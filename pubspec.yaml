@@ -1,0 +1,51 @@
+name: shadowburnv2
+description: Solo Leveling Fitness RPG - ShadowBurn V2
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.2.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  
+  # Gestion d'état
+  provider: ^6.1.1
+  
+  # Stockage et Capteurs
+  shared_preferences: ^2.2.2
+  pedometer: ^4.0.1
+  permission_handler: ^11.1.0
+  
+  # Notifications & Vibrations
+  flutter_local_notifications: ^17.0.0
+  vibration: ^2.0.1
+  
+  # Audio - VERSION STABLE CORRIGÉE
+  audioplayers: ^5.2.1
+  
+  # Utilitaires
+  logging: ^1.2.0
+  intl: ^0.19.0
+  google_fonts: ^6.3.3
+  
+  # Timezone
+  timezone: ^0.9.2
+  flutter_timezone: ^3.0.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+
+flutter:
+  uses-material-design: true
+  
+  # DÉCLARATION DES ASSETS
+  assets:
+    - assets/audio/victory.mp3
+    - assets/audio/defeat.mp3
+    - assets/audio/level_up.mp3
+    - assets/audio/goal.mp3
+    - assets/audio/notifications.mp3
