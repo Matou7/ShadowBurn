@@ -46,6 +46,7 @@ class _HunterJoinScreenState extends State<HunterJoinScreen> with WidgetsBinding
   bool _isTokenValid = false;
   bool _isWaitingQueue = false;
   bool _isNightLockActive = false;
+  bool _isQuotaLockActive = false;
   String _denialReason = "VÉRIFICATION DU PORTAIL EN COURS...";
 
   bool _isJoined = false;
@@ -147,6 +148,14 @@ class _HunterJoinScreenState extends State<HunterJoinScreen> with WidgetsBinding
   void didChangeDependencies() {
     super.didChangeDependencies();
     _parseIncomingParameters();
+  }
+
+  void _activateQuotaLock() {
+    _isQuotaLockActive = true;
+    _queueRetryTimer?.cancel();
+    _batchFlushTimer?.cancel();
+    _raidSubscription?.cancel();
+    if (mounted) setState(() {});
   }
 
   void _parseIncomingParameters() {
@@ -293,12 +302,8 @@ class _HunterJoinScreenState extends State<HunterJoinScreen> with WidgetsBinding
       }
     } catch (e) {
       if (e.toString().contains('resource-exhausted') || e.toString().contains('quota')) {
-        if (mounted) {
-          setState(() {
-            _isCheckingToken = false;
-            _isNightLockActive = true;
-          });
-        }
+        if (mounted) setState(() => _isCheckingToken = false);
+        _activateQuotaLock();
         return;
       }
       if (mounted) {
@@ -337,10 +342,8 @@ class _HunterJoinScreenState extends State<HunterJoinScreen> with WidgetsBinding
         _isRaidDataLoaded = true;
       });
     }, onError: (e) {
-      if (e.toString().contains('resource-exhausted') && mounted) {
-        setState(() {
-          _isNightLockActive = true;
-        });
+      if (e.toString().contains('resource-exhausted') || e.toString().contains('quota')) {
+        _activateQuotaLock();
       }
     });
   }
@@ -468,8 +471,8 @@ class _HunterJoinScreenState extends State<HunterJoinScreen> with WidgetsBinding
       _startInactivityWatchdog();
     } catch (e) {
       setState(() => _isLoading = false);
-      if (e.toString().contains('resource-exhausted') && mounted) {
-        setState(() => _isNightLockActive = true);
+      if (e.toString().contains('resource-exhausted') || e.toString().contains('quota')) {
+        _activateQuotaLock();
         return;
       }
       if (mounted) {
@@ -794,7 +797,9 @@ class _HunterJoinScreenState extends State<HunterJoinScreen> with WidgetsBinding
       _pendingAbsReps += aToSend;
       _pendingLogs.insertAll(0, logsToSend);
       debugPrint("[CHASSEUR] Erreur de synchronisation des dégâts : $e");
-      if (mounted && _isJoined) {
+      final bool quotaExhausted = e.toString().contains('resource-exhausted') || e.toString().contains('quota');
+      if (quotaExhausted) _activateQuotaLock();
+      if (!quotaExhausted && mounted && _isJoined) {
         _batchFlushTimer?.cancel();
         _batchFlushTimer = Timer(const Duration(seconds: kBatchIntervalSeconds), () {
           _batchFlushTimer = null;
@@ -810,6 +815,40 @@ class _HunterJoinScreenState extends State<HunterJoinScreen> with WidgetsBinding
 
   @override
   Widget build(BuildContext context) {
+    if (_isQuotaLockActive) {
+      return Scaffold(
+        backgroundColor: const Color(0xFF02070D),
+        body: Center(
+          child: Container(
+            margin: const EdgeInsets.all(24),
+            padding: const EdgeInsets.all(32),
+            decoration: BoxDecoration(
+              color: const Color(0xFF04101E),
+              border: Border.all(color: const Color(0xFFFF9100), width: 2),
+            ),
+            child: const Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.shield_outlined, color: Color(0xFFFF9100), size: 64),
+                SizedBox(height: 20),
+                Text(
+                  "PORTAIL MULTIJOUEUR EN PAUSE",
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Color(0xFFFF9100), fontFamily: 'monospace', fontSize: 18, fontWeight: FontWeight.bold, letterSpacing: 2),
+                ),
+                SizedBox(height: 12),
+                Text(
+                  "Firebase a refusé une requête pour quota atteint. Les échanges sont suspendus. Vérifiez le quota du projet avant de relancer le portail.",
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Colors.white70, fontFamily: 'monospace', fontSize: 13, height: 1.5),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
     if (_isNightLockActive) {
       return Scaffold(
         backgroundColor: const Color(0xFF02070D),
