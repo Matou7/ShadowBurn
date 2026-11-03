@@ -2,7 +2,6 @@
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:qr_flutter/qr_flutter.dart';
 import '../providers/game_provider.dart';
 
 class DungeonResultOverlay extends StatelessWidget {
@@ -60,45 +59,6 @@ class DungeonResultOverlay extends StatelessWidget {
                         fontWeight: FontWeight.bold,
                       ),
                     ),
-
-                  // ESPACEMENT NET AVANT LE QR CODE APPLI
-                  const SizedBox(height: 36),
-
-                  Container(
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: Colors.black54,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: const Color(0xFF00E5FF).withValues(alpha: 0.5)),
-                    ),
-                    child: Column(
-                      children: [
-                        const Text(
-                          "APPLICATION SHADOWBURN",
-                          style: TextStyle(
-                            color: Color(0xFF00E5FF),
-                            fontSize: 12,
-                            fontWeight: FontWeight.bold,
-                            letterSpacing: 1.5,
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        Container(
-                          padding: const EdgeInsets.all(10),
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          child: QrImageView(
-                            data: "https://shadowburn-1d8f8.web.app",
-                            version: QrVersions.auto,
-                            size: 130.0,
-                            backgroundColor: Colors.white,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
 
                   const SizedBox(height: 24),
                   const Text(
