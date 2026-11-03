@@ -166,6 +166,7 @@ class _HunterJoinScreenState extends State<HunterJoinScreen> with WidgetsBinding
   void _activateQuotaLock() {
     _isQuotaLockActive = true;
     unawaited(MultiplayerQuotaGuard.pauseUntilSafeRetry());
+    _inactivityWatchdogTimer?.cancel();
     _queueRetryTimer?.cancel();
     _batchFlushTimer?.cancel();
     _raidSubscription?.cancel();
@@ -215,6 +216,7 @@ class _HunterJoinScreenState extends State<HunterJoinScreen> with WidgetsBinding
   }
 
   Future _verifyPortalSecurity() async {
+    if (_isQuotaLockActive) return;
     final now = DateTime.now();
     if (now.hour < 6 || now.hour >= 23) {
       if (mounted) {
@@ -412,6 +414,7 @@ class _HunterJoinScreenState extends State<HunterJoinScreen> with WidgetsBinding
   }
 
   Future _joinRaid() async {
+    if (_isQuotaLockActive) return;
     final name = _nameController.text.trim();
     if (name.isEmpty || _raidRef == null) return;
 
@@ -732,7 +735,7 @@ class _HunterJoinScreenState extends State<HunterJoinScreen> with WidgetsBinding
   }
 
     Future _flushPendingDamage() async {
-    if (_pendingDamage == 0 || _raidRef == null || _isFlushing) return;
+    if (_isQuotaLockActive || _pendingDamage == 0 || _raidRef == null || _isFlushing) return;
     _isFlushing = true;
     
     final int dmgToSend = _pendingDamage;
