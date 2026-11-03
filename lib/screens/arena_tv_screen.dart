@@ -505,7 +505,10 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
       for (final doc in activeRooms.docs) {
         if (!doc.id.startsWith('room_')) continue;
         final int? number = int.tryParse(doc.id.substring('room_'.length));
-        if (number != null && number >= 1 && number <= kMaxGlobalRooms) {
+        if (number != null &&
+            number >= 1 &&
+            number <= kMaxGlobalRooms &&
+            doc.id == 'room_$number') {
           occupiedNumbers.add(number);
         }
       }
