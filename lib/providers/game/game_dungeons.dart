@@ -4,9 +4,6 @@ part of '../game_provider.dart';
 
 mixin _DungeonLogic on _GameBase {
   Timer? _threatTimer;
-  bool _isFinishingDungeon = false;
-
-  bool get isDungeonFinishing => _isFinishingDungeon;
 
   void setUrgentQuestProvider(UrgentQuestProvider p) {
     if (_urgent == p) return;
@@ -152,8 +149,8 @@ mixin _DungeonLogic on _GameBase {
 
   @override
   void _finishDungeon({required bool victory}) async {
-    if (_activeDungeon == null || _isFinishingDungeon) return;
-    _isFinishingDungeon = true;
+    if (_activeDungeon == null || _isDungeonFinishing) return;
+    _isDungeonFinishing = true;
     try {
       int baseXP = Balance.of(_activeDungeon!.rank).dungeonReward;
     if (_isActiveDungeonRed) baseXP *= 2;
@@ -214,7 +211,7 @@ mixin _DungeonLogic on _GameBase {
     _notify();
 
     } finally {
-      _isFinishingDungeon = false;
+      _isDungeonFinishing = false;
     }
   }
 
