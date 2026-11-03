@@ -28,7 +28,6 @@ import '../services/storage_service.dart';
 import 'urgent_quest_provider.dart';
 
 part 'game/game_state.dart';
-part 'game/game_legacy.dart';
 part 'game/game_lifecycle.dart';
 part 'game/game_save.dart';
 part 'game/game_day.dart';
@@ -40,7 +39,6 @@ part 'game/game_xp.dart';
 class GameProvider extends _GameBase
     with
         WidgetsBindingObserver,
-        _LegacyUiCompat,
         _LifecycleLogic,
         _SaveLogic,
         _DayLogic,
@@ -49,6 +47,30 @@ class GameProvider extends _GameBase
         _AdminLogic,
         _XpLogic {
   
+  // Compatibilité conservée pour les écrans historiques Titres / Arise.
+  bool areTitlesActive = true;
+  String titlesCooldown = "00:00:00";
+  bool isBossKneeling = false;
+  bool showAriseEffect = false;
+  int shadowExtractionAttempts = 3;
+
+  void attemptArise([dynamic arg]) {
+    if (!isBossKneeling) return;
+    showAriseEffect = true;
+    notifyListeners();
+  }
+
+  void cancelExtraction() {
+    showAriseEffect = false;
+    isBossKneeling = false;
+    notifyListeners();
+  }
+
+  void closeLevelUpOverlay() {
+    _showLevelUpOverlay = false;
+    notifyListeners();
+  }
+
   String _persistedLicenseKey = '';
   String _awakeningDate = ''; // GRAVURE DU PREMIER ÉVEIL
 
