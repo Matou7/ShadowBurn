@@ -443,6 +443,10 @@ class _HunterJoinScreenState extends State<HunterJoinScreen> with WidgetsBinding
       };
 
       await FirebaseFirestore.instance.runTransaction((transaction) async {
+        final joinNow = DateTime.now();
+        if (joinNow.hour < 6 || joinNow.hour >= 23) {
+          throw StateError('Les portails sont fermés entre 23h et 6h.');
+        }
         final latest = await transaction.get(_raidRef!);
         if (!latest.exists) throw StateError('Cette salle n’existe plus.');
         final Map<String, dynamic> latestData = latest.data() as Map<String, dynamic>? ?? {};
