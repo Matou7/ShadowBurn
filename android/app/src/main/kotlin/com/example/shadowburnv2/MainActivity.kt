@@ -13,6 +13,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
 import android.os.Process
+import org.json.JSONObject
 import android.provider.Settings
 import androidx.core.app.NotificationManagerCompat
 import io.flutter.embedding.android.FlutterActivity
@@ -47,6 +48,33 @@ class MainActivity: FlutterActivity() {
         intent?.dataString?.let {
             lastIntentUrl = it
         }
+        restoreCerberusLockFromDisk()
+    }
+
+    /**
+     * Restore the native watchdog before Flutter builds its first frame.
+     * Flutter SharedPreferences stores keys with the "flutter." prefix.
+     */
+    private fun restoreCerberusLockFromDisk() {
+        try {
+            val prefs = getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
+            val explicitLock = prefs.getBoolean("flutter.cerberus_lock_active", false)
+            val penalty = prefs.getBoolean("flutter.cerberus_penalty_active", false)
+            val rawSave = prefs.getString("flutter.save_v3", null)
+            var dungeonActive = false
+            if (!rawSave.isNullOrEmpty()) {
+                val save = JSONObject(rawSave)
+                dungeonActive = save.has("dungeon") && !save.isNull("dungeon")
+            }
+            if (explicitLock || penalty || dungeonActive) {
+                isLocked = true
+                isEmergencyExempt = false
+                setExcludeFromRecents(true)
+                startCerberusWatchdog()
+            }
+        } catch (_: Exception) {
+            // Flutter will still restore and re-arm the lock during initializeGame.
+        }
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -63,6 +91,7 @@ class MainActivity: FlutterActivity() {
         if (isLocked) {
             isEmergencyExempt = false
             setExcludeFromRecents(true)
+            startCerberusWatchdog()
         }
     }
 
