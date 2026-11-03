@@ -791,9 +791,9 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
               children: [
                 const Icon(Icons.snooze, color: Color(0xFF00E5FF), size: 64),
                 const SizedBox(height: 20),
-                const Text(
+                Text(
                   "PORTAIL MIS EN VEILLE (${_currentInactivityLimitSeconds}S D'INACTIVITÉ)",
-                  style: TextStyle(
+                  style: const TextStyle(
                     color: Color(0xFF00E5FF),
                     fontFamily: 'monospace',
                     fontSize: 18,
@@ -802,11 +802,11 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
                   ),
                 ),
                 const SizedBox(height: 12),
-                const Text(
+                Text(
                   "Aucune activité détectée pendant ${_currentInactivityLimitSeconds} secondes.\n"
                   "La salle a été automatiquement purgée du serveur pour libérer le slot mondial.",
                   textAlign: TextAlign.center,
-                  style: TextStyle(color: Colors.white70, fontFamily: 'monospace', fontSize: 13, height: 1.5),
+                  style: const TextStyle(color: Colors.white70, fontFamily: 'monospace', fontSize: 13, height: 1.5),
                 ),
                 const SizedBox(height: 24),
                 ElevatedButton.icon(
