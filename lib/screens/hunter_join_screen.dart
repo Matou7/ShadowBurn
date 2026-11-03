@@ -151,7 +151,7 @@ class _HunterJoinScreenState extends State<HunterJoinScreen> with WidgetsBinding
 
   void _parseIncomingParameters() {
     final now = DateTime.now();
-    if (now.hour >= 0 && now.hour < 6) {
+    if (now.hour < 6 || now.hour >= 23) {
       if (mounted) {
         setState(() {
           _isCheckingToken = false;
@@ -193,7 +193,7 @@ class _HunterJoinScreenState extends State<HunterJoinScreen> with WidgetsBinding
 
   Future _verifyPortalSecurity() async {
     final now = DateTime.now();
-    if (now.hour >= 0 && now.hour < 6) {
+    if (now.hour < 6 || now.hour >= 23) {
       if (mounted) {
         setState(() {
           _isCheckingToken = false;
@@ -418,10 +418,31 @@ class _HunterJoinScreenState extends State<HunterJoinScreen> with WidgetsBinding
         'last_seen': now,
       };
 
-      await _raidRef!.set({
-        'roomId': _roomId,
-        'hunters': FieldValue.arrayUnion([hunterEntry]),
-      }, SetOptions(merge: true));
+      await FirebaseFirestore.instance.runTransaction((transaction) async {
+        final latest = await transaction.get(_raidRef!);
+        if (!latest.exists) throw StateError('Cette salle n’existe plus.');
+        final Map<String, dynamic> latestData = latest.data() as Map<String, dynamic>? ?? {};
+        final String currentToken = (latestData['join_token'] ?? '').toString().trim().toUpperCase();
+        if (currentToken.isEmpty || currentToken != _token.trim().toUpperCase()) {
+          throw StateError('Le jeton du portail a expiré. Scannez à nouveau le QR code.');
+        }
+        final String currentStatus = (latestData['status'] ?? 'waiting').toString();
+        if (currentStatus != 'waiting' && currentStatus != 'active') {
+          throw StateError('Ce donjon n’accepte plus de nouveaux chasseurs.');
+        }
+        final dynamic rawLatestHunters = latestData['hunters'];
+        final List<dynamic> latestHunters = rawLatestHunters is Iterable
+            ? List<dynamic>.from(rawLatestHunters)
+            : <dynamic>[];
+        final bool alreadyJoined = latestHunters.any(
+          (hunter) => hunter is Map && hunter['id'] == _hunterSessionId,
+        );
+        if (!alreadyJoined && latestHunters.length >= kMaxHuntersPerRoom) {
+          throw StateError('Cette salle est complète : 10 chasseurs maximum.');
+        }
+        if (!alreadyJoined) latestHunters.add(hunterEntry);
+        transaction.update(_raidRef!, {'hunters': latestHunters});
+      });
 
       setState(() {
         _isJoined = true;
@@ -758,7 +779,7 @@ class _HunterJoinScreenState extends State<HunterJoinScreen> with WidgetsBinding
                 Icon(Icons.lock_clock, color: Color(0xFFFF2E56), size: 64),
                 SizedBox(height: 20),
                 Text(
-                  "[ SYSTÈME : PORTAILS SCELLÉS (00H00 - 06H00) ]",
+                  "[ SYSTÈME : PORTAILS SCELLÉS (23H00 - 06H00) ]",
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     color: Color(0xFFFF2E56),
