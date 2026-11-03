@@ -3,6 +3,9 @@
 part of '../game_provider.dart';
 
 mixin _PenaltyLogic on _GameBase {
+  bool _isCompletingPenalty = false;
+  bool get isPenaltyCompleting => _isCompletingPenalty;
+
   /// Rétablissement direct des données de pénalité depuis le stockage natif (boot).
   void restorePenaltyState(int squatsDone, int squatsGoal) {
     if (_sandbox && !SandboxManager.persistPenalty) return;
@@ -120,22 +123,27 @@ mixin _PenaltyLogic on _GameBase {
   }
 
   Future<void> _persistPenaltyCompletion() async {
-    if (!(_sandbox && !SandboxManager.persistPenalty)) {
-      await StorageService.writePenaltyState(
-        active: false,
-        squatsDone: 0,
-        squatsGoal: 100,
-      );
-      await _saveNow();
-    }
+    _isCompletingPenalty = true;
+    try {
+      if (!(_sandbox && !SandboxManager.persistPenalty)) {
+        await StorageService.writePenaltyState(
+          active: false,
+          squatsDone: 0,
+          squatsGoal: 100,
+        );
+        await _saveNow();
+      }
 
-    await LockService.unlockScreen();
-    _notify();
-    NotificationService.showNotification(
-      "PÉNALITÉ PURGÉE",
-      "Le Système lève le verrouillage. Reprenez votre entraînement.",
-      type: 'levelup',
-    );
+      await LockService.unlockScreen();
+      NotificationService.showNotification(
+        "PÉNALITÉ PURGÉE",
+        "Le Système lève le verrouillage. Reprenez votre entraînement.",
+        type: 'levelup',
+      );
+    } finally {
+      _isCompletingPenalty = false;
+      _notify();
+    }
   }
 
   void processPenaltySquats(int count) {
