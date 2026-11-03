@@ -517,9 +517,25 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
 
       for (int candidate = 1; candidate <= kMaxGlobalRooms; candidate++) {
         if (occupiedNumbers.contains(candidate)) continue;
+        final String roomId = 'room_$candidate';
         // Transactionally re-check the candidate: two TVs cannot claim it
         // from the same stale query snapshot.
-        return await _claimSpecificRoomSlot('room_$candidate', instanceToken);
+        final claim = await _claimSpecificRoomSlot(roomId, instanceToken);
+        if (claim != null) return claim;
+        if (_isQuotaLockActive) return null;
+
+        // A concurrent TV may have claimed this slot after the query.
+        // Refresh only on this rare race instead of rescanning on every attempt.
+        final refreshed = await firestore
+            .collection('current_raids')
+            .where('arena_last_seen', isGreaterThan: DateTime.now().millisecondsSinceEpoch - kRoomDeathThresholdMs)
+            .get();
+        final bool nowOccupied = refreshed.docs.any((doc) => doc.id == roomId);
+        if (nowOccupied) {
+          occupiedNumbers.add(candidate);
+          continue;
+        }
+        return null;
       }
       return null;
     } catch (error) {
