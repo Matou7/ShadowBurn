@@ -96,99 +96,6 @@ class InventoryDungeonScreen extends StatelessWidget {
     );
   }
 
-  void _showAmnestyConfirmDialog(BuildContext context, GameProvider game) {
-    SystemDialog.show(
-      context,
-      title: "RECOURS D'URGENCE (AMNISTIE)",
-      color: const Color(0xFF00E5FF),
-      content: const Text(
-        "Ce recours d'urgence referme le Portail sans pénalité en cas d'anomalie matérielle.\n\n"
-        "• Aucun gain d'XP, d'Or ou de Clé n'est accordé.\n"
-        "• Utilisable strictement une seule fois tous les 30 jours.",
-        style: TextStyle(color: Colors.white70, fontSize: 13, height: 1.4),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text("ANNULER"),
-        ),
-        ElevatedButton(
-          style: ElevatedButton.styleFrom(
-            backgroundColor: const Color(0xFF00E5FF).withOpacity(0.25),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
-            side: const BorderSide(color: Color(0xFF00E5FF)),
-          ),
-          onPressed: () async {
-            final messenger = ScaffoldMessenger.of(context);
-            Navigator.pop(context);
-            final String result = await game.useEmergencyAmnesty();
-            final bool granted = result.contains("ACCORDÉE");
-            messenger.showSnackBar(
-              SnackBar(
-                content: Text(result),
-                backgroundColor: granted ? const Color(0xFF00FF66) : Colors.redAccent,
-                duration: const Duration(seconds: 4),
-              ),
-            );
-          },
-          child: const Text("EXÉCUTER L'AMNISTIE", style: TextStyle(color: Colors.white)),
-        ),
-      ],
-    );
-  }
-
-  void _showProRequiredDialog(BuildContext context, GameProvider game, String rank) {
-    final controller = TextEditingController();
-    SystemDialog.show(
-      context,
-      title: "ACCÈS MONARQUE REQUIS",
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            "Le portail de rang $rank est réservé aux Chasseurs d'élite ayant éveillé leur statut Pro.",
-            style: GoogleFonts.rajdhani(color: Colors.white70, fontSize: 14),
-          ),
-          const SizedBox(height: 15),
-          TextField(
-            controller: controller,
-            style: const TextStyle(color: Colors.white),
-            decoration: const InputDecoration(
-              hintText: "Entrez votre clé Pro (ex: SHADOW-PRO-XXXX)",
-              hintStyle: TextStyle(color: Colors.white30),
-              enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Color(0xFF00E5FF))),
-              focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: Color(0xFF00E5FF))),
-            ),
-          ),
-        ],
-      ),
-      color: const Color(0xFF00E5FF),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: const Text("ANNULER")),
-        ElevatedButton(
-          style: ElevatedButton.styleFrom(
-            backgroundColor: const Color(0xFF00E5FF).withOpacity(0.2),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
-            side: const BorderSide(color: Color(0xFF00E5FF)),
-          ),
-          onPressed: () async {
-            final messenger = ScaffoldMessenger.of(context);
-            final keyInput = controller.text;
-            Navigator.pop(context);
-
-            final bool success = await game.activateProKey(keyInput);
-            messenger.showSnackBar(
-              SnackBar(
-                content: Text(success ? "Statut Pro activé avec succès !" : "Clé invalide."),
-                backgroundColor: success ? Colors.green : Colors.red,
-              ),
-            );
-          },
-          child: const Text("ACTIVER", style: TextStyle(color: Colors.white)),
-        ),
-      ],
-    );
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -671,20 +578,7 @@ class InventoryDungeonScreen extends StatelessWidget {
                         label: const Text("MESSAGE", style: TextStyle(color: Colors.orange, fontSize: 11)),
                       ),
                     ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        style: OutlinedButton.styleFrom(
-                          side: const BorderSide(color: Color(0xFF00E5FF)),
-                          backgroundColor: const Color(0xFF00E5FF).withOpacity(0.08),
-                          padding: const EdgeInsets.symmetric(vertical: 10),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
-                        ),
-                        onPressed: () => _showAmnestyConfirmDialog(context, game),
-                        icon: const Icon(Icons.shield_moon_outlined, color: Color(0xFF00E5FF), size: 14),
-                        label: const Text("AMNISTIE", style: TextStyle(color: Color(0xFF00E5FF), fontSize: 11, fontWeight: FontWeight.bold)),
-                      ),
-                    ),
+
                   ],
                 ),
               ],
