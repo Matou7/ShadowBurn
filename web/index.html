@@ -5,7 +5,7 @@
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
   <meta name="description" content="ShadowBurn - Fitness RPG System">
 
-  <!-- Standardisation de la compatibilité mobile moderne -->
+  <!-- iOS & Modern Mobile Web App Configurations -->
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
   <meta name="apple-mobile-web-app-title" content="ShadowBurn">
@@ -17,24 +17,14 @@
   <link rel="manifest" href="manifest.json">
 
   <script>
-    // Configuration de base pour Flutter Web
+    // Configuration de base pour CanvasKit / Flutter Web
     window.flutterConfiguration = {
       canvasKitBaseUrl: "canvaskit/"
     };
   </script>
-  <script src="flutter.js" defer></script>
 </head>
 <body>
-  <script>
-    window.addEventListener('load', function(ev) {
-      _flutter.loader.loaderOptions({
-        serviceWorkerVersion: null,
-      }).then(function(engineInitializer) {
-        return engineInitializer.initializeEngine();
-      }).then(function(appRunner) {
-        return appRunner.runApp();
-      });
-    });
-  </script>
+  <!-- Script de chargement officiel et moderne compatible avec les dernières versions de Flutter -->
+  <script src="flutter_bootstrap.js" async></script>
 </body>
 </html>
