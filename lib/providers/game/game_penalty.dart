@@ -95,28 +95,27 @@ mixin _PenaltyLogic on _GameBase {
 
   void _applyPenaltyLockAndPersist() {
     if (_sandbox && !SandboxManager.persistPenalty) {
-      LockService.lockScreen();
+      unawaited(LockService.lockScreen());
       _notify();
       return;
     }
+    unawaited(_persistPenaltyActivation());
+  }
+
+  Future<void> _persistPenaltyActivation() async {
+    await StorageService.writePenaltyState(
+      active: true,
+      squatsDone: _penaltySquatsDone,
+      squatsGoal: _kPenaltyGoal,
+    );
 
     if (SandboxManager.persistPenalty) {
-      StorageService.writePenaltyState(
-        active: true,
-        squatsDone: _penaltySquatsDone,
-        squatsGoal: _kPenaltyGoal,
-      );
-      SandboxManager.saveSandbox(_toJson());
+      await SandboxManager.saveSandbox(_toJson());
     } else {
-      StorageService.writePenaltyState(
-        active: true,
-        squatsDone: _penaltySquatsDone,
-        squatsGoal: _kPenaltyGoal,
-      );
-      _saveNow();
+      await _saveNow();
     }
 
-    LockService.lockScreen();
+    await LockService.lockScreen();
     _notify();
   }
 
@@ -131,6 +130,7 @@ mixin _PenaltyLogic on _GameBase {
     }
 
     await LockService.unlockScreen();
+    _notify();
     NotificationService.showNotification(
       "PÉNALITÉ PURGÉE",
       "Le Système lève le verrouillage. Reprenez votre entraînement.",
@@ -147,7 +147,6 @@ mixin _PenaltyLogic on _GameBase {
       _isInPenaltyZone = false;
       _penaltySquatsDone = 0;
       _kPenaltyGoal = 100;
-      _notify();
       unawaited(_persistPenaltyCompletion());
       return;
     } else {
