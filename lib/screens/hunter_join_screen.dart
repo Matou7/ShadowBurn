@@ -658,7 +658,7 @@ class _HunterJoinScreenState extends State<HunterJoinScreen> with WidgetsBinding
     });
   }
 
-  Future _flushPendingDamage() async {
+    Future _flushPendingDamage() async {
     if (_pendingDamage == 0 || _raidRef == null || _isFlushing) return;
     _isFlushing = true;
     
@@ -675,94 +675,66 @@ class _HunterJoinScreenState extends State<HunterJoinScreen> with WidgetsBinding
     _pendingLogs.clear();
 
     try {
-      final Map data = _raidData;
-      final String currentStatus = (data['status'] ?? 'waiting').toString();
-      if (currentStatus != 'active') {
-        _isFlushing = false;
-        return;
-      }
+      await FirebaseFirestore.instance.runTransaction((transaction) async {
+        final snapshot = await transaction.get(_raidRef!);
+        if (!snapshot.exists) return;
+        
+        final data = snapshot.data() as Map<String, dynamic>;
+        final currentStatus = (data['status'] ?? 'waiting').toString();
+        
+        if (currentStatus != 'active') return;
 
-      final int currentHp = (data['current_hp'] as num?)?.toInt() ?? 5000;
-      final int estimatedAfter = (currentHp - dmgToSend).clamp(0, 5000);
-
-      final dynamic rawLogs = data['logs'];
-      final List logs = rawLogs is Iterable ? List.from(rawLogs) : [];
-      logs.insertAll(0, logsToSend);
-      if (logs.length > 30) {
-        logs.removeRange(30, logs.length);
-      }
-
-      final dynamic rawHunters = data['hunters'];
-      final List hunterList = rawHunters is Iterable ? List.from(rawHunters) : [];
-      bool foundMe = false;
-
-      for (int i = 0; i < hunterList.length; i++) {
-        final item = hunterList[i];
-        if (item is Map && item['id'] == _hunterSessionId) {
-          final Map<String, dynamic> copy = Map<String, dynamic>.from(item);
-          copy['combo_step'] = _comboStep;
-          copy['last_seen'] = DateTime.now().millisecondsSinceEpoch;
-          copy['total_damage'] = ((copy['total_damage'] as num?)?.toInt() ?? 0) + dmgToSend;
-          copy['squat_reps'] = ((copy['squat_reps'] as num?)?.toInt() ?? 0) + sToSend;
-          copy['pushup_reps'] = ((copy['pushup_reps'] as num?)?.toInt() ?? 0) + pToSend;
-          copy['abs_reps'] = ((copy['abs_reps'] as num?)?.toInt() ?? 0) + aToSend;
-          hunterList[i] = copy;
-          foundMe = true;
-          break;
+        final int currentHp = (data['current_hp'] as num?)?.toInt() ?? 5000;
+        final int nextHp = (currentHp - dmgToSend).clamp(0, 5000);
+        
+        final List logs = List.from(data['logs'] ?? []);
+        logs.insertAll(0, logsToSend);
+        if (logs.length > 30) logs.removeRange(30, logs.length);
+        
+        final List hunterList = List.from(data['hunters'] ?? []);
+        bool foundHunter = false;
+        for (int i = 0; i < hunterList.length; i++) {
+          if (hunterList[i] is Map && hunterList[i]['id'] == _hunterSessionId) {
+            final Map h = Map.from(hunterList[i]);
+            h['total_damage'] = ((h['total_damage'] as num?)?.toInt() ?? 0) + dmgToSend;
+            h['squat_reps'] = ((h['squat_reps'] as num?)?.toInt() ?? 0) + sToSend;
+            h['pushup_reps'] = ((h['pushup_reps'] as num?)?.toInt() ?? 0) + pToSend;
+            h['abs_reps'] = ((h['abs_reps'] as num?)?.toInt() ?? 0) + aToSend;
+            h['last_seen'] = DateTime.now().millisecondsSinceEpoch;
+            hunterList[i] = h;
+            foundHunter = true;
+            break;
+          }
         }
-      }
 
-      if (!foundMe && _isJoined) {
-        final TrainingMode selectedMode = trainingModes.firstWhere(
-          (m) => (m as TrainingMode).id == _selectedModeId,
-        ) as TrainingMode;
-        hunterList.add({
-          'id': _hunterSessionId,
-          'name': _confirmedHunterName,
-          'rank': 'Rang E',
-          'mode_id': _selectedModeId,
-          'mode_label': selectedMode.label,
-          'combo_step': _comboStep,
-          'total_damage': dmgToSend,
-          'squat_reps': sToSend,
-          'pushup_reps': pToSend,
-          'abs_reps': aToSend,
-          'joined_at': DateTime.now().millisecondsSinceEpoch,
-          'last_seen': DateTime.now().millisecondsSinceEpoch,
+        if (!foundHunter && _confirmedHunterName.isNotEmpty) {
+          hunterList.add({
+            'id': _hunterSessionId,
+            'name': _confirmedHunterName,
+            'rank': 'Rang E',
+            'mode_id': _selectedModeId,
+            'total_damage': dmgToSend,
+            'squat_reps': sToSend,
+            'pushup_reps': pToSend,
+            'abs_reps': aToSend,
+            'joined_at': DateTime.now().millisecondsSinceEpoch,
+            'last_seen': DateTime.now().millisecondsSinceEpoch,
+          });
+        }
+        
+        transaction.update(_raidRef!, {
+          'current_hp': nextHp,
+          'logs': logs,
+          'hunters': hunterList,
+          if (nextHp <= 0) 'status': 'victory',
+          'updated_at': FieldValue.serverTimestamp(),
         });
-      }
-
-      final Map<String, dynamic> updates = {
-        'current_hp': FieldValue.increment(-dmgToSend),
-        'logs': logs,
-        'hunters': hunterList,
-      };
-
-      if (estimatedAfter <= 0) {
-        updates['status'] = 'victory';
-        updates['current_hp'] = 0;
-      }
-
-      await _raidRef!.update(updates);
+      });
     } catch (e) {
-      if (e.toString().contains('resource-exhausted') && mounted) {
-        setState(() => _isNightLockActive = true);
-        _isFlushing = false;
-        return;
-      }
-      _pendingDamage += dmgToSend;
-      _pendingSquatReps += sToSend;
-      _pendingPushupReps += pToSend;
-      _pendingAbsReps += aToSend;
-      _pendingLogs.insertAll(0, logsToSend);
-      debugPrint("[RAID] Échec Flush, restauration locale: $e");
+      debugPrint("[CHASSEUR] Erreur de synchronisation des dégâts : $e");
     } finally {
-      _isFlushing = false;
-      if (_pendingDamage > 0 && _batchFlushTimer == null) {
-        _batchFlushTimer = Timer(const Duration(seconds: kBatchIntervalSeconds), () {
-          _batchFlushTimer = null;
-          _flushPendingDamage();
-        });
+      if (mounted) {
+        setState(() => _isFlushing = false);
       }
     }
   }
