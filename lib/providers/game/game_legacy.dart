@@ -15,6 +15,10 @@ mixin _LegacyUiCompat on _GameBase {
     _notify();
   }
 
+  void closeLevelUpOverlay() {
+    closeResultScreen();
+  }
+
   void cancelExtraction() {
     isBossKneeling = false;
     showAriseEffect = false;
