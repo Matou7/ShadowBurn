@@ -401,6 +401,17 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
     if (rawHunters is! Iterable || rawHunters.isEmpty) return;
 
     final int now = DateTime.now().millisecondsSinceEpoch;
+    // Ne déclenche aucune lecture transactionnelle tant qu'aucun chasseur
+    // ne semble réellement inactif : réduit fortement les lectures Firestore.
+    final bool hasExpiredHunter = rawHunters.any((hunter) {
+      if (hunter is! Map || hunter['is_connected'] == false || !hunter.containsKey('last_seen')) {
+        return false;
+      }
+      final int lastSeen = (hunter['last_seen'] as num?)?.toInt() ?? now;
+      return now - lastSeen > kRoomDeathThresholdMs;
+    });
+    if (!hasExpiredHunter) return;
+
     FirebaseFirestore.instance.runTransaction((transaction) async {
       final snapshot = await transaction.get(ref);
       if (!snapshot.exists) return;
@@ -408,14 +419,32 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
       final dynamic latestRawHunters = latest['hunters'];
       if (latestRawHunters is! Iterable || latestRawHunters.isEmpty) return;
 
-      final List<dynamic> filtered = latestRawHunters.where((hunter) {
-        if (hunter is! Map || !hunter.containsKey('last_seen')) return true;
+      final List<dynamic> filtered = [];
+      bool changed = false;
+      for (final hunter in latestRawHunters) {
+        if (hunter is! Map || !hunter.containsKey('last_seen')) {
+          filtered.add(hunter);
+          continue;
+        }
         final int lastSeen = (hunter['last_seen'] as num?)?.toInt() ?? now;
-        final int totalDamage = (hunter['total_damage'] as num?)?.toInt() ?? 0;
-        return !(now - lastSeen > kRoomDeathThresholdMs && totalDamage == 0);
-      }).toList();
+        if (now - lastSeen <= kRoomDeathThresholdMs || hunter['is_connected'] == false) {
+          filtered.add(hunter);
+          continue;
+        }
 
-      if (filtered.length != latestRawHunters.length) {
+        final int totalDamage = (hunter['total_damage'] as num?)?.toInt() ?? 0;
+        if (totalDamage == 0) {
+          changed = true;
+          continue;
+        }
+
+        final Map<String, dynamic> inactiveHunter = Map<String, dynamic>.from(hunter);
+        inactiveHunter['is_connected'] = false;
+        filtered.add(inactiveHunter);
+        changed = true;
+      }
+
+      if (changed) {
         transaction.update(ref, {
           'hunters': filtered,
           'updateTime': FieldValue.serverTimestamp(),
