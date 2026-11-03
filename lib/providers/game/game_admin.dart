@@ -19,48 +19,6 @@ mixin _AdminLogic on _GameBase {
     StorageService.blockAllRealSaves = wasBlocked;
   }
 
-  /// Protocole d'Amnistie
-  Future<String> useEmergencyAmnesty() async {
-    if (!_isInPenaltyZone && _activeDungeon == null) {
-      return "AUCUNE ANOMALIE DÉTECTÉE : Vous n'êtes actuellement soumis à aucune pénalité ou blocage.";
-    }
-
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final int lastUsedMs = prefs.getInt('shadow_last_amnesty_ms') ?? 0;
-      final int nowMs = DateTime.now().millisecondsSinceEpoch;
-      const int thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
-
-      if (!_sandbox && lastUsedMs > 0 && (nowMs - lastUsedMs) < thirtyDaysMs) {
-        final int daysLeft = ((thirtyDaysMs - (nowMs - lastUsedMs)) / (1000 * 60 * 60 * 24)).ceil();
-        return "RECOURS REFUSÉ : Le Jeton d'Amnistie est en cours de régénération ($daysLeft jours restants).";
-      }
-
-      _isInPenaltyZone = false;
-      _penaltySquatsDone = 0;
-      _activeDungeon = null;
-      _dungeonTimer?.cancel();
-
-      await StorageService.writePenaltyState(active: false, squatsDone: 0, squatsGoal: 100);
-      await SandboxManager.clearNativePenalty();
-      try {
-        await LockService.unlockScreen();
-      } catch (_) {}
-
-      if (!_sandbox) {
-        await prefs.setInt('shadow_last_amnesty_ms', nowMs);
-        await _forceSaveRealDisk();
-      }
-
-      _notify();
-
-      return _sandbox
-          ? "AMNISTIE SYSTÈME ACCORDÉE (GOD MODE) : Blocage levé immédiatement."
-          : "AMNISTIE SYSTÈME ACCORDÉE : Pénalité levée. Prochain recours disponible dans 30 jours.";
-    } catch (e) {
-      return "Erreur lors de l'exécution du protocole : $e";
-    }
-  }
 
   /// Active une clé de licence Pro Monarque de façon sécurisée, liée à l'empreinte matérielle.
   Future<bool> activateProKey(String rawKey) async {
