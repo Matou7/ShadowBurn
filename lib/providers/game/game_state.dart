@@ -345,6 +345,7 @@ abstract class _GameBase extends ChangeNotifier {
   void _checkRankUp();
   void _rewardUrgentQuest();
   void _startDungeonTimer();
+  void _finishDungeon({required bool victory});
   void _checkDungeonStatus();
   void _checkCycleCompletion();
   void debugTriggerRankedQuest();
