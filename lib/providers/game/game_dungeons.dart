@@ -141,6 +141,7 @@ mixin _DungeonLogic on _GameBase {
     }
   }
 
+  @override
   void _finishDungeon({required bool victory}) async {
     if (_activeDungeon == null || _isFinishingDungeon) return;
     _isFinishingDungeon = true;
