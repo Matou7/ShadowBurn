@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../services/multiplayer_quota_guard.dart';
+import '../services/arena_room_policy.dart';
 
 class ArenaTvScreen extends StatefulWidget {
   const ArenaTvScreen({super.key});
@@ -48,8 +49,8 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
   double _lastKnownHp = 5000.0;
   String _lastKnownStatus = 'waiting';
 
-  static const int kMaxGlobalRooms = 100;
-  static const int kMaxHuntersPerRoom = 10;
+  static const int kMaxGlobalRooms = ArenaRoomPolicy.maxGlobalRooms;
+  static const int kMaxHuntersPerRoom = ArenaRoomPolicy.maxPlayersPerRoom;
   // 10 minutes limits background writes while tolerating temporary TV pauses.
   static const int kHeartbeatIntervalSeconds = 600;
   static const int kRoomDeathThresholdMs = 15 * 60 * 1000;
@@ -271,14 +272,8 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
     Map<String, String>? allocation;
     if (_isQuotaLockActive) return;
 
-    final String normalizedRoom = explicitRoom?.trim() ?? '';
-    final int? explicitRoomNumber = normalizedRoom.startsWith('room_')
-        ? int.tryParse(normalizedRoom.substring(5))
-        : null;
-    final bool explicitRoomIsAllowed = explicitRoomNumber != null &&
-        explicitRoomNumber >= 1 &&
-        explicitRoomNumber <= kMaxGlobalRooms &&
-        normalizedRoom == 'room_$explicitRoomNumber';
+    final bool explicitRoomIsAllowed =
+        ArenaRoomPolicy.parseRoomNumber(explicitRoom) != null;
     if (explicitRoomIsAllowed) {
       allocation = await _claimSpecificRoomSlot(explicitRoom!.trim(), myInstanceToken);
     } else {
