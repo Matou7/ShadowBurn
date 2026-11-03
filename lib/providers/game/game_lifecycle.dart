@@ -69,8 +69,9 @@ mixin _LifecycleLogic on _GameBase {
     }
 
     if (CerberusLockPolicy.shouldKeepLocked(
-      activeDungeon: _activeDungeon != null,
-      activePenalty: _isInPenaltyZone && (!_sandbox || _godModePersistPenalty),
+      activeDungeon: _activeDungeon != null || isDungeonFinishing,
+      activePenalty: (_isInPenaltyZone || isPenaltyCompleting) &&
+          (!_sandbox || _godModePersistPenalty),
     )) {
       await LockService.lockScreen();
     }
@@ -160,8 +161,9 @@ mixin _LifecycleLogic on _GameBase {
       }
 
       if (CerberusLockPolicy.shouldKeepLocked(
-        activeDungeon: _activeDungeon != null,
-        activePenalty: _isInPenaltyZone && (!_sandbox || _godModePersistPenalty),
+        activeDungeon: _activeDungeon != null || isDungeonFinishing,
+        activePenalty: (_isInPenaltyZone || isPenaltyCompleting) &&
+            (!_sandbox || _godModePersistPenalty),
       )) {
         LockService.lockScreen();
       }
