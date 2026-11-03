@@ -539,13 +539,13 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
         final refreshed = await firestore
             .collection('current_raids')
             .where(
-                'arena_last_seen',
-                isGreaterThan: Timestamp.fromDate(
-                  DateTime.fromMillisecondsSinceEpoch(
-                    DateTime.now().millisecondsSinceEpoch - kRoomDeathThresholdMs,
-                  ),
+              'arena_last_seen',
+              isGreaterThan: Timestamp.fromDate(
+                DateTime.fromMillisecondsSinceEpoch(
+                  DateTime.now().millisecondsSinceEpoch - kRoomDeathThresholdMs,
                 ),
-              )
+              ),
+            )
             .get();
         final bool nowOccupied = refreshed.docs.any((doc) => doc.id == roomId);
         if (nowOccupied) {
@@ -576,7 +576,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
       final data = snapshot.data() as Map<String, dynamic>? ?? {};
       if (data['instance_token'] != ownerToken) return;
       transaction.update(ref, {
-        'arena_last_seen': Timestamp.now(),
+        'arena_last_seen': Timestamp.fromDate(DateTime.now()),
         'updateTime': FieldValue.serverTimestamp(),
       });
     }).catchError((Object error) {
