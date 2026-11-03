@@ -69,7 +69,10 @@ void callbackDispatcher() {
         final String rank = (decoded['rank'] as String?) ?? 'E';
         final RankConfig cfg = Balance.of(rank);
 
-        final int dailyCycles = (decoded['dailyCyclesCompleted'] as num?)?.toInt() ?? 0;
+        final int dailyCycles =
+            (decoded['cycles'] as num?)?.toInt() ??
+            (decoded['dailyCyclesCompleted'] as num?)?.toInt() ??
+            0;
         final int pompes = (decoded['pompes'] as num?)?.toInt() ?? 0;
         final int abdos = (decoded['abdos'] as num?)?.toInt() ?? 0;
         final int squats = (decoded['squats'] as num?)?.toInt() ?? 0;
@@ -106,11 +109,13 @@ void callbackDispatcher() {
         // On force la mise à jour de la date dans le JSON depuis le background
         // pour empêcher l'empilement infini si le joueur ne lance pas l'app le lendemain.
         decoded['lastResetDate'] = todayStr;
+        decoded['cycles'] = 0;
         decoded['dailyCyclesCompleted'] = 0;
         decoded['pompes'] = 0;
         decoded['abdos'] = 0;
         decoded['squats'] = 0;
         decoded['dailyKm'] = 0.0;
+        decoded['steps'] = 0;
         decoded['dailySteps'] = 0;
         
         await prefs.setString('save_v3', jsonEncode(decoded));
@@ -131,7 +136,10 @@ Future<void> _checkAntiFlemmeSnacking(
   SharedPreferences prefs,
   DateTime now,
 ) async {
-  final int dailyCycles = (save['dailyCyclesCompleted'] as num?)?.toInt() ?? 0;
+  final int dailyCycles =
+      (save['cycles'] as num?)?.toInt() ??
+      (save['dailyCyclesCompleted'] as num?)?.toInt() ??
+      0;
   if (dailyCycles > 0) return;
 
   final String todayStr = now.toIso8601String().substring(0, 10);
