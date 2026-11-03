@@ -33,6 +33,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
   bool _isAllocating = true;
   bool _isWorldSaturated = false;
   bool _isNightLockActive = false;
+  bool _isQuotaLockActive = false;
   bool _isDespawnedForInactivity = false;
   bool _allocationInProgress = false;
 
@@ -107,6 +108,14 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
         }
       }
     });
+  }
+
+  void _activateQuotaLock() {
+    _isQuotaLockActive = true;
+    _arenaHeartbeatTimer?.cancel();
+    _queueRetryTimer?.cancel();
+    _raidSubscription?.cancel();
+    if (mounted) setState(() {});
   }
 
   void _recordActivity() {
@@ -328,8 +337,8 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
       if (e.toString().contains('resource-exhausted') || e.toString().contains('quota')) {
         setState(() {
           _isAllocating = false;
-          _isNightLockActive = true;
         });
+        _activateQuotaLock();
       } else {
         _queueRetryTimer?.cancel();
         _queueRetryTimer = Timer(const Duration(seconds: 5), () {
@@ -385,10 +394,8 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
         });
       }
     }, onError: (e) {
-      if (e.toString().contains('resource-exhausted') && mounted) {
-        setState(() {
-          _isNightLockActive = true;
-        });
+      if (e.toString().contains('resource-exhausted') || e.toString().contains('quota')) {
+        _activateQuotaLock();
       }
     });
   }
@@ -623,6 +630,40 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
 
   @override
   Widget build(BuildContext context) {
+    if (_isQuotaLockActive) {
+      return Scaffold(
+        backgroundColor: const Color(0xFF02070D),
+        body: Center(
+          child: Container(
+            margin: const EdgeInsets.all(24),
+            padding: const EdgeInsets.all(32),
+            decoration: BoxDecoration(
+              color: const Color(0xFF04101E),
+              border: Border.all(color: const Color(0xFFFF9100), width: 2),
+            ),
+            child: const Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.shield_outlined, color: Color(0xFFFF9100), size: 64),
+                SizedBox(height: 20),
+                Text(
+                  "MULTIJOUEUR MIS EN PAUSE",
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Color(0xFFFF9100), fontFamily: 'monospace', fontSize: 20, fontWeight: FontWeight.bold, letterSpacing: 2),
+                ),
+                SizedBox(height: 12),
+                Text(
+                  "Firebase a refusé une requête pour quota atteint. Les échanges sont suspendus pour éviter de multiplier les tentatives. Vérifiez le quota du projet avant de relancer l'Arena.",
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Colors.white70, fontFamily: 'monospace', fontSize: 13, height: 1.5),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
     if (_isNightLockActive) {
       return Scaffold(
         backgroundColor: const Color(0xFF02070D),
