@@ -13,6 +13,9 @@
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_HEALTH" />
+    <!-- SÉCURITÉ 8 MOIS : Survie des timers et notifications -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
 
     <application
         android:label="ShadowBurn"
@@ -52,7 +55,6 @@
             android:name="flutterEmbedding"
             android:value="2" />
 
-        <!-- Service de premier plan : garde l'application active en arrière-plan -->
         <service
             android:name="com.dexterous.flutterlocalnotifications.ForegroundService"
             android:exported="false"
@@ -74,7 +76,6 @@
             </intent-filter>
         </receiver>
 
-        <!-- Récepteur de redémarrage automatique du Système -->
         <receiver 
             android:name=".BootReceiver" 
             android:exported="true" 
@@ -89,27 +90,12 @@
         </receiver>
     </application>
 
-    <!-- Autorise l'application à résoudre les canaux d'Appel et de SMS -->
     <queries>
-        <intent>
-            <action android:name="android.intent.action.DIAL" />
-            <data android:scheme="tel" />
-        </intent>
-        <intent>
-            <action android:name="android.intent.action.SENDTO" />
-            <data android:scheme="smsto" />
-        </intent>
-        <intent>
-            <action android:name="android.intent.action.SENDTO" />
-            <data android:scheme="sms" />
-        </intent>
-        <intent>
-            <action android:name="android.intent.action.VIEW" />
-            <data android:scheme="sms" />
-        </intent>
-        <intent>
-            <action android:name="android.intent.action.MAIN" />
-            <category android:name="android.intent.category.APP_MESSAGING" />
-        </intent>
+        <intent><action android:name="android.intent.action.DIAL" /><data android:scheme="tel" /></intent>
+        <intent><action android:name="android.intent.action.SENDTO" /><data android:scheme="smsto" /></intent>
+        <intent><action android:name="android.intent.action.SENDTO" /><data android:scheme="sms" /></intent>
+        <intent><action android:name="android.intent.action.VIEW" /><data android:scheme="sms" /></intent>
+        <intent><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.APP_MESSAGING" /></intent>
     </queries>
+</manifest>
 </manifest>
