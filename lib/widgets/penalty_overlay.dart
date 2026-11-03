@@ -42,7 +42,7 @@ class PenaltyOverlay extends StatelessWidget {
       return const IgnorePointer(child: SizedBox.shrink());
     }
 
-    const int goal = 100;
+    final int goal = game.penaltyGoal;
     final double progressRatio = (game.penaltySquatsDone / goal).clamp(0.0, 1.0);
 
     return Material(
