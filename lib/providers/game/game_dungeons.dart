@@ -112,17 +112,21 @@ mixin _DungeonLogic on _GameBase {
     }
 
     _warningGiven = false;
-    LockService.lockScreen();
-    _notify();
-    _startDungeonTimer();
+    unawaited(_persistDungeonEntry());
+  }
 
+  Future<void> _persistDungeonEntry() async {
     if (_sandbox) {
       if (SandboxManager.persistPenalty) {
-        SandboxManager.saveSandbox(_toJson());
+        await SandboxManager.saveSandbox(_toJson());
       }
     } else {
-      _saveNow();
+      await _saveNow();
     }
+
+    await LockService.lockScreen();
+    _startDungeonTimer();
+    _notify();
   }
 
   @override
