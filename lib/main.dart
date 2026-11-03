@@ -98,12 +98,21 @@ void main() async {
     final LoadedSave? realSave = await StorageService.load();
     final Map<String, dynamic>? realData = realSave?.data;
     final bool penaltyInReal = realData?['penaltyActive'] == true;
+    final Map<String, dynamic> nativePenalty = await StorageService.readPenaltyState();
+    final bool nativePenaltyActive = nativePenalty['active'] == true;
 
-    if (penaltyInReal || kForcePenaltyOnBoot) {
-      final penaltyState = await StorageService.readPenaltyState();
+    // Native Cerberus state is authoritative even if every RPG save is missing
+    // or corrupt. Never unlock during bootstrap while this independent lock is active.
+    if (penaltyInReal || nativePenaltyActive || kForcePenaltyOnBoot) {
       startsInPenalty = true;
-      initialSquatsDone = (penaltyState['squatsDone'] as int?) ?? (realData?['penaltySquats'] as int?) ?? 0;
-      initialSquatsGoal = (penaltyState['squatsGoal'] as int?) ?? (realData?['penaltyGoal'] as int?) ?? 100;
+      final dynamic nativeDone = nativePenalty['squatsDone'];
+      final dynamic nativeGoal = nativePenalty['squatsGoal'];
+      initialSquatsDone = nativePenaltyActive && nativeDone is num
+          ? nativeDone.toInt()
+          : (realData?['penaltySquats'] as num?)?.toInt() ?? 0;
+      initialSquatsGoal = nativePenaltyActive && nativeGoal is num
+          ? nativeGoal.toInt()
+          : (realData?['penaltyGoal'] as num?)?.toInt() ?? 100;
       if (initialSquatsGoal <= 0) initialSquatsGoal = 100;
     } else {
       startsInPenalty = false;
