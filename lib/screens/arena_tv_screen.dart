@@ -265,88 +265,68 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
 
     _recordActivity();
 
-    final fullUrl = Uri.decodeFull(Uri.base.toString());
     String? explicitRoom;
-
-    final roomRegex = RegExp(r'[?&]room=([a-zA-Z0-9_]+)');
-    final match = roomRegex.firstMatch(fullUrl);
-    if (match != null) {
-      explicitRoom = match.group(1);
+    try {
+      final fullUrl = Uri.decodeFull(Uri.base.toString());
+      final match = RegExp(r'[?&]room=([a-zA-Z0-9_]+)').firstMatch(fullUrl);
+      explicitRoom = match?.group(1);
+    } catch (_) {
+      explicitRoom = Uri.base.queryParameters['room'];
     }
 
     final String myInstanceToken = 'inst_${_generateRandomToken(12)}';
     Map<String, String>? allocation;
-
     if (_isQuotaLockActive) return;
 
     final bool explicitRoomIsAllowed = explicitRoom != null &&
-        RegExp(r'^room_(?:[1-9]|[1-9][0-9]|100)
+        RegExp(r'^room_(?:[1-9]|[1-9][0-9]|100)\$').hasMatch(explicitRoom.trim());
+    if (explicitRoomIsAllowed) {
+      allocation = await _claimSpecificRoomSlot(explicitRoom!.trim(), myInstanceToken);
+    } else {
+      allocation = await _claimNextAvailableRoomSlot(myInstanceToken);
+    }
+
+    if (!mounted || _isQuotaLockActive) return;
+
+    if (allocation == null) {
       setState(() {
         _isAllocating = false;
         _isWorldSaturated = true;
       });
-
       _queueRetryTimer?.cancel();
       _queueRetryTimer = Timer(const Duration(seconds: 30), () {
-        if (mounted) {
-          setState(() {
-            _isAllocating = true;
-            _isWorldSaturated = false;
-          });
-          _allocationInProgress = false;
-          _resolveRoomAllocation();
-        }
+        if (!mounted || _isQuotaLockActive) return;
+        setState(() {
+          _isAllocating = true;
+          _isWorldSaturated = false;
+        });
+        _allocationInProgress = false;
+        _resolveRoomAllocation();
       });
       return;
     }
 
     _queueRetryTimer?.cancel();
-
     final String chosenRoom = allocation['roomId']!;
     final String keyToUse = allocation['adminKey']!;
     final String tokenToUse = allocation['joinToken']!;
     final DocumentReference<Map<String, dynamic>> ref =
         FirebaseFirestore.instance.collection('current_raids').doc(chosenRoom);
 
-    try {
-      // The claim transaction already created and populated the room document.
-      // Do not perform a second get + set: that would double allocation reads/writes.
-      if (!mounted) return;
-
-      _recordActivity();
-
-      setState(() {
-        _roomId = chosenRoom;
-        _instanceToken = myInstanceToken;
-        _adminKey = keyToUse;
-        _joinToken = tokenToUse;
-        _raidRef = ref;
-        _isAllocating = false;
-        _isWorldSaturated = false;
-        _isDespawnedForInactivity = false;
-      });
-
-      _startArenaHeartbeat();
-      _startListeningToRaid();
-    } catch (e) {
-      if (!mounted) return;
-      if (e.toString().contains('resource-exhausted') || e.toString().contains('quota')) {
-        setState(() {
-          _isAllocating = false;
-        });
-        _activateQuotaLock();
-      } else {
-        _queueRetryTimer?.cancel();
-        _queueRetryTimer = Timer(const Duration(seconds: 30), () {
-          if (mounted) {
-            _allocationInProgress = false;
-            _resolveRoomAllocation();
-          }
-        });
-      }
-    }
+    _recordActivity();
+    setState(() {
+      _roomId = chosenRoom;
+      _instanceToken = myInstanceToken;
+      _adminKey = keyToUse;
+      _joinToken = tokenToUse;
+      _raidRef = ref;
+      _isAllocating = false;
+      _isWorldSaturated = false;
+      _isDespawnedForInactivity = false;
+    });
+    _startArenaHeartbeat();
+    _startListeningToRaid();
   }
-
   void _startListeningToRaid() {
     _raidSubscription?.cancel();
     if (_raidRef == null) return;
