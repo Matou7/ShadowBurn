@@ -1,21 +1,37 @@
 import 'dart:async';
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class LockService {
   static const MethodChannel _channel = MethodChannel('com.shadowburn.lock/channel');
 
+  static const String _persistedLockKey = 'cerberus_lock_active';
   static bool _isLocked = false;
   static bool get isLocked => _isLocked;
+
+  static Future<void> _persistLock(bool locked) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_persistedLockKey, locked);
+      await prefs.reload();
+    } catch (e) {
+      print('Erreur persistance Cerbère : $e');
+    }
+  }
 
   /// Active le verrouillage Cerbère uniquement s'il n'est pas déjà engagé
   static Future<void> lockScreen({bool force = false}) async {
     if (_isLocked && !force) return;
+    // Persist before calling Android: process death must not erase the lock intent.
+    await _persistLock(true);
+    _isLocked = true;
     try {
-      _isLocked = true;
       await _channel.invokeMethod('lockScreen');
     } on PlatformException catch (e) {
-      _isLocked = false;
+      // Keep the local state armed so a later resume can retry the native lock.
       print("Erreur LockService (lock) : ${e.message}");
+    } on MissingPluginException catch (e) {
+      print("Canal Cerbère indisponible : $e");
     }
   }
 
@@ -23,10 +39,16 @@ class LockService {
   static Future<void> unlockScreen({bool force = false}) async {
     if (!_isLocked && !force) return;
     try {
-      _isLocked = false;
       await _channel.invokeMethod('unlockScreen');
+      _isLocked = false;
+      await _persistLock(false);
     } on PlatformException catch (e) {
+      // Never clear the persisted lock if Android did not confirm the release.
+      _isLocked = true;
       print("Erreur LockService (unlock) : ${e.message}");
+    } on MissingPluginException catch (e) {
+      _isLocked = true;
+      print("Canal Cerbère indisponible : $e");
     }
   }
 
