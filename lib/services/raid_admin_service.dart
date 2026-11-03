@@ -6,12 +6,10 @@ import 'package:flutter/foundation.dart';
 class RaidAdminService {
   static final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
-  // CALIBRAGE UNIQUE : Uniquement le Raid Standard 5 000 PV pour maximiser le quota gratuit Firebase (0 €)
   static const List raidPresets = [
     {'hp': 5000, 'label': 'RAID STANDARD (5 000 PV)'},
   ];
 
-  /// Applique le preset standard de 5 000 PV et purge les logs/scores précédents
   static Future applyPreset(int maxHp, String label, {required String roomId}) async {
     try {
       final docRef = _firestore.collection('current_raids').doc(roomId);
@@ -51,31 +49,33 @@ class RaidAdminService {
     }
   }
 
-  /// Frappe atomique du Maître du Jeu sur le Boss
+  /// Frappe atomique du Maître du Jeu sur le Boss (Sécurisé par Transaction 0% Bug)
   static Future strikeBoss(int damage, {required String roomId}) async {
     try {
       final docRef = _firestore.collection('current_raids').doc(roomId);
-      final snap = await docRef.get();
-      if (!snap.exists) return;
+      
+      await _firestore.runTransaction((transaction) async {
+        final snap = await transaction.get(docRef);
+        if (!snap.exists) return;
 
-      final Map data = snap.data() ?? {};
-      final int currentHp = (data['current_hp'] as num?)?.toInt() ?? 5000;
-      final int nextHp = (currentHp - damage).clamp(0, 5000);
+        final Map data = snap.data() ?? {};
+        final int currentHp = (data['current_hp'] as num?)?.toInt() ?? 5000;
+        final int nextHp = (currentHp - damage).clamp(0, 5000);
 
-      final Map<String, dynamic> updates = {
-        'current_hp': nextHp,
-        'last_strike_at': FieldValue.serverTimestamp(),
-      };
-      if (nextHp <= 0) {
-        updates['status'] = 'victory';
-      }
-      await docRef.update(updates);
+        final Map<String, dynamic> updates = {
+          'current_hp': nextHp,
+          'last_strike_at': FieldValue.serverTimestamp(),
+        };
+        if (nextHp <= 0) {
+          updates['status'] = 'victory';
+        }
+        transaction.update(docRef, updates);
+      });
     } catch (e) {
       debugPrint("[RAID ADMIN] Erreur strikeBoss: $e");
     }
   }
 
-  /// Réinitialise intégralement le Boss à 5 000 PV, vide les logs de la TV et remet les scores des Chasseurs à 0
   static Future resetBoss({required String roomId}) async {
     try {
       final docRef = _firestore.collection('current_raids').doc(roomId);
@@ -115,7 +115,6 @@ class RaidAdminService {
     }
   }
 
-  /// Change le statut du raid de manière sécurisée
   static Future setRaidStatus(String status, {required String roomId}) async {
     try {
       final docRef = _firestore.collection('current_raids').doc(roomId);
@@ -134,7 +133,6 @@ class RaidAdminService {
     }
   }
 
-  /// Prolonge le chronomètre du raid
   static Future extendRaidMinutes(int minutes, {required String roomId}) async {
     try {
       final docRef = _firestore.collection('current_raids').doc(roomId);
@@ -142,8 +140,7 @@ class RaidAdminService {
       if (!snapshot.exists) return;
 
       final Map data = snapshot.data() ?? {};
-      final int currentEndMs = (data['target_end_time'] as num?)?.toInt() ??
-          DateTime.now().millisecondsSinceEpoch;
+      final int currentEndMs = (data['target_end_time'] as num?)?.toInt() ?? DateTime.now().millisecondsSinceEpoch;
       DateTime baseTime = DateTime.fromMillisecondsSinceEpoch(currentEndMs);
       if (baseTime.isBefore(DateTime.now())) {
         baseTime = DateTime.now();
@@ -159,7 +156,6 @@ class RaidAdminService {
     }
   }
 
-  /// Réduit le chronomètre du raid
   static Future reduceRaidMinutes(int minutes, {required String roomId}) async {
     try {
       final docRef = _firestore.collection('current_raids').doc(roomId);
@@ -167,8 +163,7 @@ class RaidAdminService {
       if (!snapshot.exists) return;
 
       final Map data = snapshot.data() ?? {};
-      final int currentEndMs = (data['target_end_time'] as num?)?.toInt() ??
-          DateTime.now().millisecondsSinceEpoch;
+      final int currentEndMs = (data['target_end_time'] as num?)?.toInt() ?? DateTime.now().millisecondsSinceEpoch;
       final DateTime baseTime = DateTime.fromMillisecondsSinceEpoch(currentEndMs);
       final newEndTime = baseTime.subtract(Duration(minutes: minutes));
 
@@ -181,7 +176,6 @@ class RaidAdminService {
     }
   }
 
-  /// Réinitialise l'échéance à minuit le jour même
   static Future resetToMidnight({required String roomId}) async {
     try {
       final now = DateTime.now();
@@ -198,7 +192,6 @@ class RaidAdminService {
     }
   }
 
-  /// Expire immédiatement le raid
   static Future expireRaidNow({required String roomId}) async {
     try {
       final docRef = _firestore.collection('current_raids').doc(roomId);
