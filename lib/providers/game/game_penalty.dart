@@ -120,6 +120,24 @@ mixin _PenaltyLogic on _GameBase {
     _notify();
   }
 
+  Future<void> _persistPenaltyCompletion() async {
+    if (!(_sandbox && !SandboxManager.persistPenalty)) {
+      await StorageService.writePenaltyState(
+        active: false,
+        squatsDone: 0,
+        squatsGoal: 100,
+      );
+      await _saveNow();
+    }
+
+    await LockService.unlockScreen();
+    NotificationService.showNotification(
+      "PÉNALITÉ PURGÉE",
+      "Le Système lève le verrouillage. Reprenez votre entraînement.",
+      type: 'levelup',
+    );
+  }
+
   void processPenaltySquats(int count) {
     if (!_isInPenaltyZone) return;
 
@@ -129,23 +147,9 @@ mixin _PenaltyLogic on _GameBase {
       _isInPenaltyZone = false;
       _penaltySquatsDone = 0;
       _kPenaltyGoal = 100;
-
-      if (!(_sandbox && !SandboxManager.persistPenalty)) {
-        StorageService.writePenaltyState(
-          active: false,
-          squatsDone: 0,
-          squatsGoal: 100,
-        );
-        _saveNow();
-      }
-
-      LockService.unlockScreen();
-
-      NotificationService.showNotification(
-        "PÉNALITÉ PURGÉE",
-        "Le Système lève le verrouillage. Reprenez votre entraînement.",
-        type: 'levelup',
-      );
+      _notify();
+      unawaited(_persistPenaltyCompletion());
+      return;
     } else {
       if (!(_sandbox && !SandboxManager.persistPenalty)) {
         if (SandboxManager.persistPenalty) {
