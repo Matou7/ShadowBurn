@@ -1,7 +1,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- Permissions Système & Confinement Cerbère -->
+    <!-- Permissions Système & Contrôle des Quêtes de l'Arène -->
     <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.REORDER_TASKS" />
@@ -41,7 +41,7 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
-            <!-- Deeplink Maître du Jeu -->
+            <!-- Deeplink Maître du Jeu / Portail Admin -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
@@ -54,7 +54,7 @@
             android:name="flutterEmbedding"
             android:value="2" />
 
-        <!-- Service de premier plan -->
+        <!-- Service de premier plan pour les notifications et chronos de donjon -->
         <service
             android:name="com.dexterous.flutterlocalnotifications.ForegroundService"
             android:exported="false"
@@ -76,7 +76,7 @@
             </intent-filter>
         </receiver>
 
-        <!-- Récepteur de redémarrage automatique -->
+        <!-- Récepteur de redémarrage automatique du système de punition/quêtes -->
         <receiver 
             android:name=".BootReceiver" 
             android:exported="true" 
@@ -91,7 +91,7 @@
         </receiver>
     </application>
 
-    <!-- Requêtes de messagerie et d'appel -->
+    <!-- Requêtes de messagerie et de communication externe -->
     <queries>
         <intent>
             <action android:name="android.intent.action.DIAL" />
