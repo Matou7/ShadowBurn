@@ -27,6 +27,7 @@ import '../services/storage_service.dart';
 import 'urgent_quest_provider.dart';
 
 part 'game/game_state.dart';
+part 'game/game_legacy.dart';
 part 'game/game_lifecycle.dart';
 part 'game/game_save.dart';
 part 'game/game_day.dart';
@@ -38,6 +39,7 @@ part 'game/game_xp.dart';
 class GameProvider extends _GameBase
     with
         WidgetsBindingObserver,
+        _LegacyUiCompat,
         _LifecycleLogic,
         _SaveLogic,
         _DayLogic,
