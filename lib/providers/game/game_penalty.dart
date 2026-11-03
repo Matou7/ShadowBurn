@@ -3,9 +3,6 @@
 part of '../game_provider.dart';
 
 mixin _PenaltyLogic on _GameBase {
-  bool _isCompletingPenalty = false;
-  bool get isPenaltyCompleting => _isCompletingPenalty;
-
   /// Rétablissement direct des données de pénalité depuis le stockage natif (boot).
   void restorePenaltyState(int squatsDone, int squatsGoal) {
     if (_sandbox && !SandboxManager.persistPenalty) return;
@@ -123,7 +120,7 @@ mixin _PenaltyLogic on _GameBase {
   }
 
   Future<void> _persistPenaltyCompletion() async {
-    _isCompletingPenalty = true;
+    _isPenaltyCompleting = true;
     try {
       if (!(_sandbox && !SandboxManager.persistPenalty)) {
         await StorageService.writePenaltyState(
@@ -141,7 +138,7 @@ mixin _PenaltyLogic on _GameBase {
         type: 'levelup',
       );
     } finally {
-      _isCompletingPenalty = false;
+      _isPenaltyCompleting = false;
       _notify();
     }
   }
