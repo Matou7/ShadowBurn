@@ -144,8 +144,8 @@ mixin _DungeonLogic on _GameBase {
   void _finishDungeon({required bool victory}) async {
     if (_activeDungeon == null || _isFinishingDungeon) return;
     _isFinishingDungeon = true;
-
-    int baseXP = Balance.of(_activeDungeon!.rank).dungeonReward;
+    try {
+      int baseXP = Balance.of(_activeDungeon!.rank).dungeonReward;
     if (_isActiveDungeonRed) baseXP *= 2;
 
     if (victory) {
@@ -203,7 +203,9 @@ mixin _DungeonLogic on _GameBase {
       _saveNow();
     }
 
-    _isFinishingDungeon = false;
+    } finally {
+      _isFinishingDungeon = false;
+    }
   }
 
   void leaveDungeon() {
