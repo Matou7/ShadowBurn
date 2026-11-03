@@ -1,7 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- Permissions Système & Confinement Cerbère -->
     <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.REORDER_TASKS" />
@@ -13,7 +12,6 @@
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_HEALTH" />
-    <!-- SÉCURITÉ 8 MOIS : Survie des timers et notifications -->
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
 
@@ -42,7 +40,6 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
-            <!-- Deeplink Maître du Jeu : shadowburn://admin?room=room_X -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
@@ -91,11 +88,25 @@
     </application>
 
     <queries>
-        <intent><action android:name="android.intent.action.DIAL" /><data android:scheme="tel" /></intent>
-        <intent><action android:name="android.intent.action.SENDTO" /><data android:scheme="smsto" /></intent>
-        <intent><action android:name="android.intent.action.SENDTO" /><data android:scheme="sms" /></intent>
-        <intent><action android:name="android.intent.action.VIEW" /><data android:scheme="sms" /></intent>
-        <intent><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.APP_MESSAGING" /></intent>
+        <intent>
+            <action android:name="android.intent.action.DIAL" />
+            <data android:scheme="tel" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.SENDTO" />
+            <data android:scheme="smsto" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.SENDTO" />
+            <data android:scheme="sms" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="sms" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.APP_MESSAGING" />
+        </intent>
     </queries>
-</manifest>
 </manifest>
