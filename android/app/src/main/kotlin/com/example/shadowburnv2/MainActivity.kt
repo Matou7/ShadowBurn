@@ -62,11 +62,13 @@ class MainActivity: FlutterActivity() {
             val penalty = prefs.getBoolean("flutter.cerberus_penalty_active", false)
             val rawSave = prefs.getString("flutter.save_v3", null)
             var dungeonActive = false
+            var savedPenaltyActive = false
             if (!rawSave.isNullOrEmpty()) {
                 val save = JSONObject(rawSave)
                 dungeonActive = save.has("dungeon") && !save.isNull("dungeon")
+                savedPenaltyActive = save.optBoolean("penaltyActive", false)
             }
-            if (explicitLock || penalty || dungeonActive) {
+            if (explicitLock || penalty || savedPenaltyActive || dungeonActive) {
                 isLocked = true
                 isEmergencyExempt = false
                 setExcludeFromRecents(true)
