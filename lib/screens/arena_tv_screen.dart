@@ -50,8 +50,10 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
 
   static const int kMaxGlobalRooms = 100;
   static const int kMaxHuntersPerRoom = 10;
-  static const int kHeartbeatIntervalSeconds = 20;
-  static const int kRoomDeathThresholdMs = 60000;
+  // 10 minutes limits background writes while tolerating temporary TV pauses.
+  static const int kHeartbeatIntervalSeconds = 600;
+  static const int kRoomDeathThresholdMs = 15 * 60 * 1000;
+  static const int kHunterInactiveThresholdMs = 90 * 1000;
   static const int kMaxInactivitySeconds = 60;
   static const int kMaxVictoryPodiumSeconds = 180;
 
@@ -442,7 +444,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
         return false;
       }
       final int lastSeen = (hunter['last_seen'] as num?)?.toInt() ?? now;
-      return now - lastSeen > kRoomDeathThresholdMs;
+      return now - lastSeen > kHunterInactiveThresholdMs;
     });
     if (!hasExpiredHunter) return;
 
@@ -461,7 +463,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
           continue;
         }
         final int lastSeen = (hunter['last_seen'] as num?)?.toInt() ?? now;
-        if (now - lastSeen <= kRoomDeathThresholdMs || hunter['is_connected'] == false) {
+        if (now - lastSeen <= kHunterInactiveThresholdMs || hunter['is_connected'] == false) {
           filtered.add(hunter);
           continue;
         }
