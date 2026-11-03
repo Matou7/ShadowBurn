@@ -205,7 +205,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
         if (data['instance_token'] == ownerToken) {
           transaction.update(ref, {
             'status': 'closed',
-            'arena_last_seen': Timestamp.fromMillisecondsSinceEpoch(0),
+            'arena_last_seen': Timestamp.fromDate(DateTime.fromMillisecondsSinceEpoch(0)),
             'updateTime': FieldValue.serverTimestamp(),
           });
         }
@@ -478,7 +478,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
           'hunters': [],
           'logs': [],
           'target_end_time': midnight.millisecondsSinceEpoch,
-          'arena_last_seen': Timestamp.fromMillisecondsSinceEpoch(nowMs),
+          'arena_last_seen': Timestamp.fromDate(DateTime.fromMillisecondsSinceEpoch(nowMs)),
           'updateTime': FieldValue.serverTimestamp(),
         });
         return <String, String>{
@@ -509,7 +509,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
           .collection('current_raids')
           .where(
             'arena_last_seen',
-            isGreaterThan: Timestamp.fromMillisecondsSinceEpoch(nowMs - kRoomDeathThresholdMs),
+            isGreaterThan: Timestamp.fromDate(DateTime.fromMillisecondsSinceEpoch(nowMs - kRoomDeathThresholdMs)),
           )
           .get();
 
@@ -540,8 +540,10 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
             .collection('current_raids')
             .where(
                 'arena_last_seen',
-                isGreaterThan: Timestamp.fromMillisecondsSinceEpoch(
-                  DateTime.now().millisecondsSinceEpoch - kRoomDeathThresholdMs,
+                isGreaterThan: Timestamp.fromDate(
+                  DateTime.fromMillisecondsSinceEpoch(
+                    DateTime.now().millisecondsSinceEpoch - kRoomDeathThresholdMs,
+                  ),
                 ),
               )
             .get();
