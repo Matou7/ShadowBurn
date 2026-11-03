@@ -145,7 +145,11 @@ mixin _LifecycleLogic on _GameBase {
 
       final DateTime now = DateTime.now();
       if (_activeDungeon != null) {
-        LockService.lockScreen();
+        if (!now.isBefore(_activeDungeon!.expiresAt)) {
+          _finishDungeon(victory: false);
+        } else {
+          LockService.lockScreen();
+        }
       } else {
         final expiredIndex = _activeThreats.indexWhere((t) => now.isAfter(t.expiresAt));
         if (expiredIndex != -1) {
