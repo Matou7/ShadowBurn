@@ -212,7 +212,7 @@ mixin _DungeonLogic on _GameBase {
   void leaveDungeon() {
     NotificationService.showNotification(
       "ACCÈS REFUSÉ",
-      "Le Système interdit la fuite. Achevez le quota imposé ou utilisez l'Amnistie Système.",
+      "Le Système interdit la fuite. Achevez toutes les tâches imposées pour lever le verrouillage.",
       type: 'penalty',
     );
   }
