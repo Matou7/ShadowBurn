@@ -5,6 +5,7 @@ import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../services/multiplayer_quota_guard.dart';
 
 class ArenaTvScreen extends StatefulWidget {
   const ArenaTvScreen({super.key});
@@ -34,6 +35,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
   bool _isWorldSaturated = false;
   bool _isNightLockActive = false;
   bool _isQuotaLockActive = false;
+  bool _quotaGuardLoaded = false;
   bool _isDespawnedForInactivity = false;
   bool _allocationInProgress = false;
 
@@ -61,6 +63,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _lastRoomActivityMs = DateTime.now().millisecondsSinceEpoch;
+    unawaited(_loadQuotaGuard());
 
     _localTickTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (!mounted) return;
@@ -110,8 +113,25 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
     });
   }
 
+  Future<void> _loadQuotaGuard() async {
+    final bool paused = await MultiplayerQuotaGuard.isPaused();
+    if (!mounted) return;
+    setState(() {
+      _isQuotaLockActive = paused;
+      _quotaGuardLoaded = true;
+    });
+    if (!paused && !_isNightLockActive && _roomId == null && !_allocationInProgress) {
+      _allocationInProgress = true;
+      _resolveRoomAllocation().whenComplete(() {
+        _allocationInProgress = false;
+        if (mounted) setState(() {});
+      });
+    }
+  }
+
   void _activateQuotaLock() {
     _isQuotaLockActive = true;
+    unawaited(MultiplayerQuotaGuard.pauseUntilSafeRetry());
     _arenaHeartbeatTimer?.cancel();
     _queueRetryTimer?.cancel();
     _raidSubscription?.cancel();
@@ -184,6 +204,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
       });
       return;
     }
+    if (!_quotaGuardLoaded) return;
     if (_roomId == null && !_isWorldSaturated && !_isNightLockActive && !_isDespawnedForInactivity && !_allocationInProgress) {
       _allocationInProgress = true;
       _resolveRoomAllocation().whenComplete(() {
