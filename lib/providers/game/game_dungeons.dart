@@ -218,11 +218,21 @@ mixin _DungeonLogic on _GameBase {
   void _startDungeonTimer() {
     _dungeonTimer?.cancel();
     _dungeonTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (_activeDungeon == null) {
+      final Dungeon? dungeon = _activeDungeon;
+      if (dungeon == null) {
         timer.cancel();
-      } else {
-        _notify();
+        return;
       }
+
+      if (!DateTime.now().isBefore(dungeon.expiresAt)) {
+        // Le temps écoulé doit toujours fermer le donjon et libérer Cerbère,
+        // même si le joueur n'effectue plus aucune action.
+        _finishDungeon(victory: false);
+        timer.cancel();
+        return;
+      }
+
+      _notify();
     });
   }
 
