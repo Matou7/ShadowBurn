@@ -15,7 +15,8 @@ class BootReceiver : BroadcastReceiver() {
 
             val prefs = context.getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
             val isPenaltyActive = prefs.getBoolean("flutter.cerberus_penalty_active", false)
-            var shouldForceAwaken = isPenaltyActive
+            val explicitLock = prefs.getBoolean("flutter.cerberus_lock_active", false)
+            var shouldForceAwaken = isPenaltyActive || explicitLock
 
             if (!shouldForceAwaken) {
                 val rawSave = prefs.getString("flutter.save_v3", null)
@@ -24,15 +25,10 @@ class BootReceiver : BroadcastReceiver() {
                         val json = JSONObject(rawSave)
                         val now = Instant.now()
 
+                        // Any active dungeon is a prison, including an overdue dungeon.
+                        // Expiry never cancels the lock or releases the player.
                         if (json.has("dungeon") && !json.isNull("dungeon")) {
-                            val dj = json.getJSONObject("dungeon")
-                            val expiresAtStr = dj.optString("expiresAt", null)
-                            if (!expiresAtStr.isNullOrEmpty()) {
-                                val expiry = Instant.parse(expiresAtStr)
-                                if (now.isAfter(expiry)) {
-                                    shouldForceAwaken = true
-                                }
-                            }
+                            shouldForceAwaken = true
                         }
 
                         if (!shouldForceAwaken && json.has("threats") && !json.isNull("threats")) {
