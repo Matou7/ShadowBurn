@@ -117,9 +117,24 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
     _arenaHeartbeatTimer?.cancel();
     _queueRetryTimer?.cancel();
     _raidSubscription?.cancel();
-    if (_raidRef != null) {
-      _raidRef!.update({'status': 'closed'}).catchError((_) {});
-      _raidRef = null;
+    final DocumentReference? ref = _raidRef;
+    final String? ownerToken = _instanceToken;
+    _raidRef = null;
+    if (ref != null && ownerToken != null && ownerToken.isNotEmpty) {
+      FirebaseFirestore.instance.runTransaction((transaction) async {
+        final snapshot = await transaction.get(ref);
+        if (!snapshot.exists) return;
+        final data = snapshot.data() as Map<String, dynamic>? ?? {};
+        if (data['instance_token'] == ownerToken) {
+          transaction.update(ref, {
+            'status': 'closed',
+            'arena_last_seen': 0,
+            'updateTime': FieldValue.serverTimestamp(),
+          });
+        }
+      }).catchError((Object error) {
+        debugPrint('Fermeture conditionnelle de la salle impossible: $error');
+      });
     }
   }
 
@@ -152,11 +167,10 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
     }
     if (_roomId == null && !_isWorldSaturated && !_isNightLockActive && !_isDespawnedForInactivity && !_allocationInProgress) {
       _allocationInProgress = true;
-      _resolveRoomAllocation().then((_) {
+      _resolveRoomAllocation().whenComplete(() {
+        _allocationInProgress = false;
         if (mounted) {
-          setState(() {
-            _allocationInProgress = false;
-          });
+          setState(() {});
         }
       });
     }
@@ -195,7 +209,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
     String? chosenRoom;
 
     if (explicitRoom != null && explicitRoom.trim().isNotEmpty) {
-      chosenRoom = explicitRoom.trim();
+      chosenRoom = await _claimSpecificRoomSlot(explicitRoom.trim(), myInstanceToken);
     } else {
       chosenRoom = await _claimNextAvailableRoomSlot(myInstanceToken);
     }
@@ -215,6 +229,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
             _isAllocating = true;
             _isWorldSaturated = false;
           });
+          _allocationInProgress = false;
           _resolveRoomAllocation();
         }
       });
@@ -308,7 +323,10 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
       } else {
         _queueRetryTimer?.cancel();
         _queueRetryTimer = Timer(const Duration(seconds: 5), () {
-          if (mounted) _resolveRoomAllocation();
+          if (mounted) {
+            _allocationInProgress = false;
+            _resolveRoomAllocation();
+          }
         });
       }
     }
@@ -366,104 +384,164 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
   }
 
   void _cleanInactiveHuntersIfNeeded(Map mapData) {
-    if (_raidRef == null) return;
+    final DocumentReference? ref = _raidRef;
+    if (ref == null) return;
+
     final dynamic rawHunters = mapData['hunters'];
     if (rawHunters is! Iterable || rawHunters.isEmpty) return;
 
-    final List currentHunters = List.from(rawHunters);
     final int now = DateTime.now().millisecondsSinceEpoch;
-    bool changed = false;
+    FirebaseFirestore.instance.runTransaction((transaction) async {
+      final snapshot = await transaction.get(ref);
+      if (!snapshot.exists) return;
+      final Map<String, dynamic> latest = snapshot.data() as Map<String, dynamic>? ?? {};
+      final dynamic latestRawHunters = latest['hunters'];
+      if (latestRawHunters is! Iterable || latestRawHunters.isEmpty) return;
 
-    currentHunters.removeWhere((h) {
-      if (h is Map && h.containsKey('last_seen')) {
-        final int lastSeen = (h['last_seen'] as num).toInt();
-        final int totalDmg = (h['total_damage'] as num?)?.toInt() ?? 0;
-        if (now - lastSeen > 60000 && totalDmg == 0) {
-          changed = true;
-          return true;
-        }
+      final List<dynamic> filtered = latestRawHunters.where((hunter) {
+        if (hunter is! Map || !hunter.containsKey('last_seen')) return true;
+        final int lastSeen = (hunter['last_seen'] as num?)?.toInt() ?? now;
+        final int totalDamage = (hunter['total_damage'] as num?)?.toInt() ?? 0;
+        return !(now - lastSeen > kRoomDeathThresholdMs && totalDamage == 0);
+      }).toList();
+
+      if (filtered.length != latestRawHunters.length) {
+        transaction.update(ref, {
+          'hunters': filtered,
+          'updateTime': FieldValue.serverTimestamp(),
+        });
       }
-      return false;
+    }).catchError((Object error) {
+      debugPrint('Nettoyage transactionnel des chasseurs impossible: $error');
     });
+  }
 
-    if (changed) {
-      _raidRef!.update({
-        'hunters': currentHunters,
-        'updateTime': FieldValue.serverTimestamp(),
-      }).catchError((_) {});
+  Future<String?> _claimSpecificRoomSlot(String roomId, String instanceToken) async {
+    final DocumentReference<Map<String, dynamic>> ref =
+        FirebaseFirestore.instance.collection('current_raids').doc(roomId);
+    final DateTime now = DateTime.now();
+    final DateTime midnight = DateTime(now.year, now.month, now.day, 23, 59, 59);
+    final String newKey = _generateRandomToken(6);
+    final String newToken = _generateRandomToken(8);
+
+    try {
+      final bool claimed = await FirebaseFirestore.instance.runTransaction<bool>((transaction) async {
+        final snapshot = await transaction.get(ref);
+        final Map<String, dynamic> data = snapshot.data() ?? <String, dynamic>{};
+        final int lastSeen = (data['arena_last_seen'] as num?)?.toInt() ?? 0;
+        final int nowMs = DateTime.now().millisecondsSinceEpoch;
+        final bool stale = !snapshot.exists || lastSeen == 0 || nowMs - lastSeen > kRoomDeathThresholdMs;
+        if (snapshot.exists && !stale) return false;
+
+        transaction.set(ref, {
+          'roomId': roomId,
+          'boss_name': 'MONARQUE DU FEU',
+          'instance_token': instanceToken,
+          'join_token': newToken,
+          'admin_key': newKey,
+          'status': 'waiting',
+          'preset_label': 'RAID STANDARD (5 000 PV)',
+          'current_hp': 5000,
+          'max_hp': 5000,
+          'hunters': [],
+          'logs': [],
+          'target_end_time': midnight.millisecondsSinceEpoch,
+          'arena_last_seen': nowMs,
+          'updateTime': FieldValue.serverTimestamp(),
+        });
+        return true;
+      });
+      return claimed ? roomId : null;
+    } catch (error) {
+      debugPrint('Erreur réservation salle $roomId: $error');
+      return null;
     }
   }
 
   Future<String?> _claimNextAvailableRoomSlot(String instanceToken) async {
     final firestore = FirebaseFirestore.instance;
-    final now = DateTime.now().millisecondsSinceEpoch;
-    final today = DateTime.now();
-    final midnight = DateTime(today.year, today.month, today.day, 23, 59, 59);
+    final now = DateTime.now();
+    final midnight = DateTime(now.year, now.month, now.day, 23, 59, 59);
 
     try {
       final snapshot = await firestore.collection('current_raids').get();
-      final Map occupiedNumbers = {};
+      final Set<int> occupiedNumbers = <int>{};
+      final int nowMs = now.millisecondsSinceEpoch;
 
-      for (var doc in snapshot.docs) {
-        if (doc.id.startsWith('room_')) {
-          final numPart = int.tryParse(doc.id.replaceFirst('room_', ''));
-          if (numPart != null) {
-            final Map data = doc.data();
-            final int lastSeen = (data['arena_last_seen'] as num?)?.toInt() ?? 0;
-
-            if (lastSeen == 0 || (now - lastSeen > kRoomDeathThresholdMs)) {
-              await doc.reference.delete().catchError((_) {});
-            } else {
-              occupiedNumbers[numPart] = true;
-            }
-          }
+      for (final doc in snapshot.docs) {
+        if (!doc.id.startsWith('room_')) continue;
+        final int? number = int.tryParse(doc.id.substring('room_'.length));
+        if (number == null || number < 1 || number > kMaxGlobalRooms) continue;
+        final data = doc.data();
+        final int lastSeen = (data['arena_last_seen'] as num?)?.toInt() ?? 0;
+        if (lastSeen != 0 && nowMs - lastSeen <= kRoomDeathThresholdMs) {
+          occupiedNumbers.add(number);
         }
       }
 
-      int candidate = 1;
-      while (occupiedNumbers[candidate] == true) {
-        candidate++;
+      for (int candidate = 1; candidate <= kMaxGlobalRooms; candidate++) {
+        if (occupiedNumbers.contains(candidate)) continue;
+        final String roomId = 'room_$candidate';
+        final DocumentReference<Map<String, dynamic>> ref =
+            firestore.collection('current_raids').doc(roomId);
+        final String newKey = _generateRandomToken(6);
+        final String newToken = _generateRandomToken(8);
+
+        final bool claimed = await firestore.runTransaction<bool>((transaction) async {
+          final roomSnapshot = await transaction.get(ref);
+          final Map<String, dynamic> data = roomSnapshot.data() ?? <String, dynamic>{};
+          final int lastSeen = (data['arena_last_seen'] as num?)?.toInt() ?? 0;
+          final int transactionNow = DateTime.now().millisecondsSinceEpoch;
+          final bool stale = !roomSnapshot.exists || lastSeen == 0 ||
+              transactionNow - lastSeen > kRoomDeathThresholdMs;
+          if (roomSnapshot.exists && !stale) return false;
+
+          transaction.set(ref, {
+            'roomId': roomId,
+            'boss_name': 'MONARQUE DU FEU',
+            'instance_token': instanceToken,
+            'join_token': newToken,
+            'admin_key': newKey,
+            'status': 'waiting',
+            'preset_label': 'RAID STANDARD (5 000 PV)',
+            'current_hp': 5000,
+            'max_hp': 5000,
+            'hunters': [],
+            'logs': [],
+            'target_end_time': midnight.millisecondsSinceEpoch,
+            'arena_last_seen': transactionNow,
+            'updateTime': FieldValue.serverTimestamp(),
+          });
+          return true;
+        });
+
+        if (claimed) return roomId;
       }
-
-      if (candidate > kMaxGlobalRooms) {
-        return null;
-      }
-
-      final allocatedRoom = 'room_$candidate';
-      final newKey = _generateRandomToken(6);
-      final newToken = _generateRandomToken(8);
-
-      await firestore.collection('current_raids').doc(allocatedRoom).set({
-        'roomId': allocatedRoom,
-        'boss_name': 'MONARQUE DU FEU',
-        'instance_token': instanceToken,
-        'join_token': newToken,
-        'admin_key': newKey,
-        'status': 'waiting',
-        'preset_label': 'RAID STANDARD (5 000 PV)',
-        'current_hp': 5000,
-        'max_hp': 5000,
-        'hunters': [],
-        'logs': [],
-        'target_end_time': midnight.millisecondsSinceEpoch,
-        'arena_last_seen': now,
-        'updateTime': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
-
-      return allocatedRoom;
-    } catch (e) {
-      debugPrint("Erreur allocation slot: $e");
-      return 'room_1';
+      return null;
+    } catch (error) {
+      debugPrint('Erreur allocation slot: $error');
+      return null;
     }
   }
 
   void _sendHeartbeatNow() {
-    if (_raidRef != null && !_isDespawnedForInactivity && !_isNightLockActive) {
-      _raidRef!.update({
+    final DocumentReference? ref = _raidRef;
+    final String? ownerToken = _instanceToken;
+    if (ref == null || ownerToken == null || ownerToken.isEmpty ||
+        _isDespawnedForInactivity || _isNightLockActive) return;
+
+    FirebaseFirestore.instance.runTransaction((transaction) async {
+      final snapshot = await transaction.get(ref);
+      if (!snapshot.exists) return;
+      final data = snapshot.data() as Map<String, dynamic>? ?? {};
+      if (data['instance_token'] != ownerToken) return;
+      transaction.update(ref, {
         'arena_last_seen': DateTime.now().millisecondsSinceEpoch,
         'updateTime': FieldValue.serverTimestamp(),
-      }).catchError((_) {});
-    }
+      });
+    }).catchError((Object error) {
+      debugPrint('Heartbeat de la salle impossible: $error');
+    });
   }
 
   void _startArenaHeartbeat() {
@@ -592,6 +670,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
                       _roomId = null;
                       _isDespawnedForInactivity = false;
                       _isAllocating = true;
+                      _allocationInProgress = false;
                     });
                     _resolveRoomAllocation();
                   },
