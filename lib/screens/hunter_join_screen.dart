@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../services/multiplayer_quota_guard.dart';
 
 const Color kSystemBlue = Color(0xFF00E5FF);
 const String kAppDownloadUrl = "https://shadowburn-1d8f8.web.app";
@@ -47,6 +48,7 @@ class _HunterJoinScreenState extends State<HunterJoinScreen> with WidgetsBinding
   bool _isWaitingQueue = false;
   bool _isNightLockActive = false;
   bool _isQuotaLockActive = false;
+  bool _quotaGuardLoaded = false;
   String _denialReason = "VÉRIFICATION DU PORTAIL EN COURS...";
 
   bool _isJoined = false;
@@ -142,16 +144,28 @@ class _HunterJoinScreenState extends State<HunterJoinScreen> with WidgetsBinding
     final randomInt = Random().nextInt(999999);
     _hunterSessionId = 'chasseur_${DateTime.now().millisecondsSinceEpoch}_$randomInt';
     _autoDetectDeviceName(randomInt);
+    unawaited(_loadQuotaGuard());
   }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _parseIncomingParameters();
+    if (_quotaGuardLoaded) _parseIncomingParameters();
+  }
+
+  Future<void> _loadQuotaGuard() async {
+    final bool paused = await MultiplayerQuotaGuard.isPaused();
+    if (!mounted) return;
+    setState(() {
+      _isQuotaLockActive = paused;
+      _quotaGuardLoaded = true;
+    });
+    if (!paused) _parseIncomingParameters();
   }
 
   void _activateQuotaLock() {
     _isQuotaLockActive = true;
+    unawaited(MultiplayerQuotaGuard.pauseUntilSafeRetry());
     _queueRetryTimer?.cancel();
     _batchFlushTimer?.cancel();
     _raidSubscription?.cancel();
