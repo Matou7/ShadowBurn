@@ -4,6 +4,7 @@ part of '../game_provider.dart';
 
 mixin _DungeonLogic on _GameBase {
   Timer? _threatTimer;
+  bool _isFinishingDungeon = false;
 
   void setUrgentQuestProvider(UrgentQuestProvider p) {
     if (_urgent == p) return;
@@ -141,7 +142,8 @@ mixin _DungeonLogic on _GameBase {
   }
 
   void _finishDungeon({required bool victory}) async {
-    if (_activeDungeon == null) return;
+    if (_activeDungeon == null || _isFinishingDungeon) return;
+    _isFinishingDungeon = true;
 
     int baseXP = Balance.of(_activeDungeon!.rank).dungeonReward;
     if (_isActiveDungeonRed) baseXP *= 2;
@@ -163,9 +165,11 @@ mixin _DungeonLogic on _GameBase {
         if (higher != null) {
           _inventoryKeys[higher] = (_inventoryKeys[higher] ?? 0) + 1;
           lootMsg = "\nLOOT RARE : CLÉ RANG $higher";
-          if (await Vibration.hasVibrator()) {
-            Vibration.vibrate(pattern: [0, 100, 50, 100, 50, 200]);
-          }
+          try {
+            if (await Vibration.hasVibrator()) {
+              Vibration.vibrate(pattern: [0, 100, 50, 100, 50, 200]);
+            }
+          } catch (_) {}
         }
       }
       _dungeonResult = {'status': 'VICTOIRE$lootMsg\n(+ $dungeonHeal HP)', 'xp': finalXp};
@@ -198,6 +202,8 @@ mixin _DungeonLogic on _GameBase {
     } else {
       _saveNow();
     }
+
+    _isFinishingDungeon = false;
   }
 
   void leaveDungeon() {
