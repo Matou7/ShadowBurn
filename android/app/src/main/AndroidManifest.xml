@@ -1,6 +1,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <!-- Permissions Système & Confinement Cerbère -->
     <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.REORDER_TASKS" />
@@ -9,6 +10,11 @@
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_HEALTH" />
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
 
     <application
         android:label="ShadowBurn"
@@ -35,6 +41,7 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
+            <!-- Deeplink Maître du Jeu -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
@@ -47,6 +54,7 @@
             android:name="flutterEmbedding"
             android:value="2" />
 
+        <!-- Service de premier plan -->
         <service
             android:name="com.dexterous.flutterlocalnotifications.ForegroundService"
             android:exported="false"
@@ -68,6 +76,7 @@
             </intent-filter>
         </receiver>
 
+        <!-- Récepteur de redémarrage automatique -->
         <receiver 
             android:name=".BootReceiver" 
             android:exported="true" 
@@ -82,6 +91,7 @@
         </receiver>
     </application>
 
+    <!-- Requêtes de messagerie et d'appel -->
     <queries>
         <intent>
             <action android:name="android.intent.action.DIAL" />
