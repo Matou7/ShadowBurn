@@ -227,14 +227,10 @@ mixin _DungeonLogic on _GameBase {
         return;
       }
 
-      if (!DateTime.now().isBefore(dungeon.expiresAt)) {
-        // Le temps écoulé doit toujours fermer le donjon et libérer Cerbère,
-        // même si le joueur n'effectue plus aucune action.
-        _finishDungeon(victory: false);
-        timer.cancel();
-        return;
-      }
-
+      // L'expiration est une échéance, pas une sortie automatique.
+      // Le donjon reste actif, l'écran reste ouvert et Cerbère reste verrouillé.
+      // Le joueur doit terminer les tâches ; _checkDungeonStatus applique alors
+      // la pénalité de retard éventuelle et clôture légitimement le donjon.
       _notify();
     });
   }
