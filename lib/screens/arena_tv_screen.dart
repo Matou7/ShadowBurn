@@ -440,6 +440,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
   }
 
   Future<Map<String, String>?> _claimSpecificRoomSlot(String roomId, String instanceToken) async {
+    if (ArenaRoomPolicy.parseRoomNumber(roomId) == null) return null;
     final DocumentReference<Map<String, dynamic>> ref =
         FirebaseFirestore.instance.collection('current_raids').doc(roomId);
     final DateTime now = DateTime.now();
