@@ -466,6 +466,7 @@ class GameWrapper extends StatefulWidget {
 
 class _GameWrapperState extends State<GameWrapper> with WidgetsBindingObserver {
   bool _lastLockState = false;
+  bool _hasReconciledNativeLock = false;
 
   @override
   void initState() {
@@ -508,7 +509,20 @@ class _GameWrapperState extends State<GameWrapper> with WidgetsBindingObserver {
     final game = context.watch<GameProvider>();
 
     final bool shouldLock = game.isInPenaltyZone || game.isInDungeon;
-    _syncNativeLock(shouldLock);
+    if (game.isLoaded) {
+      if (!_hasReconciledNativeLock) {
+        // Reconcile a lock restored by Android with the authoritative saved game state.
+        _hasReconciledNativeLock = true;
+        _lastLockState = shouldLock;
+        if (shouldLock) {
+          LockService.lockScreen(force: true);
+        } else {
+          LockService.unlockScreen(force: true);
+        }
+      } else {
+        _syncNativeLock(shouldLock);
+      }
+    }
 
     if (!game.isLoaded && !game.isInPenaltyZone && !game.isInDungeon) {
       return const _LoadingScreen();
