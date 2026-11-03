@@ -532,6 +532,35 @@ class _GameWrapperState extends State<GameWrapper> with WidgetsBindingObserver {
       return const _LoadingScreen();
     }
 
+    if (game.isDungeonFinishing || game.isPenaltyCompleting) {
+      final String statusText = game.isDungeonFinishing
+          ? "VALIDATION DU DONJON..."
+          : "VALIDATION DE LA PÉNALITÉ...";
+      return PopScope(
+        canPop: false,
+        child: Scaffold(
+          backgroundColor: Colors.black,
+          body: Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const CircularProgressIndicator(color: Color(0xFF00E5FF)),
+                const SizedBox(height: 20),
+                Text(
+                  statusText,
+                  style: const TextStyle(
+                    color: Color(0xFF00E5FF),
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 2,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
     if (game.isInPenaltyZone) {
       return const PopScope(
         canPop: false,
