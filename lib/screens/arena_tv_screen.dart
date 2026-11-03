@@ -67,12 +67,18 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
       final now = DateTime.now();
       bool isNightClosed = now.hour < 6 || now.hour >= 23;
       if (isNightClosed != _isNightLockActive) {
-        setState(() {
-          _isNightLockActive = isNightClosed;
-        });
-        if (isNightClosed) {
-          _despawnAndStopAllTimers();
-          return;
+        // Une victoire conserve son podium pendant les 3 minutes prévues,
+        // même si l'horaire de fermeture de l'Arena vient d'être atteint.
+        final bool preserveVictoryPodium =
+            isNightClosed && _currentRaidStatus == 'victory' && !_isDespawnedForInactivity;
+        if (!preserveVictoryPodium) {
+          setState(() {
+            _isNightLockActive = isNightClosed;
+          });
+          if (isNightClosed) {
+            _despawnAndStopAllTimers();
+            return;
+          }
         }
       }
 
