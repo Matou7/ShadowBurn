@@ -408,15 +408,20 @@ mixin _AdminLogic on _GameBase {
   }
 
   bool toggleAdminMode(String password) {
-    final bool canAccess = kDebugMode || _rank.toUpperCase() == "MONARQUE";
-    if (!canAccess) {
-      debugPrint("[SÉCURITÉ] Accès Bac à Sable verrouillé. Statut MONARQUE requis.");
+    final cleanInput = password.trim();
+    final bool matchMaster =
+        cleanInput.toUpperCase() == kMasterAdminPassword.toUpperCase();
+    final bool canAccessWithStoredPassword =
+        kDebugMode || _rank.toUpperCase() == "MONARQUE";
+    final bool matchStored = cleanInput == _adminPassword ||
+        cleanInput.toUpperCase() == _adminPassword.toUpperCase();
+
+    // La clé maître doit aussi fonctionner dans une APK Release.
+    // Le mot de passe administrateur personnalisé reste réservé au debug/Monarque.
+    if (!matchMaster && (!canAccessWithStoredPassword || !matchStored)) {
+      debugPrint("[SÉCURITÉ] Accès Bac à Sable refusé.");
       return false;
     }
-
-    final cleanInput = password.trim();
-    final bool matchMaster = cleanInput.toUpperCase() == kMasterAdminPassword.toUpperCase();
-    final bool matchStored = cleanInput == _adminPassword || cleanInput.toUpperCase() == _adminPassword.toUpperCase();
 
     if (matchMaster || matchStored) {
       _adminPassword = kMasterAdminPassword;
