@@ -499,38 +499,25 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
     final midnight = DateTime(now.year, now.month, now.day, 23, 0, 0);
 
     try {
-      final snapshot = await firestore.collection('current_raids').get();
-      final Set<int> occupiedNumbers = <int>{};
-      final int nowMs = now.millisecondsSinceEpoch;
-
-      for (final doc in snapshot.docs) {
-        if (!doc.id.startsWith('room_')) continue;
-        final int? number = int.tryParse(doc.id.substring('room_'.length));
-        if (number == null || number < 1 || number > kMaxGlobalRooms) continue;
-        final data = doc.data();
-        final int lastSeen = (data['arena_last_seen'] as num?)?.toInt() ?? 0;
-        if (lastSeen != 0 && nowMs - lastSeen <= kRoomDeathThresholdMs) {
-          occupiedNumbers.add(number);
-        }
-      }
-
-      for (int candidate = 1; candidate <= kMaxGlobalRooms; candidate++) {
-        if (occupiedNumbers.contains(candidate)) continue;
-        final String roomId = 'room_$candidate';
-        final DocumentReference<Map<String, dynamic>> ref =
-            firestore.collection('current_raids').doc(roomId);
-        final String newKey = _generateRandomToken(6);
-        final String newToken = _generateRandomToken(8);
-
-        final Map<String, String>? claimed = await firestore.runTransaction<Map<String, String>?>((transaction) async {
+      // One atomic scan: stop at the first free/stale slot instead of reading
+      // the whole collection on every allocation attempt.
+      return await firestore.runTransaction<Map<String, String>?>((transaction) async {
+        for (int candidate = 1; candidate <= kMaxGlobalRooms; candidate++) {
+          final String roomId = 'room_$candidate';
+          final DocumentReference<Map<String, dynamic>> ref =
+              firestore.collection('current_raids').doc(roomId);
           final roomSnapshot = await transaction.get(ref);
-          final Map<String, dynamic> data = roomSnapshot.data() ?? <String, dynamic>{};
+          final Map<String, dynamic> data =
+              roomSnapshot.data() ?? <String, dynamic>{};
           final int lastSeen = (data['arena_last_seen'] as num?)?.toInt() ?? 0;
           final int transactionNow = DateTime.now().millisecondsSinceEpoch;
-          final bool stale = !roomSnapshot.exists || lastSeen == 0 ||
+          final bool stale = !roomSnapshot.exists ||
+              lastSeen == 0 ||
               transactionNow - lastSeen > kRoomDeathThresholdMs;
-          if (roomSnapshot.exists && !stale) return null;
+          if (roomSnapshot.exists && !stale) continue;
 
+          final String newKey = _generateRandomToken(6);
+          final String newToken = _generateRandomToken(8);
           transaction.set(ref, {
             'roomId': roomId,
             'boss_name': 'MONARQUE DU FEU',
@@ -552,20 +539,18 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
             'adminKey': newKey,
             'joinToken': newToken,
           };
-        });
-
-        if (claimed != null) return claimed;
-      }
-      return null;
+        }
+        return null;
+      });
     } catch (error) {
       debugPrint('Erreur allocation slot: $error');
-      if (error.toString().contains('resource-exhausted') || error.toString().contains('quota')) {
+      if (error.toString().contains('resource-exhausted') ||
+          error.toString().contains('quota')) {
         _activateQuotaLock();
       }
       return null;
     }
   }
-
   void _sendHeartbeatNow() {
     final DocumentReference? ref = _raidRef;
     final String? ownerToken = _instanceToken;
