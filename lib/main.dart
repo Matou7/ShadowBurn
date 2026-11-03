@@ -81,6 +81,7 @@ void main() async {
   final bool isPersistentGod = godSave != null && godSave['godModePersistPenalty'] == true;
 
   bool startsInPenalty = false;
+  bool startsInDungeon = false;
   int initialSquatsDone = 0;
   int initialSquatsGoal = 100;
 
@@ -90,6 +91,7 @@ void main() async {
     StorageService.blockAllRealSaves = true;
 
     startsInPenalty = godSave['penaltyActive'] == true;
+    startsInDungeon = godSave['dungeon'] != null;
     initialSquatsDone = (godSave['penaltySquats'] as num?)?.toInt() ?? 0;
     initialSquatsGoal = (godSave['penaltyGoal'] as num?)?.toInt() ?? 100;
   } else {
@@ -98,6 +100,7 @@ void main() async {
     final LoadedSave? realSave = await StorageService.load();
     final Map<String, dynamic>? realData = realSave?.data;
     final bool penaltyInReal = realData?['penaltyActive'] == true;
+    startsInDungeon = realData?['dungeon'] != null;
     final Map<String, dynamic> nativePenalty = await StorageService.readPenaltyState();
     final bool nativePenaltyActive = nativePenalty['active'] == true;
 
@@ -120,7 +123,7 @@ void main() async {
     }
   }
 
-  final bool shouldLockAtBoot = startsInPenalty || kForceDungeonOnBoot;
+  final bool shouldLockAtBoot = startsInPenalty || startsInDungeon || kForceDungeonOnBoot;
   if (shouldLockAtBoot) {
     try {
       await LockService.lockScreen(force: true);
