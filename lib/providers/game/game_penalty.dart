@@ -109,7 +109,7 @@ mixin _PenaltyLogic on _GameBase {
       squatsGoal: _kPenaltyGoal,
     );
 
-    if (SandboxManager.persistPenalty) {
+    if (_sandbox && SandboxManager.persistPenalty) {
       await SandboxManager.saveSandbox(_toJson());
     } else {
       await _saveNow();
@@ -156,7 +156,7 @@ mixin _PenaltyLogic on _GameBase {
       return;
     } else {
       if (!(_sandbox && !SandboxManager.persistPenalty)) {
-        if (SandboxManager.persistPenalty) {
+        if (_sandbox && SandboxManager.persistPenalty) {
           StorageService.writePenaltyState(
             active: true,
             squatsDone: _penaltySquatsDone,
