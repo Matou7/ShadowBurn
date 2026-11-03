@@ -279,7 +279,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
     if (_isQuotaLockActive) return;
 
     final bool explicitRoomIsAllowed = explicitRoom != null &&
-        RegExp(r'^room_(?:[1-9]|[1-9][0-9]|100)\$').hasMatch(explicitRoom.trim());
+        RegExp(r'^room_(?:[1-9]|[1-9][0-9]|100)$').hasMatch(explicitRoom.trim());
     if (explicitRoomIsAllowed) {
       allocation = await _claimSpecificRoomSlot(explicitRoom!.trim(), myInstanceToken);
     } else {
