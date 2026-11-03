@@ -25,15 +25,20 @@ mixin _LifecycleLogic on _GameBase {
         SandboxManager.persistPenalty = false;
         StorageService.blockAllRealSaves = false;
 
-        if (_activeDungeon != null && _activeDungeon!.isRandomThreat && !_godModePersistPenalty) {
-          _activeDungeon = null;
-          _isActiveDungeonRed = false;
-          _dungeonTimer?.cancel();
-          LockService.unlockScreen(force: true);
-        }
       }
     } catch (e) {
       dlog("Chargement impossible : $e");
+    }
+
+    // Le verrou Cerbère possède un état persistant distinct de la sauvegarde RPG.
+    // En cas de désynchronisation, un verrou actif ne doit jamais être effacé au démarrage.
+    if (!_sandbox || _godModePersistPenalty) {
+      final Map<String, dynamic> nativePenalty = await StorageService.readPenaltyState();
+      if (nativePenalty['active'] == true) {
+        _isInPenaltyZone = true;
+        _penaltySquatsDone = max(_penaltySquatsDone, asInt(nativePenalty['squatsDone']));
+        _kPenaltyGoal = max(_kPenaltyGoal, asInt(nativePenalty['squatsGoal'], 100));
+      }
     }
 
     _syncTitleWithRank();
@@ -145,11 +150,8 @@ mixin _LifecycleLogic on _GameBase {
 
       final DateTime now = DateTime.now();
       if (_activeDungeon != null) {
-        if (!now.isBefore(_activeDungeon!.expiresAt)) {
-          _finishDungeon(victory: false);
-        } else {
-          LockService.lockScreen();
-        }
+        // Même expiré, un donjon actif reste une prison jusqu'à l'achèvement.
+        LockService.lockScreen();
       } else {
         final expiredIndex = _activeThreats.indexWhere((t) => now.isAfter(t.expiresAt));
         if (expiredIndex != -1) {
