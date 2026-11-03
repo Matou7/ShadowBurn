@@ -2,7 +2,6 @@
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:qr_flutter/qr_flutter.dart';
 import '../providers/game_provider.dart';
 
 class DungeonResultScreen extends StatelessWidget {
@@ -102,47 +101,6 @@ class DungeonResultScreen extends StatelessWidget {
                           child: Text("AUCUN OBJET RARE TROUVÉ", style: TextStyle(color: Colors.white24, fontSize: 12, fontStyle: FontStyle.italic)),
                         ),
                       ],
-                    ],
-                  ),
-                ),
-
-                // ESPACEMENT FRANC POUR LE QR CODE DE TÉLÉCHARGEMENT DE L'APPLICATION
-                const SizedBox(height: 48),
-
-                Container(
-                  padding: const EdgeInsets.all(20),
-                  margin: const EdgeInsets.symmetric(horizontal: 32),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF0A121E),
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: Colors.cyanAccent.withValues(alpha: 0.4)),
-                  ),
-                  child: Column(
-                    children: [
-                      const Text(
-                        "TÉLÉCHARGER L'APPLICATION SHADOWBURN",
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          color: Colors.cyanAccent,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 12,
-                          letterSpacing: 1.5,
-                        ),
-                      ),
-                      const SizedBox(height: 14),
-                      Container(
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: QrImageView(
-                          data: "https://shadowburn-1d8f8.web.app",
-                          version: QrVersions.auto,
-                          size: 140.0,
-                          backgroundColor: Colors.white,
-                        ),
-                      ),
                     ],
                   ),
                 ),
