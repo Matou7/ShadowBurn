@@ -13,7 +13,7 @@ jobs:
       - name: 1. Récupération du code source
         uses: actions/checkout@v4
 
-      - name: 2. Configuration de Java 17 (Nécessaire pour compiler l'APK)
+      - name: 2. Configuration de Java 17
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
@@ -35,13 +35,11 @@ jobs:
         run: flutter build web --release --no-wasm-dry-run
 
       - name: 6. Déploiement sur Firebase Hosting
-        uses: FirebaseExtended/action-hosting-deploy@v0
+        uses: w9jds/firebase-action@master
         with:
-          repoToken: '${{ secrets.GITHUB_TOKEN }}'
-          # Remplace par le nom exact du secret généré lors du 'firebase init'
-          firebaseServiceAccount: '${{ secrets.FIREBASE_SERVICE_ACCOUNT_SHADOWBURN_1D8F8 }}'
-          channelId: live
-          projectId: shadowburn-1d8f8
+          args: deploy --only hosting
+        env:
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
 
       # =======================================================================
       # COMPILATION, RENOMMAGE ET PUBLICATION DE L'APK ANDROID
