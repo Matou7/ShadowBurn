@@ -199,7 +199,6 @@ mixin _DungeonLogic on _GameBase {
     _activeDungeon = null;
     _isActiveDungeonRed = false;
     _dungeonTimer?.cancel();
-    _notify();
 
     if (_sandbox) {
       if (SandboxManager.persistPenalty) {
@@ -210,6 +209,7 @@ mixin _DungeonLogic on _GameBase {
     }
 
     await LockService.unlockScreen();
+    _notify();
 
     } finally {
       _isFinishingDungeon = false;
