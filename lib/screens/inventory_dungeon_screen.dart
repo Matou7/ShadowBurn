@@ -400,7 +400,25 @@ class InventoryDungeonScreen extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text("DONJON ACTIF : RANG ${d.rank}", style: GoogleFonts.orbitron(color: themeColor, fontSize: 18, fontWeight: FontWeight.bold, shadows: [Shadow(color: themeColor, blurRadius: 10)])),
-                        CountdownWidget(targetTime: d.expiresAt, style: GoogleFonts.orbitron(color: dangerColor, fontSize: 16, fontWeight: FontWeight.bold)),
+                        if (DateTime.now().isBefore(d.expiresAt))
+                          CountdownWidget(
+                            targetTime: d.expiresAt,
+                            style: GoogleFonts.orbitron(color: dangerColor, fontSize: 16, fontWeight: FontWeight.bold),
+                          )
+                        else
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                "DÉLAI ÉCOULÉ — DONJON TOUJOURS ACTIF",
+                                style: GoogleFonts.orbitron(color: dangerColor, fontSize: 11, fontWeight: FontWeight.bold),
+                              ),
+                              Text(
+                                "Terminez toutes les tâches pour lever le verrouillage.",
+                                style: GoogleFonts.rajdhani(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.w600),
+                              ),
+                            ],
+                          ),
                       ],
                     ),
                     Transform.translate(
