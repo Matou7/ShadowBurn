@@ -7,7 +7,6 @@ import 'package:vibration/vibration.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../providers/game_provider.dart';
 import '../services/lock_service.dart';
-import '../widgets/system_dialog.dart';
 
 class PenaltyOverlay extends StatelessWidget {
   const PenaltyOverlay({super.key});
@@ -34,46 +33,6 @@ class PenaltyOverlay extends StatelessWidget {
     );
   }
 
-  void _showAmnestyConfirmDialog(BuildContext context, GameProvider game) {
-    SystemDialog.show(
-      context,
-      title: "RECOURS D'URGENCE (AMNISTIE)",
-      color: const Color(0xFF00E5FF),
-      content: const Text(
-        "Ce recours d'urgence purge la Pénalité suite à un dysfonctionnement matériel ou d'affichage.\n\n"
-        "• Aucun gain d'XP ou d'Or n'est attribué.\n"
-        "• Utilisable strictement une seule fois tous les 30 jours (ou à volonté en God Mode).",
-        style: TextStyle(color: Colors.white70, fontSize: 13, height: 1.4),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text("ANNULER"),
-        ),
-        ElevatedButton(
-          style: ElevatedButton.styleFrom(
-            backgroundColor: const Color(0xFF00E5FF).withOpacity(0.25),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            side: const BorderSide(color: Color(0xFF00E5FF)),
-          ),
-          onPressed: () async {
-            final messenger = ScaffoldMessenger.of(context);
-            Navigator.pop(context);
-            final String result = await game.useEmergencyAmnesty();
-            final bool granted = result.contains("ACCORDÉE");
-            messenger.showSnackBar(
-              SnackBar(
-                content: Text(result),
-                backgroundColor: granted ? const Color(0xFF00FF66) : Colors.redAccent,
-                duration: const Duration(seconds: 4),
-              ),
-            );
-          },
-          child: const Text("EXÉCUTER L'AMNISTIE", style: TextStyle(color: Colors.white)),
-        ),
-      ],
-    );
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -196,28 +155,7 @@ class PenaltyOverlay extends StatelessWidget {
                     ),
                   ],
                 ),
-                const SizedBox(height: 15),
-                SizedBox(
-                  width: double.infinity,
-                  child: OutlinedButton.icon(
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: const Color(0xFF00E5FF),
-                      side: const BorderSide(color: Color(0xFF00E5FF)),
-                      backgroundColor: const Color(0xFF00E5FF).withOpacity(0.08),
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                    icon: const Icon(Icons.shield_moon_outlined, size: 16, color: Color(0xFF00E5FF)),
-                    label: Text(
-                      "RECOURS D'URGENCE (AMNISTIE 1/30J)",
-                      textAlign: TextAlign.center,
-                      style: GoogleFonts.orbitron(fontSize: 11, letterSpacing: 1, fontWeight: FontWeight.bold, color: const Color(0xFF00E5FF)),
-                    ),
-                    onPressed: () => _showAmnestyConfirmDialog(context, game),
-                  ),
-                ),
+
               ],
             ),
           ),
