@@ -41,6 +41,59 @@ class _CountdownWidgetState extends State<CountdownWidget> {
     super.dispose();
   }
 
+  void _showProRequiredDialog(BuildContext context, GameProvider game, String rank) {
+    final controller = TextEditingController();
+    SystemDialog.show(
+      context,
+      title: "ACCÈS MONARQUE REQUIS",
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            "Le portail de rang $rank est réservé aux Chasseurs d'élite ayant éveillé leur statut Pro.",
+            style: GoogleFonts.rajdhani(color: Colors.white70, fontSize: 14),
+          ),
+          const SizedBox(height: 15),
+          TextField(
+            controller: controller,
+            style: const TextStyle(color: Colors.white),
+            decoration: const InputDecoration(
+              hintText: "Entrez votre clé Pro (ex: SHADOW-PRO-XXXX)",
+              hintStyle: TextStyle(color: Colors.white30),
+              enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Color(0xFF00E5FF))),
+              focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: Color(0xFF00E5FF))),
+            ),
+          ),
+        ],
+      ),
+      color: const Color(0xFF00E5FF),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text("ANNULER")),
+        ElevatedButton(
+          style: ElevatedButton.styleFrom(
+            backgroundColor: const Color(0xFF00E5FF).withOpacity(0.2),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+            side: const BorderSide(color: Color(0xFF00E5FF)),
+          ),
+          onPressed: () async {
+            final messenger = ScaffoldMessenger.of(context);
+            final keyInput = controller.text;
+            Navigator.pop(context);
+
+            final bool success = await game.activateProKey(keyInput);
+            messenger.showSnackBar(
+              SnackBar(
+                content: Text(success ? "Statut Pro activé avec succès !" : "Clé invalide."),
+                backgroundColor: success ? Colors.green : Colors.red,
+              ),
+            );
+          },
+          child: const Text("ACTIVER", style: TextStyle(color: Colors.white)),
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     String twoDigits(int n) => n.toString().padLeft(2, "0");
