@@ -1,4 +1,4 @@
-name: ShadowBurn Quality Checks
+name: ShadowBurn Quality Checks — Static Analysis, Tests, Web and APK
 
 concurrency:
   group: shadowburn-quality-${{ github.head_ref || github.ref }}
