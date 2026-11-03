@@ -198,6 +198,15 @@ class _HunterJoinScreenState extends State<HunterJoinScreen> with WidgetsBinding
     _roomId = (foundRoom != null && foundRoom.trim().isNotEmpty) ? foundRoom.trim() : '';
     _token = (foundToken != null && foundToken.trim().isNotEmpty) ? foundToken.trim() : '';
 
+    if (ArenaRoomPolicy.parseRoomNumber(_roomId) == null) {
+      setState(() {
+        _isCheckingToken = false;
+        _isTokenValid = false;
+        _denialReason = "ACCÈS REFUSÉ : IDENTIFIANT DE SALLE INVALIDE.\nLes salles autorisées vont de room_1 à room_100.";
+      });
+      return;
+    }
+
     _verifyPortalSecurity();
   }
 
