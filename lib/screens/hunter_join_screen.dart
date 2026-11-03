@@ -251,7 +251,7 @@ class _HunterJoinScreenState extends State<HunterJoinScreen> with WidgetsBinding
           });
         }
         _queueRetryTimer?.cancel();
-        _queueRetryTimer = Timer(const Duration(seconds: 10), () {
+        _queueRetryTimer = Timer(const Duration(seconds: 30), () {
           if (mounted) {
             setState(() {
               _isCheckingToken = true;
@@ -291,7 +291,7 @@ class _HunterJoinScreenState extends State<HunterJoinScreen> with WidgetsBinding
           });
         }
         _queueRetryTimer?.cancel();
-        _queueRetryTimer = Timer(const Duration(seconds: 10), () {
+        _queueRetryTimer = Timer(const Duration(seconds: 30), () {
           if (mounted) {
             setState(() {
               _isCheckingToken = true;
@@ -940,7 +940,7 @@ class _HunterJoinScreenState extends State<HunterJoinScreen> with WidgetsBinding
                 SizedBox(height: 12),
                 Text(
                   "La salle a atteint son quota maximal de 10 Chasseurs ou est en cours d'allocation.\n"
-                  "En attente de libération d'un slot... (Nouvelle tentative dans 10 secondes)",
+                  "En attente de libération d'un slot... (Nouvelle tentative dans 30 secondes)",
                   textAlign: TextAlign.center,
                   style: TextStyle(color: Colors.white70, fontFamily: 'monospace', fontSize: 13, height: 1.5),
                 ),
