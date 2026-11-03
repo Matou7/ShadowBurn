@@ -14,6 +14,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/balance.dart';
+import '../core/cerberus_lock_policy.dart';
 import '../core/json_utils.dart';
 import '../core/log.dart';
 import '../core/titles.dart';
