@@ -66,7 +66,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
     unawaited(_loadQuotaGuard());
 
     _localTickTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (!mounted) return;
+      if (!mounted || _isQuotaLockActive) return;
 
       final now = DateTime.now();
       bool isNightClosed = now.hour < 6 || now.hour >= 23;
@@ -132,6 +132,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
   void _activateQuotaLock() {
     _isQuotaLockActive = true;
     unawaited(MultiplayerQuotaGuard.pauseUntilSafeRetry());
+    _localTickTimer?.cancel();
     _arenaHeartbeatTimer?.cancel();
     _queueRetryTimer?.cancel();
     _raidSubscription?.cancel();
@@ -159,6 +160,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
     final DocumentReference? ref = _raidRef;
     final String? ownerToken = _instanceToken;
     _raidRef = null;
+    if (_isQuotaLockActive) return;
     if (ref != null && ownerToken != null && ownerToken.isNotEmpty) {
       FirebaseFirestore.instance.runTransaction((transaction) async {
         final snapshot = await transaction.get(ref);
@@ -205,7 +207,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
       return;
     }
     if (!_quotaGuardLoaded) return;
-    if (_roomId == null && !_isWorldSaturated && !_isNightLockActive && !_isDespawnedForInactivity && !_allocationInProgress) {
+    if (_roomId == null && !_isWorldSaturated && !_isNightLockActive && !_isQuotaLockActive && !_isDespawnedForInactivity && !_allocationInProgress) {
       _allocationInProgress = true;
       _resolveRoomAllocation().whenComplete(() {
         _allocationInProgress = false;
@@ -247,6 +249,8 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
 
     final String myInstanceToken = 'inst_${_generateRandomToken(12)}';
     String? chosenRoom;
+
+    if (_isQuotaLockActive) return;
 
     if (explicitRoom != null && explicitRoom.trim().isNotEmpty) {
       chosenRoom = await _claimSpecificRoomSlot(explicitRoom.trim(), myInstanceToken);
@@ -606,7 +610,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
     final DocumentReference? ref = _raidRef;
     final String? ownerToken = _instanceToken;
     if (ref == null || ownerToken == null || ownerToken.isEmpty ||
-        _isDespawnedForInactivity || _isNightLockActive) return;
+        _isDespawnedForInactivity || _isNightLockActive || _isQuotaLockActive) return;
 
     FirebaseFirestore.instance.runTransaction((transaction) async {
       final snapshot = await transaction.get(ref);
