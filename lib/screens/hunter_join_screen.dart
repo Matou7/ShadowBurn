@@ -255,7 +255,10 @@ class _HunterJoinScreenState extends State<HunterJoinScreen> with WidgetsBinding
 
       final dynamic rawHunters = data['hunters'];
       final List hunterList = rawHunters is Iterable ? rawHunters.toList() : [];
-      if (hunterList.length >= kMaxHuntersPerRoom) {
+      final int connectedHunters = hunterList.where(
+        (hunter) => hunter is Map && hunter['is_connected'] != false,
+      ).length;
+      if (connectedHunters >= kMaxHuntersPerRoom) {
         if (mounted) {
           setState(() {
             _isCheckingToken = false;
@@ -416,6 +419,7 @@ class _HunterJoinScreenState extends State<HunterJoinScreen> with WidgetsBinding
         'abs_reps': 0,
         'joined_at': now,
         'last_seen': now,
+        'is_connected': true,
       };
 
       await FirebaseFirestore.instance.runTransaction((transaction) async {
@@ -434,13 +438,24 @@ class _HunterJoinScreenState extends State<HunterJoinScreen> with WidgetsBinding
         final List<dynamic> latestHunters = rawLatestHunters is Iterable
             ? List<dynamic>.from(rawLatestHunters)
             : <dynamic>[];
-        final bool alreadyJoined = latestHunters.any(
+        final int existingIndex = latestHunters.indexWhere(
           (hunter) => hunter is Map && hunter['id'] == _hunterSessionId,
         );
-        if (!alreadyJoined && latestHunters.length >= kMaxHuntersPerRoom) {
+        final int connectedCount = latestHunters.where(
+          (hunter) => hunter is Map && hunter['is_connected'] != false,
+        ).length;
+        if (existingIndex == -1 && connectedCount >= kMaxHuntersPerRoom) {
           throw StateError('Cette salle est complète : 10 chasseurs maximum.');
         }
-        if (!alreadyJoined) latestHunters.add(hunterEntry);
+        if (existingIndex == -1) {
+          latestHunters.add(hunterEntry);
+        } else {
+          final Map<String, dynamic> existingHunter =
+              Map<String, dynamic>.from(latestHunters[existingIndex] as Map);
+          existingHunter['is_connected'] = true;
+          existingHunter['last_seen'] = now;
+          latestHunters[existingIndex] = existingHunter;
+        }
         transaction.update(_raidRef!, {'hunters': latestHunters});
       });
 
@@ -480,10 +495,30 @@ class _HunterJoinScreenState extends State<HunterJoinScreen> with WidgetsBinding
 
     try {
       if (_raidRef != null && _raidData.isNotEmpty) {
-        final dynamic rawHunters = _raidData['hunters'];
-        final List hunterList = rawHunters is Iterable ? List.from(rawHunters) : [];
-        hunterList.removeWhere((h) => h is Map && h['id'] == _hunterSessionId && ((h['total_damage'] as num?)?.toInt() ?? 0) == 0);
-        await _raidRef!.update({'hunters': hunterList});
+        final DocumentReference ref = _raidRef!;
+        await FirebaseFirestore.instance.runTransaction((transaction) async {
+          final latest = await transaction.get(ref);
+          if (!latest.exists) return;
+          final Map<String, dynamic> data = latest.data() as Map<String, dynamic>? ?? {};
+          final dynamic rawLatestHunters = data['hunters'];
+          final List<dynamic> latestHunters = rawLatestHunters is Iterable
+              ? List<dynamic>.from(rawLatestHunters)
+              : <dynamic>[];
+          final int index = latestHunters.indexWhere(
+            (hunter) => hunter is Map && hunter['id'] == _hunterSessionId,
+          );
+          if (index == -1) return;
+          final Map<String, dynamic> hunter =
+              Map<String, dynamic>.from(latestHunters[index] as Map);
+          if ((hunter['total_damage'] as num?)?.toInt() == 0) {
+            latestHunters.removeAt(index);
+          } else {
+            hunter['is_connected'] = false;
+            hunter['last_seen'] = DateTime.now().millisecondsSinceEpoch;
+            latestHunters[index] = hunter;
+          }
+          transaction.update(ref, {'hunters': latestHunters});
+        });
       }
 
       if (mounted) {
@@ -752,7 +787,20 @@ class _HunterJoinScreenState extends State<HunterJoinScreen> with WidgetsBinding
         });
       });
     } catch (e) {
+      // Ne perds pas les dégâts si le réseau échoue : ils restent en attente d'un nouvel envoi.
+      _pendingDamage += dmgToSend;
+      _pendingSquatReps += sToSend;
+      _pendingPushupReps += pToSend;
+      _pendingAbsReps += aToSend;
+      _pendingLogs.insertAll(0, logsToSend);
       debugPrint("[CHASSEUR] Erreur de synchronisation des dégâts : $e");
+      if (mounted && _isJoined) {
+        _batchFlushTimer?.cancel();
+        _batchFlushTimer = Timer(const Duration(seconds: kBatchIntervalSeconds), () {
+          _batchFlushTimer = null;
+          _flushPendingDamage();
+        });
+      }
     } finally {
       if (mounted) {
         setState(() => _isFlushing = false);
