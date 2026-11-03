@@ -271,7 +271,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
       });
 
       _queueRetryTimer?.cancel();
-      _queueRetryTimer = Timer(const Duration(seconds: 10), () {
+      _queueRetryTimer = Timer(const Duration(seconds: 30), () {
         if (mounted) {
           setState(() {
             _isAllocating = true;
@@ -370,7 +370,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
         _activateQuotaLock();
       } else {
         _queueRetryTimer?.cancel();
-        _queueRetryTimer = Timer(const Duration(seconds: 5), () {
+        _queueRetryTimer = Timer(const Duration(seconds: 30), () {
           if (mounted) {
             _allocationInProgress = false;
             _resolveRoomAllocation();
@@ -837,7 +837,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
                 SizedBox(height: 12),
                 Text(
                   "Les 100 failles dimensionnelles sont actuellement engagées en combat.\n"
-                  "En attente de libération d'un slot... (Nouvelle tentative dans 10 secondes)",
+                  "En attente de libération d'un slot... (Nouvelle tentative dans 30 secondes)",
                   textAlign: TextAlign.center,
                   style: TextStyle(color: Colors.white70, fontFamily: 'monospace', fontSize: 13, height: 1.5),
                 ),
