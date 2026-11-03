@@ -135,8 +135,11 @@ mixin _DungeonLogic on _GameBase {
       }
     }
 
-    if (allDone) {
-      final bool inTime = DateTime.now().isBefore(_activeDungeon!.expiresAt);
+    if (CerberusLockPolicy.canReleaseDungeon(allTasksCompleted: allDone)) {
+      final bool inTime = CerberusLockPolicy.isDungeonOnTime(
+        completedAt: DateTime.now(),
+        expiresAt: _activeDungeon!.expiresAt,
+      );
       _finishDungeon(victory: inTime);
     }
   }
