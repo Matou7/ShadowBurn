@@ -487,7 +487,8 @@ class _GameWrapperState extends State<GameWrapper> with WidgetsBindingObserver {
     if (state == AppLifecycleState.resumed) {
       LockService.cancelEmergencyExemption();
       final game = context.read<GameProvider>();
-      if (game.isInPenaltyZone || game.isInDungeon) {
+      if (game.isInPenaltyZone || game.isInDungeon ||
+          game.isDungeonFinishing || game.isPenaltyCompleting) {
         LockService.lockScreen(force: true);
       }
     }
@@ -508,7 +509,10 @@ class _GameWrapperState extends State<GameWrapper> with WidgetsBindingObserver {
   Widget build(BuildContext context) {
     final game = context.watch<GameProvider>();
 
-    final bool shouldLock = game.isInPenaltyZone || game.isInDungeon;
+    final bool shouldLock = game.isInPenaltyZone ||
+        game.isInDungeon ||
+        game.isDungeonFinishing ||
+        game.isPenaltyCompleting;
     if (game.isLoaded) {
       if (!_hasReconciledNativeLock) {
         // Reconcile a lock restored by Android with the authoritative saved game state.
