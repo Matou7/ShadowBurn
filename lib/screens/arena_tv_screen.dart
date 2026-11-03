@@ -294,7 +294,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
         _isWorldSaturated = true;
       });
       _queueRetryTimer?.cancel();
-      _queueRetryTimer = Timer(const Duration(seconds: 30), () {
+      _queueRetryTimer = Timer(const Duration(minutes: 10), () {
         if (!mounted || _isQuotaLockActive) return;
         setState(() {
           _isAllocating = true;
@@ -796,7 +796,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
                 SizedBox(height: 12),
                 Text(
                   "Les 100 failles dimensionnelles sont actuellement engagées en combat.\n"
-                  "En attente de libération d'un slot... (Nouvelle tentative dans 30 secondes)",
+                  "En attente de libération d'un slot... (Nouvelle tentative dans 10 minutes)",
                   textAlign: TextAlign.center,
                   style: TextStyle(color: Colors.white70, fontFamily: 'monospace', fontSize: 13, height: 1.5),
                 ),
@@ -2744,7 +2744,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
                 SizedBox(height: 12),
                 Text(
                   "Les 100 failles dimensionnelles sont actuellement engagées en combat.\n"
-                  "En attente de libération d'un slot... (Nouvelle tentative dans 30 secondes)",
+                  "En attente de libération d'un slot... (Nouvelle tentative dans 10 minutes)",
                   textAlign: TextAlign.center,
                   style: TextStyle(color: Colors.white70, fontFamily: 'monospace', fontSize: 13, height: 1.5),
                 ),
