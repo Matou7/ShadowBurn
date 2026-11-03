@@ -15,9 +15,9 @@ class MultiplayerQuotaGuard {
       await prefs.remove(_lockUntilKey);
       return false;
     } catch (_) {
-      // If local storage is unavailable, fail open rather than permanently
-      // blocking multiplayer for a storage error.
-      return false;
+      // Fail closed: if the local circuit-breaker state cannot be read,
+      // do not risk hammering Firestore after a quota rejection.
+      return true;
     }
   }
 
