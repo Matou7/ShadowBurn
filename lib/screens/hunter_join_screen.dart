@@ -453,7 +453,10 @@ class _HunterJoinScreenState extends State<HunterJoinScreen> with WidgetsBinding
         final int connectedCount = latestHunters.where(
           (hunter) => hunter is Map && hunter['is_connected'] != false,
         ).length;
-        if (existingIndex == -1 && connectedCount >= kMaxHuntersPerRoom) {
+        final bool existingIsConnected = existingIndex != -1 &&
+            latestHunters[existingIndex] is Map &&
+            (latestHunters[existingIndex] as Map)['is_connected'] != false;
+        if (!existingIsConnected && connectedCount >= kMaxHuntersPerRoom) {
           throw StateError('Cette salle est complète : 10 chasseurs maximum.');
         }
         if (existingIndex == -1) {
