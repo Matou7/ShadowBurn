@@ -1705,7 +1705,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
     final String rawJoinUrl = 'https://shadowburn-1d8f8.web.app/#/join?room=$_roomId&token=${_joinToken ?? ""}';
     final joinQrData = Uri.encodeComponent(rawJoinUrl);
 
-    const String apkDownloadUrl = 'https://github.com/Matou7/shadowburn-webhook/releases/latest/download/ShadowBurn.apk';
+    const String apkDownloadUrl = 'https://github.com/Matou7/ShadowBurn/releases/latest/download/ShadowBurn.apk';
     final apkQrData = Uri.encodeComponent(apkDownloadUrl);
 
     return Container(
