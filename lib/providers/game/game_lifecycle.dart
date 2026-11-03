@@ -60,14 +60,19 @@ mixin _LifecycleLogic on _GameBase {
     _syncCycleWithCalendar();
 
     final DateTime now = DateTime.now();
-    if (_activeDungeon != null) {
-      LockService.lockScreen();
-    } else {
+    if (_activeDungeon == null) {
       final expiredThreatIndex = _activeThreats.indexWhere((t) => now.isAfter(t.expiresAt));
       if (expiredThreatIndex != -1) {
         final d = _activeThreats.removeAt(expiredThreatIndex);
         enterDungeon(d.rank, isThreat: true, threatInstance: d, isRed: _isActiveDungeonRed);
       }
+    }
+
+    if (CerberusLockPolicy.shouldKeepLocked(
+      activeDungeon: _activeDungeon != null,
+      activePenalty: _isInPenaltyZone && (!_sandbox || _godModePersistPenalty),
+    )) {
+      await LockService.lockScreen();
     }
 
     _notify();
@@ -94,9 +99,6 @@ mixin _LifecycleLogic on _GameBase {
       _updateOngoingSystem(force: true);
     }
 
-    if (_isInPenaltyZone && (!_sandbox || _godModePersistPenalty)) {
-      Future.microtask(() => LockService.lockScreen());
-    }
   }
 
   void _applyPassiveRegen(DateTime? lastSave) {
@@ -149,15 +151,19 @@ mixin _LifecycleLogic on _GameBase {
       _urgent?.checkExpired();
 
       final DateTime now = DateTime.now();
-      if (_activeDungeon != null) {
-        // Même expiré, un donjon actif reste une prison jusqu'à l'achèvement.
-        LockService.lockScreen();
-      } else {
+      if (_activeDungeon == null) {
         final expiredIndex = _activeThreats.indexWhere((t) => now.isAfter(t.expiresAt));
         if (expiredIndex != -1) {
           final d = _activeThreats.removeAt(expiredIndex);
           enterDungeon(d.rank, isThreat: true, threatInstance: d, isRed: _isActiveDungeonRed);
         }
+      }
+
+      if (CerberusLockPolicy.shouldKeepLocked(
+        activeDungeon: _activeDungeon != null,
+        activePenalty: _isInPenaltyZone && (!_sandbox || _godModePersistPenalty),
+      )) {
+        LockService.lockScreen();
       }
 
       final String today = _todayKey();
@@ -166,9 +172,6 @@ mixin _LifecycleLogic on _GameBase {
         _updateOngoingSystem(force: true);
       }
 
-      if (_isInPenaltyZone && (!_sandbox || _godModePersistPenalty)) {
-        LockService.lockScreen();
-      }
       _notify();
     } else if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.inactive ||
