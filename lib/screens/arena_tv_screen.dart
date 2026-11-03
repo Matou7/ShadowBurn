@@ -34,6 +34,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
   bool _isWorldSaturated = false;
   bool _isNightLockActive = false;
   bool _isDespawnedForInactivity = false;
+  bool _allocationInProgress = false;
 
   String _currentRaidStatus = 'waiting';
   double _currentBossHp = 5000.0;
@@ -60,7 +61,6 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
       if (!mounted) return;
 
       final now = DateTime.now();
-      // VERROUILLAGE NOCTURNE : Fermé de 00:00 à 06:00 du matin
       bool isNightClosed = now.hour >= 0 && now.hour < 6;
       if (isNightClosed != _isNightLockActive) {
         setState(() {
@@ -119,7 +119,6 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
     _raidSubscription?.cancel();
     if (_raidRef != null) {
       _raidRef!.update({'status': 'closed'}).catchError((_) {});
-      _raidRef!.delete().catchError((_) {});
       _raidRef = null;
     }
   }
@@ -151,8 +150,15 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
       });
       return;
     }
-    if (_roomId == null && !_isWorldSaturated && !_isNightLockActive && !_isDespawnedForInactivity) {
-      _resolveRoomAllocation();
+    if (_roomId == null && !_isWorldSaturated && !_isNightLockActive && !_isDespawnedForInactivity && !_allocationInProgress) {
+      _allocationInProgress = true;
+      _resolveRoomAllocation().then((_) {
+        if (mounted) {
+          setState(() {
+            _allocationInProgress = false;
+          });
+        }
+      });
     }
   }
 
@@ -240,6 +246,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
           'logs': [],
           'target_end_time': midnight.millisecondsSinceEpoch,
           'arena_last_seen': DateTime.now().millisecondsSinceEpoch,
+          'updateTime': FieldValue.serverTimestamp(),
         };
         await ref.set(roomData);
       } else {
@@ -268,6 +275,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
           'logs': isStale ? [] : (data['logs'] ?? []),
           'target_end_time': isStale ? midnight.millisecondsSinceEpoch : (data['target_end_time'] ?? midnight.millisecondsSinceEpoch),
           'arena_last_seen': DateTime.now().millisecondsSinceEpoch,
+          'updateTime': FieldValue.serverTimestamp(),
         };
 
         await ref.set(updateData, SetOptions(merge: true));
@@ -298,7 +306,6 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
           _isNightLockActive = true;
         });
       } else {
-        // En cas d'erreur réseau temporaire, on réessaie proprement après 5 secondes
         _queueRetryTimer?.cancel();
         _queueRetryTimer = Timer(const Duration(seconds: 5), () {
           if (mounted) _resolveRoomAllocation();
@@ -328,7 +335,11 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
         }
 
         if (hp <= 0 && st == 'active') {
-          _raidRef!.update({'status': 'victory', 'current_hp': 0}).catchError((_) {});
+          _raidRef!.update({
+            'status': 'victory',
+            'current_hp': 0,
+            'updateTime': FieldValue.serverTimestamp(),
+          }).catchError((_) {});
           mapData['status'] = 'victory';
           mapData['current_hp'] = 0;
         }
@@ -376,7 +387,10 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
     });
 
     if (changed) {
-      _raidRef!.update({'hunters': currentHunters}).catchError((_) {});
+      _raidRef!.update({
+        'hunters': currentHunters,
+        'updateTime': FieldValue.serverTimestamp(),
+      }).catchError((_) {});
     }
   }
 
@@ -419,7 +433,6 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
       final newKey = _generateRandomToken(6);
       final newToken = _generateRandomToken(8);
 
-      // STRUCTURE COMPLÈTE DÈS LA CRÉATION POUR RESPECTER FIRESTORE.RULES
       await firestore.collection('current_raids').doc(allocatedRoom).set({
         'roomId': allocatedRoom,
         'boss_name': 'MONARQUE DU FEU',
@@ -434,6 +447,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
         'logs': [],
         'target_end_time': midnight.millisecondsSinceEpoch,
         'arena_last_seen': now,
+        'updateTime': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
 
       return allocatedRoom;
@@ -447,6 +461,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
     if (_raidRef != null && !_isDespawnedForInactivity && !_isNightLockActive) {
       _raidRef!.update({
         'arena_last_seen': DateTime.now().millisecondsSinceEpoch,
+        'updateTime': FieldValue.serverTimestamp(),
       }).catchError((_) {});
     }
   }
@@ -633,7 +648,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
       );
     }
 
-    if (_isAllocating || _raidRef == null || !_isRaidDataLoaded) {
+    if (_isAllocating || _roomId == null || _raidRef == null || !_isRaidDataLoaded) {
       return const Scaffold(
         backgroundColor: Color(0xFF02070D),
         body: Center(
@@ -1718,7 +1733,6 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            // --- SECTION 1 : SCAN CHASSEUR (REJOINDRE) ---
             const Text(
               'SCAN CHASSEUR',
               style: TextStyle(
@@ -1760,7 +1774,6 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
             const Divider(color: Colors.white24, height: 1),
             const SizedBox(height: 14),
 
-            // --- SECTION 2 : TÉLÉCOMMANDE MAÎTRE ---
             const Text(
               'TÉLÉCOMMANDE',
               style: TextStyle(
@@ -1804,7 +1817,6 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
             const Divider(color: Colors.white24, height: 1),
             const SizedBox(height: 14),
 
-            // --- SECTION 3 : TÉLÉCHARGER L'APPLICATION APK ---
             const Text(
               'TÉLÉCHARGER APK',
               style: TextStyle(
