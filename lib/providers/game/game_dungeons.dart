@@ -190,10 +190,8 @@ mixin _DungeonLogic on _GameBase {
       AudioService.playDefeat();
     }
 
-    try {
-      await LockService.unlockScreen();
-    } catch (_) {}
-
+    // Persist the completed state before releasing the native lock.
+    // A process death between these operations must never resurrect a finished dungeon.
     _activeDungeon = null;
     _isActiveDungeonRed = false;
     _dungeonTimer?.cancel();
@@ -201,11 +199,13 @@ mixin _DungeonLogic on _GameBase {
 
     if (_sandbox) {
       if (SandboxManager.persistPenalty) {
-        SandboxManager.saveSandbox(_toJson());
+        await SandboxManager.saveSandbox(_toJson());
       }
     } else {
-      _saveNow();
+      await _saveNow();
     }
+
+    await LockService.unlockScreen();
 
     } finally {
       _isFinishingDungeon = false;
