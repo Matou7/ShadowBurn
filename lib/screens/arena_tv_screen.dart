@@ -265,21 +265,20 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
 
     _recordActivity();
 
-    String? explicitRoom;
-    try {
-      final fullUrl = Uri.decodeFull(Uri.base.toString());
-      final match = RegExp(r'[?&]room=([a-zA-Z0-9_]+)').firstMatch(fullUrl);
-      explicitRoom = match?.group(1);
-    } catch (_) {
-      explicitRoom = Uri.base.queryParameters['room'];
-    }
+    final String? explicitRoom = Uri.base.queryParameters['room'];
 
     final String myInstanceToken = 'inst_${_generateRandomToken(12)}';
     Map<String, String>? allocation;
     if (_isQuotaLockActive) return;
 
-    final bool explicitRoomIsAllowed = explicitRoom != null &&
-        RegExp(r'^room_(?:[1-9]|[1-9][0-9]|100)$').hasMatch(explicitRoom.trim());
+    final String normalizedRoom = explicitRoom?.trim() ?? '';
+    final int? explicitRoomNumber = normalizedRoom.startsWith('room_')
+        ? int.tryParse(normalizedRoom.substring(5))
+        : null;
+    final bool explicitRoomIsAllowed = explicitRoomNumber != null &&
+        explicitRoomNumber >= 1 &&
+        explicitRoomNumber <= kMaxGlobalRooms &&
+        normalizedRoom == 'room_$explicitRoomNumber';
     if (explicitRoomIsAllowed) {
       allocation = await _claimSpecificRoomSlot(explicitRoom!.trim(), myInstanceToken);
     } else {
