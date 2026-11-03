@@ -1,0 +1,455 @@
+import 'dart:io';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:permission_handler/permission_handler.dart';
+import '../services/lock_service.dart';
+
+class PermissionGuideScreen extends StatefulWidget {
+  final VoidCallback onPermissionsGranted;
+
+  const PermissionGuideScreen({super.key, required this.onPermissionsGranted});
+
+  @override
+  State<PermissionGuideScreen> createState() => _PermissionGuideScreenState();
+}
+
+class _PermissionGuideScreenState extends State<PermissionGuideScreen>
+    with WidgetsBindingObserver {
+  static const MethodChannel _platform = MethodChannel('com.shadowburn.app/lock');
+
+  bool _isChecking = false;
+
+  bool _hasActivity = false;
+  bool _hasNotifications = false;
+  bool _hasOverlay = false;
+  bool _hasUsageStats = false;
+  bool _hasBatteryExemption = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _checkAllPermissions();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _checkAllPermissions();
+    }
+  }
+
+  Future<bool> _checkUsageStatsPermission() async {
+    if (!Platform.isAndroid) return true;
+    try {
+      final bool? result = await _platform.invokeMethod<bool>('checkUsagePermission');
+      return result ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<bool> _checkBatteryPermission() async {
+    if (!Platform.isAndroid) return true;
+    try {
+      final bool? result = await _platform.invokeMethod<bool>('checkBatteryOptimizations');
+      return result ?? false;
+    } catch (_) {
+      final status = await Permission.ignoreBatteryOptimizations.status;
+      return status.isGranted;
+    }
+  }
+
+  Future<bool> _checkAllNotifications() async {
+    if (!Platform.isAndroid) return true;
+    try {
+      final bool? nativeResult = await _platform.invokeMethod<bool>('checkAllNotificationsEnabled');
+      if (nativeResult != null) return nativeResult;
+    } catch (_) {}
+
+    final PermissionStatus status = await Permission.notification.status;
+    return status.isGranted;
+  }
+
+  Future<void> _checkAllPermissions() async {
+    final PermissionStatus activity = await Permission.activityRecognition.status;
+    final PermissionStatus overlay = await Permission.systemAlertWindow.status;
+
+    final bool notifsOk = await _checkAllNotifications();
+    final bool usageOk = await _checkUsageStatsPermission();
+    final bool batteryOk = await _checkBatteryPermission();
+
+    if (!mounted) return;
+
+    setState(() {
+      _hasActivity = activity.isGranted;
+      _hasNotifications = notifsOk;
+      _hasOverlay = overlay.isGranted;
+      _hasUsageStats = usageOk;
+      _hasBatteryExemption = batteryOk;
+      _isChecking = false;
+    });
+
+    final bool s1Ok = _hasActivity && _hasNotifications;
+    final bool s2Ok = _hasOverlay && _hasUsageStats;
+    final bool s3Ok = _hasBatteryExemption;
+
+    if (s1Ok && s2Ok && s3Ok) {
+      widget.onPermissionsGranted();
+    }
+  }
+
+  Future<void> _handleSector1() async {
+    setState(() => _isChecking = true);
+    if (!_hasActivity) {
+      final status = await Permission.activityRecognition.request();
+      if (status.isPermanentlyDenied || status.isDenied) {
+        await openAppSettings();
+        return;
+      }
+    }
+    if (!_hasNotifications) {
+      final status = await Permission.notification.request();
+      if (status.isPermanentlyDenied || status.isDenied) {
+        await openAppSettings();
+        return;
+      }
+    }
+    await _checkAllPermissions();
+  }
+
+  Future<void> _handleOverlay() async {
+    await LockService.requestOverlayPermission();
+    await _checkAllPermissions();
+  }
+
+  Future<void> _handleUsageAccessDeep() async {
+    try {
+      await _platform.invokeMethod('openUsageSettings');
+    } catch (_) {
+      await openAppSettings();
+    }
+    await _checkAllPermissions();
+  }
+
+  Future<void> _handleBatteryDeep() async {
+    setState(() => _isChecking = true);
+    // 1. Demande prioritaire via le dialogue système officiel
+    final status = await Permission.ignoreBatteryOptimizations.request();
+    
+    // 2. Si le dialogue natif ne s'ouvre pas ou échoue sous MIUI, routage vers PowerKeeper
+    if (!status.isGranted) {
+      try {
+        await _platform.invokeMethod('openBatteryNoRestrictions');
+      } catch (_) {
+        await openAppSettings();
+      }
+    }
+
+    await _checkAllPermissions();
+  }
+
+  Future<void> _handleGlobalValidate() async {
+    final bool s1Ok = _hasActivity && _hasNotifications;
+    final bool s2Ok = _hasOverlay && _hasUsageStats;
+
+    if (!s1Ok) {
+      await _handleSector1();
+      return;
+    }
+    if (!_hasOverlay) {
+      await _handleOverlay();
+      return;
+    }
+    if (!_hasUsageStats) {
+      await _handleUsageAccessDeep();
+      return;
+    }
+    if (!_hasBatteryExemption) {
+      await _handleBatteryDeep();
+      return;
+    }
+    await _checkAllPermissions();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bool s1Ok = _hasActivity && _hasNotifications;
+    final bool s2Ok = _hasOverlay && _hasUsageStats;
+    final bool s3Ok = _hasBatteryExemption;
+    final bool allGood = s1Ok && s2Ok && s3Ok;
+
+    return PopScope(
+      canPop: false,
+      child: Scaffold(
+        backgroundColor: Colors.black,
+        body: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 16.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const SizedBox(height: 10),
+                const Icon(
+                  Icons.shield_outlined,
+                  color: Color(0xFF00E5FF),
+                  size: 50,
+                ),
+                const SizedBox(height: 10),
+                const Text(
+                  "ACCÈS MATRICIELS",
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: Color(0xFF00E5FF),
+                    fontSize: 20,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 2.0,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                const Text(
+                  "Validation physique intégrale. Aucun accès ne peut être ignoré.",
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Colors.white70, fontSize: 12),
+                ),
+                const SizedBox(height: 16),
+
+                Expanded(
+                  child: ListView(
+                    children: [
+                      // SECTEUR 1
+                      _buildSectorContainer(
+                        title: "1. Forge Physique & Radar",
+                        subtitle: "ACTIVITY_RECOGNITION • NOTIFICATIONS",
+                        description:
+                            "Comptabilisation du podomètre et alertes du Système.",
+                        isComplete: s1Ok,
+                        actionButton: OutlinedButton.icon(
+                          style: OutlinedButton.styleFrom(
+                            side: BorderSide(
+                              color: s1Ok ? const Color(0xFF00E5FF) : Colors.redAccent,
+                            ),
+                          ),
+                          onPressed: _handleSector1,
+                          icon: Icon(
+                            s1Ok ? Icons.check : Icons.lock_open,
+                            color: s1Ok ? const Color(0xFF00E5FF) : Colors.redAccent,
+                            size: 16,
+                          ),
+                          label: Text(
+                            s1Ok ? "PODOMÈTRE & NOTIFS : ACTIFS" : "ACTIVER PODOMÈTRE & NOTIFS",
+                            style: TextStyle(
+                              color: s1Ok ? const Color(0xFF00E5FF) : Colors.redAccent,
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+
+                      // SECTEUR 2
+                      _buildSectorContainer(
+                        title: "2. Confinement Cerbère",
+                        subtitle: "SYSTEM_ALERT_WINDOW • PACKAGE_USAGE_STATS",
+                        description:
+                            "Superposition d'écran et accès aux données d'usage pour verrouiller la Pénalité.",
+                        isComplete: s2Ok,
+                        actionButton: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            OutlinedButton.icon(
+                              style: OutlinedButton.styleFrom(
+                                side: BorderSide(
+                                  color: _hasOverlay ? const Color(0xFF00E5FF) : Colors.redAccent,
+                                ),
+                              ),
+                              onPressed: _handleOverlay,
+                              icon: Icon(
+                                _hasOverlay ? Icons.check : Icons.layers,
+                                color: _hasOverlay ? const Color(0xFF00E5FF) : Colors.redAccent,
+                                size: 16,
+                              ),
+                              label: Text(
+                                _hasOverlay ? "SUPERPOSITION : ACCORDÉE" : "1. ACTIVER : SUPERPOSITION D'ÉCRAN",
+                                style: TextStyle(
+                                  color: _hasOverlay ? const Color(0xFF00E5FF) : Colors.redAccent,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 6),
+                            OutlinedButton.icon(
+                              style: OutlinedButton.styleFrom(
+                                side: BorderSide(
+                                  color: _hasUsageStats ? const Color(0xFF00E5FF) : Colors.redAccent,
+                                ),
+                              ),
+                              onPressed: _handleUsageAccessDeep,
+                              icon: Icon(
+                                _hasUsageStats ? Icons.check : Icons.query_stats,
+                                color: _hasUsageStats ? const Color(0xFF00E5FF) : Colors.redAccent,
+                                size: 16,
+                              ),
+                              label: Text(
+                                _hasUsageStats ? "DONNÉES D'USAGE : ACCORDÉES" : "2. ACTIVER : DONNÉES D'USAGE",
+                                style: TextStyle(
+                                  color: _hasUsageStats ? const Color(0xFF00E5FF) : Colors.redAccent,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+
+                      // SECTEUR 3 : ZÉRO SKIP SUR LA BATTERIE
+                      _buildSectorContainer(
+                        title: "3. Matrice de Réveil & Zéro Restriction",
+                        subtitle: "BATTERY_OPTIMIZATIONS • MATÉRIEL",
+                        description:
+                            "L'OS exige l'exemption formelle de l'optimisation batterie. Le Système refuse de s'ouvrir tant que le statut physique n'est pas accordé.",
+                        isComplete: s3Ok,
+                        actionButton: OutlinedButton.icon(
+                          style: OutlinedButton.styleFrom(
+                            side: BorderSide(
+                              color: s3Ok ? const Color(0xFF00E5FF) : Colors.redAccent,
+                            ),
+                          ),
+                          onPressed: _handleBatteryDeep,
+                          icon: Icon(
+                            s3Ok ? Icons.check : Icons.battery_alert,
+                            color: s3Ok ? const Color(0xFF00E5FF) : Colors.redAccent,
+                            size: 16,
+                          ),
+                          label: Text(
+                            s3Ok ? "BATTERIE : AUCUNE RESTRICTION (VÉRIFIÉ)" : "AUTORISER L'EXEMPTION DE BATTERIE",
+                            style: TextStyle(
+                              color: s3Ok ? const Color(0xFF00E5FF) : Colors.redAccent,
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+
+                const SizedBox(height: 10),
+
+                // BOUTON DE SORTIE : DÉSACTIVÉ TANT QUE TOUT N'EST PAS AU VERT
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: allGood ? const Color(0xFF00E5FF) : Colors.grey[900],
+                    foregroundColor: allGood ? Colors.black : Colors.white38,
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    elevation: allGood ? 5 : 0,
+                  ),
+                  onPressed: allGood ? _handleGlobalValidate : null,
+                  child: _isChecking
+                      ? const SizedBox(
+                          height: 20,
+                          width: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF00E5FF)),
+                        )
+                      : Text(
+                          allGood ? "MATRICE COMPLÈTE : ENTRER DANS L'ÉVEIL" : "ACCÈS MATRICIELS INCOMPLETS",
+                          style: const TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: 1.5,
+                          ),
+                        ),
+                ),
+                const SizedBox(height: 6),
+                const Center(
+                  child: Text(
+                    "Aucune simulation tolérée. Verrouillage physique actif.",
+                    style: TextStyle(color: Colors.white38, fontSize: 11),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSectorContainer({
+    required String title,
+    required String subtitle,
+    required String description,
+    required bool isComplete,
+    required Widget actionButton,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFF0D131D),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: isComplete
+              ? const Color(0xFF00E5FF).withValues(alpha: 0.6)
+              : Colors.redAccent.withValues(alpha: 0.4),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  title,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 14,
+                  ),
+                ),
+              ),
+              Icon(
+                isComplete ? Icons.check_circle : Icons.cancel_outlined,
+                color: isComplete ? const Color(0xFF00E5FF) : Colors.redAccent,
+                size: 20,
+              ),
+            ],
+          ),
+          const SizedBox(height: 3),
+          Text(
+            subtitle,
+            style: const TextStyle(
+              color: Color(0xFF00E5FF),
+              fontSize: 10,
+              fontFamily: 'monospace',
+              letterSpacing: 0.5,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            description,
+            style: const TextStyle(
+              color: Colors.white70,
+              fontSize: 12,
+              height: 1.3,
+            ),
+          ),
+          const SizedBox(height: 10),
+          actionButton,
+        ],
+      ),
+    );
+  }
+}

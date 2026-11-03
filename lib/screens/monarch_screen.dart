@@ -13,16 +13,17 @@ class MonarchScreen extends StatefulWidget {
 class _MonarchScreenState extends State<MonarchScreen> {
   Timer? _uiTimer;
 
+  static const double goalMonarqueKm = 40.0;
+  static const int goalMonarquePompes = 400;
+  static const int goalMonarqueAbdos = 400;
+  static const int goalMonarqueSquats = 400;
+
   @override
   void initState() {
     super.initState();
-    // Rafraîchir l'écran chaque seconde
     _uiTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
       final gameProvider = Provider.of<GameProvider>(context, listen: false);
-      
-      // Vérifie si on a perdu
       gameProvider.checkAwakeningFailure();
-      
       if (mounted) setState(() {});
     });
   }
@@ -37,9 +38,13 @@ class _MonarchScreenState extends State<MonarchScreen> {
   Widget build(BuildContext context) {
     final game = Provider.of<GameProvider>(context);
 
-    // Empêche le retour arrière
+    final bool allGoalsMet = game.classChangeKm >= goalMonarqueKm &&
+        game.classChangePompes >= goalMonarquePompes &&
+        game.classChangeAbdos >= goalMonarqueAbdos &&
+        game.classChangeSquats >= goalMonarqueSquats;
+
     return PopScope(
-      canPop: false, 
+      canPop: false,
       child: Scaffold(
         backgroundColor: Colors.black,
         body: Container(
@@ -47,7 +52,7 @@ class _MonarchScreenState extends State<MonarchScreen> {
             gradient: LinearGradient(
               begin: Alignment.topCenter,
               end: Alignment.bottomCenter,
-              colors: [Colors.deepPurple.shade900.withOpacity(0.8), Colors.black],
+              colors: [Colors.deepPurple.shade900.withValues(alpha: 0.8), Colors.black],
             ),
           ),
           child: Padding(
@@ -72,15 +77,15 @@ class _MonarchScreenState extends State<MonarchScreen> {
                   style: TextStyle(color: Colors.white54, fontSize: 13),
                 ),
                 const SizedBox(height: 30),
-                
+
                 // --- TIMER ---
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 15),
                   decoration: BoxDecoration(
-                    border: Border.all(color: Colors.redAccent.withOpacity(0.8), width: 2),
+                    border: Border.all(color: Colors.redAccent.withValues(alpha: 0.8), width: 2),
                     borderRadius: BorderRadius.circular(10),
                     color: Colors.black54,
-                    boxShadow: [BoxShadow(color: Colors.redAccent.withOpacity(0.2), blurRadius: 10)]
+                    boxShadow: [BoxShadow(color: Colors.redAccent.withValues(alpha: 0.2), blurRadius: 10)],
                   ),
                   child: Text(
                     game.formattedRemainingTime,
@@ -92,18 +97,18 @@ class _MonarchScreenState extends State<MonarchScreen> {
                     ),
                   ),
                 ),
-                
+
                 const SizedBox(height: 40),
-                
-                // --- BARRES DE PROGRESSION (Utilise les variables modifiables) ---
-                _buildQuestBar("ENDURANCE : COURSE", game.classChangeKm, game.goalNationKm, "KM", Colors.cyanAccent),
+
+                // --- BARRES DE PROGRESSION (QUOTAS 400 REPS / 40 KM) ---
+                _buildQuestBar("ENDURANCE : COURSE", game.classChangeKm, goalMonarqueKm, "KM", Colors.cyanAccent),
                 const SizedBox(height: 20),
-                _buildQuestBar("FORCE : POMPES", game.classChangePompes.toDouble(), game.goalNationPompes.toDouble(), "REPS", Colors.redAccent),
+                _buildQuestBar("FORCE : POMPES", game.classChangePompes.toDouble(), goalMonarquePompes.toDouble(), "REPS", Colors.redAccent),
                 const SizedBox(height: 20),
-                _buildQuestBar("AGILITÉ : ABDOS", game.classChangeAbdos.toDouble(), game.goalNationAbdos.toDouble(), "REPS", Colors.purpleAccent),
+                _buildQuestBar("AGILITÉ : ABDOS", game.classChangeAbdos.toDouble(), goalMonarqueAbdos.toDouble(), "REPS", Colors.purpleAccent),
                 const SizedBox(height: 20),
-                _buildQuestBar("VIGUEUR : SQUATS", game.classChangeSquats.toDouble(), game.goalNationSquats.toDouble(), "REPS", Colors.orangeAccent),
-                
+                _buildQuestBar("VIGUEUR : SQUATS", game.classChangeSquats.toDouble(), goalMonarqueSquats.toDouble(), "REPS", Colors.orangeAccent),
+
                 const Spacer(),
 
                 // --- BOUTONS DEBUG ---
@@ -116,13 +121,9 @@ class _MonarchScreenState extends State<MonarchScreen> {
                   ],
                 ),
                 const SizedBox(height: 20),
-                
-                // --- BOUTON DE FIN ---
-                // Vérifie si TOUS les objectifs sont atteints
-                if (game.classChangeKm >= game.goalNationKm && 
-                    game.classChangePompes >= game.goalNationPompes && 
-                    game.classChangeAbdos >= game.goalNationAbdos && 
-                    game.classChangeSquats >= game.goalNationSquats)
+
+                // --- BOUTON DE VALIDATION ---
+                if (allGoalsMet)
                   ElevatedButton(
                     onPressed: () => game.completeClassChange(),
                     style: ElevatedButton.styleFrom(
@@ -131,14 +132,17 @@ class _MonarchScreenState extends State<MonarchScreen> {
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
                       elevation: 10,
                     ),
-                    child: const Text("ACCEPTER LE POUVOIR", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
+                    child: const Text(
+                      "ACCEPTER LE POUVOIR",
+                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white),
+                    ),
                   )
                 else
-                   const Text(
+                  const Text(
                     "ÉPREUVE EN COURS...",
                     style: TextStyle(color: Colors.white24, letterSpacing: 2),
                   ),
-                  
+
                 const SizedBox(height: 20),
               ],
             ),
@@ -157,7 +161,10 @@ class _MonarchScreenState extends State<MonarchScreen> {
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             Text(label, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
-            Text("${current.toStringAsFixed(1)} / ${max.toInt()} $unit", style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 12)),
+            Text(
+              "${current.toStringAsFixed(1)} / ${max.toInt()} $unit",
+              style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 12),
+            ),
           ],
         ),
         const SizedBox(height: 6),
@@ -171,8 +178,11 @@ class _MonarchScreenState extends State<MonarchScreen> {
       ],
     );
   }
-  
+
   Widget _debugBtn(String lbl, VoidCallback act) {
-      return TextButton(onPressed: act, child: Text(lbl, style: const TextStyle(color: Colors.white12, fontSize: 10)));
+    return TextButton(
+      onPressed: act,
+      child: Text(lbl, style: const TextStyle(color: Colors.white12, fontSize: 10)),
+    );
   }
 }

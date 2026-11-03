@@ -47,7 +47,7 @@ class _AriseOverlayState extends State<AriseOverlay> with SingleTickerProviderSt
       children: [
         // 1. Fond semi-transparent sombre (ambiance donjon fini)
         Container(
-          color: Colors.black.withOpacity(0.85),
+          color: Colors.black.withValues(alpha: 0.85),
           width: double.infinity,
           height: double.infinity,
         ),
@@ -104,7 +104,7 @@ class _AriseOverlayState extends State<AriseOverlay> with SingleTickerProviderSt
                           borderRadius: BorderRadius.circular(10),
                           boxShadow: [
                             BoxShadow(
-                              color: Colors.blueAccent.withOpacity(0.5),
+                              color: Colors.blueAccent.withValues(alpha: 0.5),
                               blurRadius: 20,
                               spreadRadius: 5,
                             )
@@ -157,7 +157,7 @@ class _AriseOverlayState extends State<AriseOverlay> with SingleTickerProviderSt
         if (game.showAriseEffect)
           Positioned.fill(
             child: Container(
-              color: Colors.black.withOpacity(0.6),
+              color: Colors.black.withValues(alpha: 0.6),
               child: Center(
                 child: CircularProgressIndicator(
                   color: Colors.purpleAccent,

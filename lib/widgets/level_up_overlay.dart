@@ -66,7 +66,7 @@ class _LevelUpOverlayState extends State<LevelUpOverlay> with SingleTickerProvid
           // 1. Fond d'assombrissement (Bloque les interactions derrière)
           Positioned.fill(
             child: Container(
-              color: Colors.black.withOpacity(0.85),
+              color: Colors.black.withValues(alpha: 0.85),
             ),
           ),
           
@@ -85,7 +85,7 @@ class _LevelUpOverlayState extends State<LevelUpOverlay> with SingleTickerProvid
                     border: Border.all(color: mainColor, width: 2),
                     boxShadow: [
                       BoxShadow(
-                        color: mainColor.withOpacity(0.4),
+                        color: mainColor.withValues(alpha: 0.4),
                         blurRadius: 30,
                         spreadRadius: 5,
                       )
@@ -104,7 +104,7 @@ class _LevelUpOverlayState extends State<LevelUpOverlay> with SingleTickerProvid
                           fontWeight: FontWeight.w900,
                           letterSpacing: 3.0,
                           shadows: [
-                            Shadow(blurRadius: 15, color: mainColor.withOpacity(0.8)),
+                            Shadow(blurRadius: 15, color: mainColor.withValues(alpha: 0.8)),
                           ],
                         ),
                       ),
@@ -134,7 +134,7 @@ class _LevelUpOverlayState extends State<LevelUpOverlay> with SingleTickerProvid
                           shadows: [
                             Shadow(
                               blurRadius: 25, 
-                              color: mainColor.withOpacity(0.6),
+                              color: mainColor.withValues(alpha: 0.6),
                               offset: const Offset(0, 0),
                             ),
                           ],

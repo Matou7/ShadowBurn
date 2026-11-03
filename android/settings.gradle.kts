@@ -1,5 +1,3 @@
-// android/settings.gradle.kts
-
 pluginManagement {
     val flutterSdkPath = run {
         val properties = java.util.Properties()
@@ -20,9 +18,8 @@ pluginManagement {
 
 plugins {
     id("dev.flutter.flutter-plugin-loader") version "1.0.0"
-    // --- 🚨 MISES À JOUR VERSIONS 2025 ---
-    id("com.android.application") version "8.6.0" apply false
-    id("org.jetbrains.kotlin.android") version "2.1.0" apply false
+    id("com.android.application") version "8.11.1" apply false
+    id("org.jetbrains.kotlin.android") version "2.2.20" apply false
 }
 
 include(":app")

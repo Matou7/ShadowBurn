@@ -1,0 +1,62 @@
+name: Build APK & Deploy Web (ShadowBurn CI)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main, master ]
+
+jobs:
+  build_and_deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 1. Récupération du code source
+        uses: actions/checkout@v4
+
+      - name: 2. Configuration de Java 17 (Nécessaire pour compiler l'APK)
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: 3. Installation du moteur Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: 4. Installation des dépendances Dart
+        run: flutter pub get
+
+      # =======================================================================
+      # COMPILATION ET DÉPLOIEMENT WEB SUR FIREBASE HOSTING
+      # =======================================================================
+      - name: 5. Compilation Web (Release)
+        run: flutter build web --release --no-wasm-dry-run
+
+      - name: 6. Déploiement sur Firebase Hosting
+        uses: FirebaseExtended/action-hosting-deploy@v0
+        with:
+          repoToken: '${{ secrets.GITHUB_TOKEN }}'
+          # Remplace par le nom exact du secret généré lors du 'firebase init'
+          firebaseServiceAccount: '${{ secrets.FIREBASE_SERVICE_ACCOUNT_SHADOWBURN_1D8F8 }}'
+          channelId: live
+          projectId: shadowburn-1d8f8
+
+      # =======================================================================
+      # COMPILATION, RENOMMAGE ET PUBLICATION DE L'APK ANDROID
+      # =======================================================================
+      - name: 7. Compilation APK (Release) et Renommage
+        run: |
+          flutter build apk --release
+          mv build/app/outputs/flutter-apk/app-release.apk build/app/outputs/flutter-apk/ShadowBurn.apk
+
+      - name: 8. Publication de ShadowBurn.apk sur GitHub Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.${{ github.run_number }}
+          name: "ShadowBurn Release #${{ github.run_number }}"
+          files: build/app/outputs/flutter-apk/ShadowBurn.apk
+          make_latest: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

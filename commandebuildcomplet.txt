@@ -1,0 +1,21 @@
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+flutter build web --release
+firebase deploy --only hosting
+flutter run --release
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

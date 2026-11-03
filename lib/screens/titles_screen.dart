@@ -25,7 +25,7 @@ class TitlesScreen extends StatelessWidget {
           if (!game.areTitlesActive)
             Container(
               width: double.infinity,
-              color: Colors.redAccent.withOpacity(0.2),
+              color: Colors.redAccent.withValues(alpha: 0.2),
               padding: const EdgeInsets.all(15),
               child: Column(
                 children: [

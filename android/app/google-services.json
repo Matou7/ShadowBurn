@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1045603092576",
+    "project_id": "shadowburn-1d8f8",
+    "storage_bucket": "shadowburn-1d8f8.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1045603092576:android:2c06362671bb7ffab9db05",
+        "android_client_info": {
+          "package_name": "com.example.shadowburnv2"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDw6ikhosi0JgxrxB_dTsReeUMCLpcgvmc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
