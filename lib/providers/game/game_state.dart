@@ -56,10 +56,14 @@ abstract class _GameBase extends ChangeNotifier {
   Map<String, int> _inventoryKeys = {'E': 0, 'D': 0, 'C': 0, 'B': 0, 'A': 0, 'S': 0, 'NATION': 0};
 
   bool _isInPenaltyZone = false;
+  bool _isPenaltyCompleting = false;
   int _penaltySquatsDone = 0;
   int _kPenaltyGoal = 100;
 
   Dungeon? _activeDungeon;
+  bool _isDungeonFinishing = false;
+  bool get isDungeonFinishing => _isDungeonFinishing;
+  bool get isPenaltyCompleting => _isPenaltyCompleting;
   bool _isActiveDungeonRed = false;
   Map<String, dynamic>? _dungeonResult;
   List<Dungeon> _activeThreats = [];
