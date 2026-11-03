@@ -235,6 +235,8 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
 
     if (!mounted) return;
 
+    if (_isQuotaLockActive) return;
+
     if (chosenRoom == null) {
       setState(() {
         _isAllocating = false;
@@ -459,6 +461,9 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
       }
     }).catchError((Object error) {
       debugPrint('Nettoyage transactionnel des chasseurs impossible: $error');
+      if (error.toString().contains('resource-exhausted') || error.toString().contains('quota')) {
+        _activateQuotaLock();
+      }
     });
   }
 
@@ -500,6 +505,9 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
       return claimed ? roomId : null;
     } catch (error) {
       debugPrint('Erreur réservation salle $roomId: $error');
+      if (error.toString().contains('resource-exhausted') || error.toString().contains('quota')) {
+        _activateQuotaLock();
+      }
       return null;
     }
   }
@@ -566,6 +574,9 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
       return null;
     } catch (error) {
       debugPrint('Erreur allocation slot: $error');
+      if (error.toString().contains('resource-exhausted') || error.toString().contains('quota')) {
+        _activateQuotaLock();
+      }
       return null;
     }
   }
@@ -587,6 +598,9 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
       });
     }).catchError((Object error) {
       debugPrint('Heartbeat de la salle impossible: $error');
+      if (error.toString().contains('resource-exhausted') || error.toString().contains('quota')) {
+        _activateQuotaLock();
+      }
     });
   }
 
