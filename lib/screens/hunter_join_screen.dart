@@ -191,24 +191,8 @@ class _HunterJoinScreenState extends State<HunterJoinScreen> with WidgetsBinding
       rawUrl = Uri.decodeFull(rawUrl);
     } catch (_) {}
 
-    String? foundRoom;
-    String? foundToken;
-
-    final roomRegex = RegExp(r'[?&]room=([a-zA-Z0-9_]+)', caseSensitive: false);
-    final tokenRegex = RegExp(r'[?&]token=([a-zA-Z0-9_]+)', caseSensitive: false);
-
-    final roomMatch = roomRegex.firstMatch(rawUrl);
-    if (roomMatch != null) {
-      foundRoom = roomMatch.group(1);
-    }
-
-    final tokenMatch = tokenRegex.firstMatch(rawUrl);
-    if (tokenMatch != null) {
-      foundToken = tokenMatch.group(1);
-    }
-
-    foundRoom ??= Uri.base.queryParameters['room'];
-    foundToken ??= Uri.base.queryParameters['token'];
+    final String? foundRoom = Uri.base.queryParameters['room'];
+    final String? foundToken = Uri.base.queryParameters['token'];
 
     _roomId = (foundRoom != null && foundRoom.trim().isNotEmpty) ? foundRoom.trim() : '';
     _token = (foundToken != null && foundToken.trim().isNotEmpty) ? foundToken.trim() : '';
