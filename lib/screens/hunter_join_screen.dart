@@ -80,8 +80,8 @@ class _HunterJoinScreenState extends State<HunterJoinScreen> with WidgetsBinding
   bool _isFlushing = false;
 
   static const int kMaxHuntersPerRoom = ArenaRoomPolicy.maxPlayersPerRoom;
-  // 15s batches reduce Firestore writes while keeping combat feedback reasonably fresh.
-  static const int kBatchIntervalSeconds = 15;
+  // 60s batches reduce Firestore writes and listener fan-out on the free quota.
+  static const int kBatchIntervalSeconds = 60;
 
   static const List trainingModes = [
     TrainingMode(
