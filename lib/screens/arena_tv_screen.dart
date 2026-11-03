@@ -77,14 +77,39 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
         // même si l'horaire de fermeture de l'Arena vient d'être atteint.
         final bool preserveVictoryPodium =
             isNightClosed && _currentRaidStatus == 'victory' && !_isDespawnedForInactivity;
-        if (!preserveVictoryPodium) {
+        if (!preserveVictoryPodium && isNightClosed) {
           setState(() {
-            _isNightLockActive = isNightClosed;
+            _isNightLockActive = true;
           });
-          if (isNightClosed) {
-            _despawnAndStopAllTimers();
-            return;
-          }
+          _despawnAndStopAllTimers();
+          return;
+        }
+
+        if (!isNightClosed) {
+          // À 6h, réinitialise l'état de la veille et alloue une nouvelle salle.
+          setState(() {
+            _isNightLockActive = false;
+            _roomId = null;
+            _raidRef = null;
+            _instanceToken = null;
+            _adminKey = null;
+            _joinToken = null;
+            _raidData = {};
+            _isRaidDataLoaded = false;
+            _isWorldSaturated = false;
+            _isAllocating = true;
+            _isDespawnedForInactivity = false;
+            _currentRaidStatus = 'waiting';
+            _currentBossHp = 5000.0;
+            _targetEndTimeMs = 0;
+            _remainingSeconds = 0;
+          });
+          _allocationInProgress = true;
+          _resolveRoomAllocation().whenComplete(() {
+            _allocationInProgress = false;
+            if (mounted) setState(() {});
+          });
+          return;
         }
       }
 
