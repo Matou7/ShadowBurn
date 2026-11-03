@@ -24,6 +24,9 @@ class BootReceiver : BroadcastReceiver() {
                     try {
                         val json = JSONObject(rawSave)
                         val now = Instant.now()
+                        if (json.optBoolean("penaltyActive", false)) {
+                            shouldForceAwaken = true
+                        }
 
                         // Any active dungeon is a prison, including an overdue dungeon.
                         // Expiry never cancels the lock or releases the player.
