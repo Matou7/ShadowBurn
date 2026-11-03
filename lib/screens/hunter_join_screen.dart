@@ -8,6 +8,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../services/multiplayer_quota_guard.dart';
+import '../services/arena_room_policy.dart';
 
 const Color kSystemBlue = Color(0xFF00E5FF);
 const String kAppDownloadUrl = "https://shadowburn-1d8f8.web.app";
@@ -78,7 +79,7 @@ class _HunterJoinScreenState extends State<HunterJoinScreen> with WidgetsBinding
   Timer? _batchFlushTimer;
   bool _isFlushing = false;
 
-  static const int kMaxHuntersPerRoom = 10;
+  static const int kMaxHuntersPerRoom = ArenaRoomPolicy.maxPlayersPerRoom;
   // 15s batches reduce Firestore writes while keeping combat feedback reasonably fresh.
   static const int kBatchIntervalSeconds = 15;
 
@@ -456,7 +457,10 @@ class _HunterJoinScreenState extends State<HunterJoinScreen> with WidgetsBinding
         final bool existingIsConnected = existingIndex != -1 &&
             latestHunters[existingIndex] is Map &&
             (latestHunters[existingIndex] as Map)['is_connected'] != false;
-        if (!existingIsConnected && connectedCount >= kMaxHuntersPerRoom) {
+        if (!ArenaRoomPolicy.canAcceptPlayer(
+          connectedCount: connectedCount,
+          alreadyConnected: existingIsConnected,
+        )) {
           throw StateError('Cette salle est complète : 10 chasseurs maximum.');
         }
         if (existingIndex == -1) {
@@ -779,7 +783,10 @@ class _HunterJoinScreenState extends State<HunterJoinScreen> with WidgetsBinding
           final int connectedCount = hunterList.where(
             (hunter) => hunter is Map && hunter['is_connected'] != false,
           ).length;
-          if (connectedCount >= kMaxHuntersPerRoom) {
+          if (!ArenaRoomPolicy.canAcceptPlayer(
+            connectedCount: connectedCount,
+            alreadyConnected: false,
+          )) {
             throw StateError('La salle est complète : 10 chasseurs maximum.');
           }
           hunterList.add({
