@@ -496,52 +496,32 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
   Future<Map<String, String>?> _claimNextAvailableRoomSlot(String instanceToken) async {
     final firestore = FirebaseFirestore.instance;
     final now = DateTime.now();
-    final midnight = DateTime(now.year, now.month, now.day, 23, 0, 0);
+    final int nowMs = now.millisecondsSinceEpoch;
 
     try {
-      // One atomic scan: stop at the first free/stale slot instead of reading
-      // the whole collection on every allocation attempt.
-      return await firestore.runTransaction<Map<String, String>?>((transaction) async {
-        for (int candidate = 1; candidate <= kMaxGlobalRooms; candidate++) {
-          final String roomId = 'room_$candidate';
-          final DocumentReference<Map<String, dynamic>> ref =
-              firestore.collection('current_raids').doc(roomId);
-          final roomSnapshot = await transaction.get(ref);
-          final Map<String, dynamic> data =
-              roomSnapshot.data() ?? <String, dynamic>{};
-          final int lastSeen = (data['arena_last_seen'] as num?)?.toInt() ?? 0;
-          final int transactionNow = DateTime.now().millisecondsSinceEpoch;
-          final bool stale = !roomSnapshot.exists ||
-              lastSeen == 0 ||
-              transactionNow - lastSeen > kRoomDeathThresholdMs;
-          if (roomSnapshot.exists && !stale) continue;
+      // Only read rooms whose heartbeat is still alive. Empty/stale slots are
+      // absent from this query, so a mostly empty world costs only a few reads.
+      final activeRooms = await firestore
+          .collection('current_raids')
+          .where('arena_last_seen', isGreaterThan: nowMs - kRoomDeathThresholdMs)
+          .get();
 
-          final String newKey = _generateRandomToken(6);
-          final String newToken = _generateRandomToken(8);
-          transaction.set(ref, {
-            'roomId': roomId,
-            'boss_name': 'MONARQUE DU FEU',
-            'instance_token': instanceToken,
-            'join_token': newToken,
-            'admin_key': newKey,
-            'status': 'waiting',
-            'preset_label': 'RAID STANDARD (5 000 PV)',
-            'current_hp': 5000,
-            'max_hp': 5000,
-            'hunters': [],
-            'logs': [],
-            'target_end_time': midnight.millisecondsSinceEpoch,
-            'arena_last_seen': transactionNow,
-            'updateTime': FieldValue.serverTimestamp(),
-          });
-          return <String, String>{
-            'roomId': roomId,
-            'adminKey': newKey,
-            'joinToken': newToken,
-          };
+      final Set<int> occupiedNumbers = <int>{};
+      for (final doc in activeRooms.docs) {
+        if (!doc.id.startsWith('room_')) continue;
+        final int? number = int.tryParse(doc.id.substring('room_'.length));
+        if (number != null && number >= 1 && number <= kMaxGlobalRooms) {
+          occupiedNumbers.add(number);
         }
-        return null;
-      });
+      }
+
+      for (int candidate = 1; candidate <= kMaxGlobalRooms; candidate++) {
+        if (occupiedNumbers.contains(candidate)) continue;
+        // Transactionally re-check the candidate: two TVs cannot claim it
+        // from the same stale query snapshot.
+        return await _claimSpecificRoomSlot('room_$candidate', instanceToken);
+      }
+      return null;
     } catch (error) {
       debugPrint('Erreur allocation slot: $error');
       if (error.toString().contains('resource-exhausted') ||
