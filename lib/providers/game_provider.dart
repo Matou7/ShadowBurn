@@ -112,6 +112,7 @@ class GameProvider extends _GameBase
   }
 
   void setUrgentQuestProvider(UrgentQuestProvider provider) {
+    if (identical(urgentQuestProvider, provider)) return;
     urgentQuestProvider = provider;
     urgentQuestProvider!.onTimeExpired = () {
       triggerPenaltyState("Échec de la Quête Urgente.");
@@ -124,6 +125,17 @@ class GameProvider extends _GameBase
       goldCoins += gold;
       persistGame();
     };
+
+    // Restaure la quête chargée avant que le Provider ne soit disponible.
+    final pending = _pendingUrgentJson;
+    if (pending != null) {
+      _pendingUrgentJson = null;
+      Future.microtask(() {
+        if (!identical(urgentQuestProvider, provider)) return;
+        provider.restore(pending);
+        provider.checkExpired();
+      });
+    }
   }
 
   @override
