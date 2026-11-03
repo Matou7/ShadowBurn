@@ -6,6 +6,8 @@ mixin _DungeonLogic on _GameBase {
   Timer? _threatTimer;
   bool _isFinishingDungeon = false;
 
+  bool get isDungeonFinishing => _isFinishingDungeon;
+
   void setUrgentQuestProvider(UrgentQuestProvider p) {
     if (_urgent == p) return;
     _urgent = p;
