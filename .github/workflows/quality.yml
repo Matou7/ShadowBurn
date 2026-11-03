@@ -1,5 +1,9 @@
 name: ShadowBurn Quality Checks
 
+concurrency:
+  group: shadowburn-quality-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
 on:
   push:
     branches:
