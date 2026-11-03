@@ -50,6 +50,10 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
   static const int kHeartbeatIntervalSeconds = 20;
   static const int kRoomDeathThresholdMs = 60000;
   static const int kMaxInactivitySeconds = 60;
+  static const int kMaxVictoryPodiumSeconds = 180;
+
+  int get _currentInactivityLimitSeconds =>
+      _currentRaidStatus == 'victory' ? kMaxVictoryPodiumSeconds : kMaxInactivitySeconds;
 
   @override
   void initState() {
@@ -61,7 +65,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
       if (!mounted) return;
 
       final now = DateTime.now();
-      bool isNightClosed = now.hour >= 0 && now.hour < 6;
+      bool isNightClosed = now.hour < 6 || now.hour >= 23;
       if (isNightClosed != _isNightLockActive) {
         setState(() {
           _isNightLockActive = isNightClosed;
@@ -76,8 +80,8 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
         final int nowMs = now.millisecondsSinceEpoch;
         _idleSecondsElapsed = ((nowMs - _lastRoomActivityMs) ~/ 1000).clamp(0, 9999);
 
-        if (_idleSecondsElapsed >= kMaxInactivitySeconds &&
-            (_currentRaidStatus == 'waiting' || _currentRaidStatus == 'active')) {
+        if (_idleSecondsElapsed >= _currentInactivityLimitSeconds &&
+            (_currentRaidStatus == 'waiting' || _currentRaidStatus == 'active' || _currentRaidStatus == 'victory')) {
           _triggerInactivityDespawn();
           return;
         }
@@ -158,7 +162,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
   void didChangeDependencies() {
     super.didChangeDependencies();
     final now = DateTime.now();
-    if (now.hour >= 0 && now.hour < 6) {
+    if (now.hour < 6 || now.hour >= 23) {
       setState(() {
         _isNightLockActive = true;
         _isAllocating = false;
@@ -184,7 +188,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
 
   Future _resolveRoomAllocation() async {
     final now = DateTime.now();
-    if (now.hour >= 0 && now.hour < 6) {
+    if (now.hour < 6 || now.hour >= 23) {
       if (mounted) {
         setState(() {
           _isAllocating = false;
@@ -239,7 +243,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
     _queueRetryTimer?.cancel();
 
     final ref = FirebaseFirestore.instance.collection('current_raids').doc(chosenRoom);
-    final midnight = DateTime(now.year, now.month, now.day, 23, 59, 59);
+    final midnight = DateTime(now.year, now.month, now.day, 23, 0, 0);
 
     try {
       final existingDoc = await ref.get();
@@ -420,7 +424,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
     final DocumentReference<Map<String, dynamic>> ref =
         FirebaseFirestore.instance.collection('current_raids').doc(roomId);
     final DateTime now = DateTime.now();
-    final DateTime midnight = DateTime(now.year, now.month, now.day, 23, 59, 59);
+    final DateTime midnight = DateTime(now.year, now.month, now.day, 23, 0, 0);
     final String newKey = _generateRandomToken(6);
     final String newToken = _generateRandomToken(8);
 
@@ -461,7 +465,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
   Future<String?> _claimNextAvailableRoomSlot(String instanceToken) async {
     final firestore = FirebaseFirestore.instance;
     final now = DateTime.now();
-    final midnight = DateTime(now.year, now.month, now.day, 23, 59, 59);
+    final midnight = DateTime(now.year, now.month, now.day, 23, 0, 0);
 
     try {
       final snapshot = await firestore.collection('current_raids').get();
@@ -601,7 +605,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
                 Icon(Icons.lock_clock, color: Color(0xFFFF2E56), size: 64),
                 SizedBox(height: 20),
                 Text(
-                  "[ SYSTÈME : PORTAILS SCELLÉS (00H00 - 06H00) ]",
+                  "[ SYSTÈME : PORTAILS SCELLÉS (23H00 - 06H00) ]",
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     color: Color(0xFFFF2E56),
@@ -642,7 +646,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
                 const Icon(Icons.snooze, color: Color(0xFF00E5FF), size: 64),
                 const SizedBox(height: 20),
                 const Text(
-                  "PORTAIL MIS EN VEILLE (60S D'INACTIVITÉ)",
+                  "PORTAIL MIS EN VEILLE (${_currentInactivityLimitSeconds}S D'INACTIVITÉ)",
                   style: TextStyle(
                     color: Color(0xFF00E5FF),
                     fontFamily: 'monospace',
@@ -653,7 +657,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
                 ),
                 const SizedBox(height: 12),
                 const Text(
-                  "Aucune activité physique détectée pendant 60 secondes.\n"
+                  "Aucune activité détectée pendant ${_currentInactivityLimitSeconds} secondes.\n"
                   "La salle a été automatiquement purgée du serveur pour libérer le slot mondial.",
                   textAlign: TextAlign.center,
                   style: TextStyle(color: Colors.white70, fontFamily: 'monospace', fontSize: 13, height: 1.5),
@@ -834,7 +838,8 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
       ],
     );
 
-    final int sleepCountdown = (kMaxInactivitySeconds - _idleSecondsElapsed).clamp(0, kMaxInactivitySeconds);
+    final int inactivityLimit = _currentInactivityLimitSeconds;
+    final int sleepCountdown = (inactivityLimit - _idleSecondsElapsed).clamp(0, inactivityLimit);
 
     return Scaffold(
       backgroundColor: const Color(0xFF02070D),
@@ -853,7 +858,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
                     border: Border.all(color: const Color(0xFFFF2E56)),
                   ),
                   child: const Text(
-                    "⚠ ALERTE : LE DONJON MONDIAL SE REFERME À MINUIT. FIN DE LA PÉRIODE D'ASSAUT IMMINENTE.",
+                    "⚠ ALERTE : LE DONJON MONDIAL SE REFERME À 23H00. FIN DE LA PÉRIODE D'ASSAUT IMMINENTE.",
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       color: Color(0xFFFF2E56),
