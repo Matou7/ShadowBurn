@@ -773,6 +773,12 @@ class _HunterJoinScreenState extends State<HunterJoinScreen> with WidgetsBinding
         }
 
         if (!foundHunter && _confirmedHunterName.isNotEmpty) {
+          final int connectedCount = hunterList.where(
+            (hunter) => hunter is Map && hunter['is_connected'] != false,
+          ).length;
+          if (connectedCount >= kMaxHuntersPerRoom) {
+            throw StateError('La salle est complète : 10 chasseurs maximum.');
+          }
           hunterList.add({
             'id': _hunterSessionId,
             'name': _confirmedHunterName,
@@ -784,6 +790,7 @@ class _HunterJoinScreenState extends State<HunterJoinScreen> with WidgetsBinding
             'abs_reps': aToSend,
             'joined_at': DateTime.now().millisecondsSinceEpoch,
             'last_seen': DateTime.now().millisecondsSinceEpoch,
+            'is_connected': true,
           });
         }
         
