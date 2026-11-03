@@ -51,8 +51,8 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
 
   static const int kMaxGlobalRooms = ArenaRoomPolicy.maxGlobalRooms;
   static const int kMaxHuntersPerRoom = ArenaRoomPolicy.maxPlayersPerRoom;
-  // 10 minutes limits background writes while tolerating temporary TV pauses.
-  static const int kHeartbeatIntervalSeconds = 600;
+  // Deployed Firestore rules require arena_last_seen to refresh inside 60 seconds.
+  static const int kHeartbeatIntervalSeconds = 45;
   static const int kRoomDeathThresholdMs = 15 * 60 * 1000;
   static const int kHunterInactiveThresholdMs = 90 * 1000;
   static const int kMaxInactivitySeconds = 60;
@@ -60,6 +60,14 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
 
   int get _currentInactivityLimitSeconds =>
       _currentRaidStatus == 'victory' ? kMaxVictoryPodiumSeconds : kMaxInactivitySeconds;
+
+  static int _readArenaLastSeenMs(dynamic value) {
+    if (value is Timestamp) return value.millisecondsSinceEpoch;
+    if (value is DateTime) return value.millisecondsSinceEpoch;
+    // Read legacy numeric records so they can be reclaimed and rewritten as Timestamp.
+    if (value is num) return value.toInt();
+    return 0;
+  }
 
   @override
   void initState() {
@@ -197,7 +205,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
         if (data['instance_token'] == ownerToken) {
           transaction.update(ref, {
             'status': 'closed',
-            'arena_last_seen': 0,
+            'arena_last_seen': Timestamp.fromMillisecondsSinceEpoch(0),
             'updateTime': FieldValue.serverTimestamp(),
           });
         }
@@ -452,7 +460,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
       final Map<String, String>? claimed = await FirebaseFirestore.instance.runTransaction<Map<String, String>?>((transaction) async {
         final snapshot = await transaction.get(ref);
         final Map<String, dynamic> data = snapshot.data() ?? <String, dynamic>{};
-        final int lastSeen = (data['arena_last_seen'] as num?)?.toInt() ?? 0;
+        final int lastSeen = _readArenaLastSeenMs(data['arena_last_seen']);
         final int nowMs = DateTime.now().millisecondsSinceEpoch;
         final bool stale = !snapshot.exists || lastSeen == 0 || nowMs - lastSeen > kRoomDeathThresholdMs;
         if (snapshot.exists && !stale) return null;
@@ -470,7 +478,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
           'hunters': [],
           'logs': [],
           'target_end_time': midnight.millisecondsSinceEpoch,
-          'arena_last_seen': nowMs,
+          'arena_last_seen': Timestamp.fromMillisecondsSinceEpoch(nowMs),
           'updateTime': FieldValue.serverTimestamp(),
         });
         return <String, String>{
@@ -499,7 +507,10 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
       // absent from this query, so a mostly empty world costs only a few reads.
       final activeRooms = await firestore
           .collection('current_raids')
-          .where('arena_last_seen', isGreaterThan: nowMs - kRoomDeathThresholdMs)
+          .where(
+            'arena_last_seen',
+            isGreaterThan: Timestamp.fromMillisecondsSinceEpoch(nowMs - kRoomDeathThresholdMs),
+          )
           .get();
 
       final Set<int> occupiedNumbers = <int>{};
@@ -527,7 +538,12 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
         // Refresh only on this rare race instead of rescanning on every attempt.
         final refreshed = await firestore
             .collection('current_raids')
-            .where('arena_last_seen', isGreaterThan: DateTime.now().millisecondsSinceEpoch - kRoomDeathThresholdMs)
+            .where(
+                'arena_last_seen',
+                isGreaterThan: Timestamp.fromMillisecondsSinceEpoch(
+                  DateTime.now().millisecondsSinceEpoch - kRoomDeathThresholdMs,
+                ),
+              )
             .get();
         final bool nowOccupied = refreshed.docs.any((doc) => doc.id == roomId);
         if (nowOccupied) {
@@ -558,7 +574,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
       final data = snapshot.data() as Map<String, dynamic>? ?? {};
       if (data['instance_token'] != ownerToken) return;
       transaction.update(ref, {
-        'arena_last_seen': DateTime.now().millisecondsSinceEpoch,
+        'arena_last_seen': Timestamp.now(),
         'updateTime': FieldValue.serverTimestamp(),
       });
     }).catchError((Object error) {
