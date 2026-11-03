@@ -415,6 +415,10 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
         final Map mapData = Map.from(doc.data() as Map? ?? {});
         final double hp = ((mapData['current_hp'] ?? 5000) as num).toDouble();
         final String st = (mapData['status'] ?? 'waiting').toString();
+        // Synchronise immédiatement l'état terminal pour protéger le podium
+        // si l'horloge atteint 23h avant le prochain rebuild visuel.
+        _currentRaidStatus = st;
+        _currentBossHp = hp;
         final dynamic rawHunters = mapData['hunters'];
         final int hunterCount = rawHunters is Iterable ? rawHunters.length : 0;
 
