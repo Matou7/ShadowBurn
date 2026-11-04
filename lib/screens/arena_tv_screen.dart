@@ -543,7 +543,17 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
         final Map<String, dynamic> data = snapshot.data() ?? <String, dynamic>{};
         final int lastSeen = _readArenaLastSeenMs(data['arena_last_seen']);
         final int nowMs = DateTime.now().millisecondsSinceEpoch;
-        final bool stale = !snapshot.exists || lastSeen == 0 || nowMs - lastSeen > kRoomDeathThresholdMs;
+        final String existingStatus = (data['status'] ?? 'waiting').toString();
+        final bool terminal = const [
+          'failed',
+          'finished',
+          'abandoned',
+          'closed',
+        ].contains(existingStatus);
+        final bool stale = !snapshot.exists ||
+            terminal ||
+            lastSeen == 0 ||
+            nowMs - lastSeen > kRoomDeathThresholdMs;
         if (snapshot.exists && !stale) return null;
 
         transaction.set(ref, {
@@ -599,7 +609,15 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
       for (final doc in activeRooms.docs) {
         if (!doc.id.startsWith('room_')) continue;
         final int? number = int.tryParse(doc.id.substring('room_'.length));
-        if (number != null &&
+        final String status = (doc.data()['status'] ?? 'waiting').toString();
+        final bool terminal = const [
+          'failed',
+          'finished',
+          'abandoned',
+          'closed',
+        ].contains(status);
+        if (!terminal &&
+            number != null &&
             number >= 1 &&
             number <= kMaxGlobalRooms &&
             doc.id == 'room_$number') {
