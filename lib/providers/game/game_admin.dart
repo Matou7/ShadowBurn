@@ -2,7 +2,7 @@
 
 part of '../game_provider.dart';
 
-const String kMasterAdminPassword = "tricheur";
+// No release master password is embedded in the client. Configure a per-install admin password in-app.
 
 mixin _AdminLogic on _GameBase {
   bool get isGodMode => _sandbox;
@@ -408,8 +408,7 @@ mixin _AdminLogic on _GameBase {
 
   bool toggleAdminMode(String password) {
     final cleanInput = password.trim();
-    final bool matchMaster =
-        cleanInput.toUpperCase() == kMasterAdminPassword.toUpperCase();
+    const bool matchMaster = false;
     final bool canAccessWithStoredPassword =
         kDebugMode || _rank.toUpperCase() == "MONARQUE";
     final bool matchStored = cleanInput == _adminPassword ||
@@ -423,7 +422,6 @@ mixin _AdminLogic on _GameBase {
     }
 
     if (matchMaster || matchStored) {
-      _adminPassword = kMasterAdminPassword;
       if (!_sandbox) {
         _sandboxSnapshot = _toJson();
         _sandbox = true;
