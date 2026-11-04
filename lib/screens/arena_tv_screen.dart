@@ -26,6 +26,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
   Timer? _localTickTimer;
   Timer? _arenaHeartbeatTimer;
   Timer? _queueRetryTimer;
+  Timer? _roomCleanupTimer;
 
   Map _raidData = {};
   bool _isRaidDataLoaded = false;
@@ -39,6 +40,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
   bool _quotaGuardLoaded = false;
   bool _isDespawnedForInactivity = false;
   bool _allocationInProgress = false;
+  bool _roomCleanupInProgress = false;
 
   String _currentRaidStatus = 'waiting';
   double _currentBossHp = 5000.0;
@@ -55,7 +57,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
   // Keep a 30-second margin against the 60-second Firestore liveness rule.
   // This remains 33% lighter than the 20-second MASTER heartbeat.
   static const int kHeartbeatIntervalSeconds = 30;
-  static const int kRoomDeathThresholdMs = 2 * 60 * 1000;
+  static const int kRoomDeathThresholdMs = 60 * 1000;
   static const int kHunterInactiveThresholdMs = 90 * 1000;
   static const int kMaxInactivitySeconds = 60;
   static const int kMaxVictoryPodiumSeconds = 180;
@@ -158,6 +160,13 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
       _isQuotaLockActive = paused;
       _quotaGuardLoaded = true;
     });
+    final DateTime localNow = DateTime.now();
+    if (!paused && localNow.hour >= 6 && localNow.hour < 23) {
+      unawaited(_cleanupStaleArenaRooms());
+      _roomCleanupTimer ??= Timer.periodic(const Duration(seconds: 30), (_) {
+        if (!_isQuotaLockActive) unawaited(_cleanupStaleArenaRooms());
+      });
+    }
     if (!paused && !_isNightLockActive && _roomId == null && !_allocationInProgress) {
       _allocationInProgress = true;
       _resolveRoomAllocation().whenComplete(() {
@@ -173,6 +182,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
     _localTickTimer?.cancel();
     _arenaHeartbeatTimer?.cancel();
     _queueRetryTimer?.cancel();
+    _roomCleanupTimer?.cancel();
     _raidSubscription?.cancel();
     if (mounted) setState(() {});
   }
@@ -217,6 +227,104 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
           error.toString().contains('quota')) {
         _activateQuotaLock();
       }
+    }
+  }
+
+  /// Nettoie les salles abandonnées par un navigateur fermé sans exécution de dispose().
+  /// Le balayage ne lit que les documents périmés ou terminaux, pas les 100 salles.
+  Future<void> _cleanupStaleArenaRooms() async {
+    if (_roomCleanupInProgress || _isQuotaLockActive) return;
+    _roomCleanupInProgress = true;
+
+    try {
+      final firestore = FirebaseFirestore.instance;
+      final rooms = firestore.collection('current_raids');
+      final int nowMs = DateTime.now().millisecondsSinceEpoch;
+      final Timestamp timestampCutoff = Timestamp.fromMillisecondsSinceEpoch(
+        nowMs - kRoomDeathThresholdMs,
+      );
+      final int numericCutoff = nowMs - kRoomDeathThresholdMs;
+      const terminalStatuses = ['failed', 'finished', 'abandoned', 'closed'];
+
+      final results = await Future.wait<QuerySnapshot<Map<String, dynamic>>>([
+        rooms.where('arena_last_seen', isLessThan: timestampCutoff).get(),
+        rooms.where('arena_last_seen', isLessThan: numericCutoff).get(),
+        rooms.where('status', whereIn: terminalStatuses).get(),
+      ]);
+
+      final Map<String, QueryDocumentSnapshot<Map<String, dynamic>>> candidates = {};
+      for (final result in results) {
+        for (final doc in result.docs) {
+          if (ArenaRoomPolicy.parseRoomNumber(doc.id) != null) {
+            candidates[doc.id] = doc;
+          }
+        }
+      }
+
+      for (final candidate in candidates.values) {
+        if (_isQuotaLockActive) break;
+        final DocumentReference<Map<String, dynamic>> ref = candidate.reference;
+        final dynamic expectedToken = candidate.data()['instance_token'];
+
+        try {
+          final bool needsFinalDelete = await firestore.runTransaction<bool>((transaction) async {
+            final latest = await transaction.get(ref);
+            if (!latest.exists) return false;
+            final Map<String, dynamic> data = latest.data() ?? <String, dynamic>{};
+            if (data['instance_token'] != expectedToken) return false;
+
+            final String status = (data['status'] ?? 'waiting').toString();
+            final bool terminal = terminalStatuses.contains(status);
+            final dynamic rawLastSeen = data['arena_last_seen'];
+            final int lastSeenMs = _readArenaLastSeenMs(rawLastSeen);
+            final bool stale = lastSeenMs == 0 ||
+                DateTime.now().millisecondsSinceEpoch - lastSeenMs >= kRoomDeathThresholdMs;
+            if (!terminal && !stale) return false;
+
+            // Les timestamps périmés et statuts terminaux sont supprimés directement.
+            // Les anciennes dates numériques sont d'abord normalisées en salle fermée,
+            // puis supprimées dans une seconde transaction sécurisée par instance_token.
+            if (terminal || rawLastSeen is Timestamp) {
+              transaction.delete(ref);
+              return false;
+            }
+
+            transaction.update(ref, {
+              'status': 'closed',
+              'arena_last_seen': Timestamp.fromMillisecondsSinceEpoch(0),
+              'last_activity_at': Timestamp.fromMillisecondsSinceEpoch(0),
+              'updateTime': FieldValue.serverTimestamp(),
+            });
+            return true;
+          });
+
+          if (needsFinalDelete) {
+            await firestore.runTransaction((transaction) async {
+              final latest = await transaction.get(ref);
+              if (!latest.exists) return;
+              final Map<String, dynamic> data = latest.data() ?? <String, dynamic>{};
+              if (data['instance_token'] == expectedToken && data['status'] == 'closed') {
+                transaction.delete(ref);
+              }
+            });
+          }
+        } catch (error) {
+          debugPrint('Nettoyage de ' + candidate.id + ' reporté: $error');
+          if (error.toString().contains('resource-exhausted') ||
+              error.toString().contains('quota')) {
+            _activateQuotaLock();
+            break;
+          }
+        }
+      }
+    } catch (error) {
+      debugPrint('Balayage global des salles impossible: $error');
+      if (error.toString().contains('resource-exhausted') ||
+          error.toString().contains('quota')) {
+        _activateQuotaLock();
+      }
+    } finally {
+      _roomCleanupInProgress = false;
     }
   }
 
@@ -707,6 +815,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _localTickTimer?.cancel();
+    _roomCleanupTimer?.cancel();
     _despawnAndStopAllTimers();
     super.dispose();
   }
