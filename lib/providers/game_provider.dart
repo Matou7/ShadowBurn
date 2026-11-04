@@ -46,6 +46,31 @@ class GameProvider extends _GameBase
         _AdminLogic,
         _XpLogic {
   
+  // Compatibilité minimale pour les écrans historiques Titres / Arise.
+  // Ces membres étaient déjà appelés par l'interface mais absents de MASTER.
+  bool areTitlesActive = true;
+  String titlesCooldown = "00:00:00";
+  bool isBossKneeling = false;
+  bool showAriseEffect = false;
+  int shadowExtractionAttempts = 3;
+
+  void attemptArise([dynamic arg]) {
+    if (!isBossKneeling) return;
+    showAriseEffect = true;
+    notifyListeners();
+  }
+
+  void cancelExtraction() {
+    showAriseEffect = false;
+    isBossKneeling = false;
+    notifyListeners();
+  }
+
+  void closeLevelUpOverlay() {
+    _showLevelUpOverlay = false;
+    notifyListeners();
+  }
+
   String _persistedLicenseKey = '';
   String _awakeningDate = ''; // GRAVURE DU PREMIER ÉVEIL
 
