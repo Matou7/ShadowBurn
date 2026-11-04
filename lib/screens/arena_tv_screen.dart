@@ -44,6 +44,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
   double _currentBossHp = 5000.0;
 
   int _lastRoomActivityMs = 0;
+  int _lastPersistedActivityMs = 0;
   int _idleSecondsElapsed = 0;
   int _lastKnownHunterCount = 0;
   double _lastKnownHp = 5000.0;
@@ -54,7 +55,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
   // Keep a 30-second margin against the 60-second Firestore liveness rule.
   // This remains 33% lighter than the 20-second MASTER heartbeat.
   static const int kHeartbeatIntervalSeconds = 30;
-  static const int kRoomDeathThresholdMs = 15 * 60 * 1000;
+  static const int kRoomDeathThresholdMs = 60 * 1000;
   static const int kHunterInactiveThresholdMs = 90 * 1000;
   static const int kMaxInactivitySeconds = 60;
   static const int kMaxVictoryPodiumSeconds = 180;
@@ -179,6 +180,44 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
   void _recordActivity() {
     _lastRoomActivityMs = DateTime.now().millisecondsSinceEpoch;
     _idleSecondsElapsed = 0;
+    unawaited(_persistRoomActivity());
+  }
+
+  Future<void> _persistRoomActivity() async {
+    final DocumentReference? ref = _raidRef;
+    final String? ownerToken = _instanceToken;
+    if (ref == null || ownerToken == null || ownerToken.isEmpty) return;
+
+    final int nowMs = DateTime.now().millisecondsSinceEpoch;
+    // Évite les écritures répétées si plusieurs changements arrivent en rafale.
+    if (nowMs - _lastPersistedActivityMs < 5000) return;
+    _lastPersistedActivityMs = nowMs;
+
+    try {
+      await FirebaseFirestore.instance.runTransaction((transaction) async {
+        final snapshot = await transaction.get(ref);
+        if (!snapshot.exists) return;
+        final Map<String, dynamic> data =
+            snapshot.data() as Map<String, dynamic>? ?? {};
+        if (data['instance_token'] != ownerToken) return;
+
+        final String status = (data['status'] ?? 'waiting').toString();
+        if (status == 'closed' || status == 'abandoned' || status == 'finished') {
+          return;
+        }
+
+        transaction.update(ref, {
+          'last_activity_at': FieldValue.serverTimestamp(),
+          'updateTime': FieldValue.serverTimestamp(),
+        });
+      });
+    } catch (error) {
+      debugPrint('Enregistrement de l’activité du raid impossible: $error');
+      if (error.toString().contains('resource-exhausted') ||
+          error.toString().contains('quota')) {
+        _activateQuotaLock();
+      }
+    }
   }
 
   void _triggerInactivityDespawn() {
@@ -199,20 +238,48 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
     _raidRef = null;
     if (_isQuotaLockActive) return;
     if (ref != null && ownerToken != null && ownerToken.isNotEmpty) {
-      FirebaseFirestore.instance.runTransaction((transaction) async {
+      unawaited(_closeAndDeleteOwnedRoom(ref, ownerToken));
+    }
+  }
+
+  Future<void> _closeAndDeleteOwnedRoom(
+    DocumentReference ref,
+    String ownerToken,
+  ) async {
+    try {
+      // Première étape : fermeture explicite autorisée par les règles Firestore.
+      await FirebaseFirestore.instance.runTransaction((transaction) async {
         final snapshot = await transaction.get(ref);
         if (!snapshot.exists) return;
-        final data = snapshot.data() as Map<String, dynamic>? ?? {};
-        if (data['instance_token'] == ownerToken) {
-          transaction.update(ref, {
-            'status': 'closed',
-            'arena_last_seen': Timestamp.fromDate(DateTime.fromMillisecondsSinceEpoch(0)),
-            'updateTime': FieldValue.serverTimestamp(),
-          });
-        }
-      }).catchError((Object error) {
-        debugPrint('Fermeture conditionnelle de la salle impossible: $error');
+        final Map<String, dynamic> data =
+            snapshot.data() as Map<String, dynamic>? ?? {};
+        if (data['instance_token'] != ownerToken) return;
+
+        final Timestamp expired = Timestamp.fromDate(
+          DateTime.fromMillisecondsSinceEpoch(0),
+        );
+        transaction.update(ref, {
+          'status': 'closed',
+          'arena_last_seen': expired,
+          'last_activity_at': expired,
+          'updateTime': FieldValue.serverTimestamp(),
+        });
       });
+
+      // Deuxième étape : relecture du jeton pour ne jamais supprimer une salle
+      // qui aurait déjà été réattribuée à une autre instance entre-temps.
+      await FirebaseFirestore.instance.runTransaction((transaction) async {
+        final snapshot = await transaction.get(ref);
+        if (!snapshot.exists) return;
+        final Map<String, dynamic> data =
+            snapshot.data() as Map<String, dynamic>? ?? {};
+        if (data['instance_token'] == ownerToken &&
+            data['status'] == 'closed') {
+          transaction.delete(ref);
+        }
+      });
+    } catch (error) {
+      debugPrint('Fermeture/suppression conditionnelle de la salle impossible: $error');
     }
   }
 
@@ -347,6 +414,12 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
         final dynamic rawHunters = mapData['hunters'];
         final int hunterCount = rawHunters is Iterable ? rawHunters.length : 0;
 
+        // Les salles créées avant ce correctif reçoivent une horloge d’activité
+        // au premier passage de la nouvelle version de l’Arena.
+        if (!mapData.containsKey('last_activity_at')) {
+          _recordActivity();
+        }
+
         if (hunterCount != _lastKnownHunterCount || hp != _lastKnownHp || st != _lastKnownStatus) {
           _recordActivity();
           _lastKnownHunterCount = hunterCount;
@@ -371,9 +444,11 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
           _isRaidDataLoaded = true;
         });
       } else {
+        _arenaHeartbeatTimer?.cancel();
         setState(() {
           _raidData = {};
           _isRaidDataLoaded = true;
+          _isDespawnedForInactivity = true;
         });
       }
     }, onError: (e) {
@@ -480,6 +555,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
           'logs': [],
           'target_end_time': midnight.millisecondsSinceEpoch,
           'arena_last_seen': Timestamp.fromDate(DateTime.fromMillisecondsSinceEpoch(nowMs)),
+          'last_activity_at': FieldValue.serverTimestamp(),
           'updateTime': FieldValue.serverTimestamp(),
         });
         return <String, String>{
