@@ -8,8 +8,8 @@ mixin _PenaltyLogic on _GameBase {
     if (_sandbox && !SandboxManager.persistPenalty) return;
 
     _isInPenaltyZone = true;
-    _penaltySquatsDone = squatsDone;
     _kPenaltyGoal = squatsGoal > 0 ? squatsGoal : 100;
+    _penaltySquatsDone = squatsDone.clamp(0, _kPenaltyGoal);
     _notify();
   }
 
@@ -144,9 +144,11 @@ mixin _PenaltyLogic on _GameBase {
   }
 
   void processPenaltySquats(int count) {
-    if (!_isInPenaltyZone) return;
+    if (!_isInPenaltyZone || count <= 0) return;
 
-    _penaltySquatsDone += count;
+    // Each accepted event is capped to the normal five-repetition input.
+    final int acceptedCount = count.clamp(0, 5);
+    _penaltySquatsDone = (_penaltySquatsDone + acceptedCount).clamp(0, _kPenaltyGoal);
 
     if (_penaltySquatsDone >= _kPenaltyGoal) {
       _isInPenaltyZone = false;
