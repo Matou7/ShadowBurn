@@ -36,8 +36,16 @@ const bool kForceDungeonRed    = false;
 const bool kForcePenaltyOnBoot = false;
 const bool kForceIntroOnBoot   = false;
 
+// Temporary isolation: WORK must not open the Firebase multiplayer portal during MASTER testing.
+const bool kEnableArenaMultiplayerOnWork = false;
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  if (kIsWeb && !kEnableArenaMultiplayerOnWork) {
+    runApp(const ArenaMultiplayerDisabledApp());
+    return;
+  }
 
   if (kIsWeb) {
     try {
@@ -190,6 +198,53 @@ void main() async {
       child: const ShadowBurnApp(),
     ),
   );
+}
+
+class ArenaMultiplayerDisabledApp extends StatelessWidget {
+  const ArenaMultiplayerDisabledApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'ShadowBurn WORK — Multiplayer paused',
+      debugShowCheckedModeBanner: false,
+      theme: ThemeData(
+        brightness: Brightness.dark,
+        scaffoldBackgroundColor: const Color(0xFF02070D),
+      ),
+      home: const Scaffold(
+        body: Center(
+          child: Padding(
+            padding: EdgeInsets.all(28),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.pause_circle_outline, color: Color(0xFFFF9100), size: 64),
+                SizedBox(height: 20),
+                Text(
+                  'MULTIJOUEUR DÉSACTIVÉ SUR WORK',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: Color(0xFFFF9100),
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 1.5,
+                  ),
+                ),
+                SizedBox(height: 12),
+                Text(
+                  'Cette branche est isolée pendant les tests du multijoueur sur MASTER. '
+                  'Aucune connexion Firebase Arena ne sera ouverte depuis WORK.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Colors.white70, height: 1.5),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class ShadowBurnTvApp extends StatelessWidget {
