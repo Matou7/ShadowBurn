@@ -5,6 +5,9 @@ concurrency:
   cancel-in-progress: true
 
 on:
+  push:
+    branches:
+      - work/shadowburn-stability-2026-11-03
   pull_request:
     branches:
       - master
