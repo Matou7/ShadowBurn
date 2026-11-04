@@ -9,7 +9,7 @@ mixin _PenaltyLogic on _GameBase {
 
     _isInPenaltyZone = true;
     _kPenaltyGoal = squatsGoal > 0 ? squatsGoal : 100;
-    _penaltySquatsDone = squatsDone.clamp(0, _kPenaltyGoal);
+    _penaltySquatsDone = squatsDone.clamp(0, _kPenaltyGoal).toInt();
     _notify();
   }
 
@@ -147,8 +147,8 @@ mixin _PenaltyLogic on _GameBase {
     if (!_isInPenaltyZone || count <= 0) return;
 
     // Each accepted event is capped to the normal five-repetition input.
-    final int acceptedCount = count.clamp(0, 5);
-    _penaltySquatsDone = (_penaltySquatsDone + acceptedCount).clamp(0, _kPenaltyGoal);
+    final int acceptedCount = count.clamp(0, 5).toInt();
+    _penaltySquatsDone = (_penaltySquatsDone + acceptedCount).clamp(0, _kPenaltyGoal).toInt();
 
     if (_penaltySquatsDone >= _kPenaltyGoal) {
       _isInPenaltyZone = false;
