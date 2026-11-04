@@ -3,6 +3,7 @@
 part of '../game_provider.dart';
 
 mixin _DayLogic on _GameBase {
+  bool _midnightResetInProgress = false;
   /// Initialise le premier jour en zone blanche (immunité totale jusqu'au lendemain minuit)
   void initializeFirstDay(String dateStr) {
     _lastResetDateStr = dateStr;
@@ -27,6 +28,7 @@ mixin _DayLogic on _GameBase {
 
   @override
   void addReps(String type, int count) {
+    if (count <= 0) return;
     final t = type.toLowerCase();
 
     // 1. ISOLATION ZONE DE PÉNALITÉ : Priorité absolue, aucun XP, aucun contournement.
@@ -93,6 +95,7 @@ mixin _DayLogic on _GameBase {
 
   @override
   void incrementExercise(String type) {
+    if (_isInPenaltyZone) return;
     if (_isClassChangeStarted) {
       final t = type.toLowerCase();
       if (t.contains("pompe")) {
@@ -152,6 +155,9 @@ mixin _DayLogic on _GameBase {
 
   @override
   Future<void> checkMidnightReset() async {
+    if (_midnightResetInProgress) return;
+    _midnightResetInProgress = true;
+    try {
     final String today = _todayKey();
     
     // BLINDAGE ANTI-VOYAGE TEMPOREL
@@ -220,6 +226,7 @@ mixin _DayLogic on _GameBase {
       return;
     }
 
+    bool penaltyTriggered = _isInPenaltyZone;
     for (int i = 0; i < daysDiff; i++) {
       final DateTime evalDate = DateTime.utc(lastUtc.year, lastUtc.month, lastUtc.day + i);
       final String evaluatedDayKey =
@@ -249,7 +256,8 @@ mixin _DayLogic on _GameBase {
           'recordBroken': false,
         };
         // On ne force le lock que sur le premier jour manqué pour éviter une sur-couverture
-        if (i == 0 && !_isInPenaltyZone) {
+        if (!penaltyTriggered) {
+          penaltyTriggered = true;
           triggerDailyPenalty();
         }
       }
@@ -268,6 +276,9 @@ mixin _DayLogic on _GameBase {
     _updateCalendarActivity();
     await _saveNow();
     _notify();
+    } finally {
+      _midnightResetInProgress = false;
+    }
   }
 
   @override
@@ -368,6 +379,7 @@ mixin _DayLogic on _GameBase {
 
   @override
   void _onSteps(StepEvent e) {
+    if (_isInPenaltyZone) return;
     final int diff = e.delta;
     if (diff <= 0) return;
 
