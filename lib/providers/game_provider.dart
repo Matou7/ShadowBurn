@@ -4,7 +4,6 @@ import '../services/arena_backend_service.dart';
 import 'package:flutter/foundation.dart';
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
@@ -129,7 +128,7 @@ class GameProvider extends _GameBase
       );
       if (!valid) {
         _isPro = false;
-        _persistedLicenseKey = null;
+        _persistedLicenseKey = '';
         notifyListeners();
         return;
       }
