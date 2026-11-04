@@ -9,6 +9,8 @@ import 'package:qr_flutter/qr_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../services/multiplayer_quota_guard.dart';
 import '../services/arena_room_policy.dart';
+import '../services/arena_backend_service.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 const Color kSystemBlue = Color(0xFF00E5FF);
 const String kAppDownloadUrl = "https://shadowburn-1d8f8.web.app";
@@ -78,6 +80,7 @@ class _HunterJoinScreenState extends State<HunterJoinScreen> with WidgetsBinding
   final List _pendingLogs = [];
   Timer? _batchFlushTimer;
   bool _isFlushing = false;
+  String? _pendingBatchId;
 
   static const int kMaxHuntersPerRoom = ArenaRoomPolicy.maxPlayersPerRoom;
   // 60s batches reduce Firestore writes and listener fan-out on the free quota.
@@ -144,7 +147,8 @@ class _HunterJoinScreenState extends State<HunterJoinScreen> with WidgetsBinding
     _selectedModeId = (trainingModes.first as TrainingMode).id;
 
     final randomInt = Random().nextInt(999999);
-    _hunterSessionId = 'chasseur_${DateTime.now().millisecondsSinceEpoch}_$randomInt';
+    _hunterSessionId = FirebaseAuth.instance.currentUser?.uid ??
+        'session_${DateTime.now().millisecondsSinceEpoch}_$randomInt';
     _autoDetectDeviceName(randomInt);
     unawaited(_loadQuotaGuard());
   }
@@ -259,15 +263,13 @@ class _HunterJoinScreenState extends State<HunterJoinScreen> with WidgetsBinding
       }
 
       final Map data = doc.data() ?? {};
-      final String expectedToken = (data['join_token'] ?? '').toString().trim().toUpperCase();
-      final String receivedToken = _token.trim().toUpperCase();
+      final bool tokenIsValid = await ArenaBackendService.validateJoinToken(
+        roomId: _roomId,
+        token: _token.trim(),
+      );
 
-      // A missing token is never a valid portal credential. New Arena rooms
-      // always issue a token; fail closed for incomplete or legacy documents.
-      if (!ArenaRoomPolicy.hasValidJoinToken(
-        expectedToken: expectedToken,
-        receivedToken: receivedToken,
-      )) {
+      // The token hash is stored only in the private server collection.
+      if (!tokenIsValid) {
         if (mounted) {
           setState(() {
             _isCheckingToken = false;
@@ -421,73 +423,17 @@ class _HunterJoinScreenState extends State<HunterJoinScreen> with WidgetsBinding
     setState(() => _isLoading = true);
 
     try {
-      final now = DateTime.now().millisecondsSinceEpoch;
       final TrainingMode selectedMode = trainingModes.firstWhere(
         (m) => (m as TrainingMode).id == _selectedModeId,
       ) as TrainingMode;
 
-      final Map<String, dynamic> hunterEntry = {
-        'id': _hunterSessionId,
-        'name': name,
-        'rank': 'Rang E',
-        'mode_id': _selectedModeId,
-        'mode_label': selectedMode.label,
-        'combo_step': 0,
-        'total_damage': 0,
-        'squat_reps': 0,
-        'pushup_reps': 0,
-        'abs_reps': 0,
-        'joined_at': now,
-        'last_seen': now,
-        'is_connected': true,
-      };
-
-      await FirebaseFirestore.instance.runTransaction((transaction) async {
-        final joinNow = DateTime.now();
-        if (joinNow.hour < 6 || joinNow.hour >= 23) {
-          throw StateError('Les portails sont fermés entre 23h et 6h.');
-        }
-        final latest = await transaction.get(_raidRef!);
-        if (!latest.exists) throw StateError('Cette salle n’existe plus.');
-        final Map<String, dynamic> latestData = latest.data() as Map<String, dynamic>? ?? {};
-        final String currentToken = (latestData['join_token'] ?? '').toString().trim().toUpperCase();
-        if (currentToken.isEmpty || currentToken != _token.trim().toUpperCase()) {
-          throw StateError('Le jeton du portail a expiré. Scannez à nouveau le QR code.');
-        }
-        final String currentStatus = (latestData['status'] ?? 'waiting').toString();
-        if (currentStatus != 'waiting' && currentStatus != 'active') {
-          throw StateError('Ce donjon n’accepte plus de nouveaux chasseurs.');
-        }
-        final dynamic rawLatestHunters = latestData['hunters'];
-        final List<dynamic> latestHunters = rawLatestHunters is Iterable
-            ? List<dynamic>.from(rawLatestHunters)
-            : <dynamic>[];
-        final int existingIndex = latestHunters.indexWhere(
-          (hunter) => hunter is Map && hunter['id'] == _hunterSessionId,
-        );
-        final int connectedCount = latestHunters.where(
-          (hunter) => hunter is Map && hunter['is_connected'] != false,
-        ).length;
-        final bool existingIsConnected = existingIndex != -1 &&
-            latestHunters[existingIndex] is Map &&
-            (latestHunters[existingIndex] as Map)['is_connected'] != false;
-        if (!ArenaRoomPolicy.canAcceptPlayer(
-          connectedCount: connectedCount,
-          alreadyConnected: existingIsConnected,
-        )) {
-          throw StateError('Cette salle est complète : 10 chasseurs maximum.');
-        }
-        if (existingIndex == -1) {
-          latestHunters.add(hunterEntry);
-        } else {
-          final Map<String, dynamic> existingHunter =
-              Map<String, dynamic>.from(latestHunters[existingIndex] as Map);
-          existingHunter['is_connected'] = true;
-          existingHunter['last_seen'] = now;
-          latestHunters[existingIndex] = existingHunter;
-        }
-        transaction.update(_raidRef!, {'hunters': latestHunters});
-      });
+      await ArenaBackendService.joinRoom(
+        roomId: _roomId,
+        token: _token.trim(),
+        name: name,
+        modeId: _selectedModeId,
+        modeLabel: selectedMode.label,
+      );
 
       setState(() {
         _isJoined = true;
@@ -526,29 +472,7 @@ class _HunterJoinScreenState extends State<HunterJoinScreen> with WidgetsBinding
     try {
       if (_raidRef != null && _raidData.isNotEmpty) {
         final DocumentReference ref = _raidRef!;
-        await FirebaseFirestore.instance.runTransaction((transaction) async {
-          final latest = await transaction.get(ref);
-          if (!latest.exists) return;
-          final Map<String, dynamic> data = latest.data() as Map<String, dynamic>? ?? {};
-          final dynamic rawLatestHunters = data['hunters'];
-          final List<dynamic> latestHunters = rawLatestHunters is Iterable
-              ? List<dynamic>.from(rawLatestHunters)
-              : <dynamic>[];
-          final int index = latestHunters.indexWhere(
-            (hunter) => hunter is Map && hunter['id'] == _hunterSessionId,
-          );
-          if (index == -1) return;
-          final Map<String, dynamic> hunter =
-              Map<String, dynamic>.from(latestHunters[index] as Map);
-          if ((hunter['total_damage'] as num?)?.toInt() == 0) {
-            latestHunters.removeAt(index);
-          } else {
-            hunter['is_connected'] = false;
-            hunter['last_seen'] = DateTime.now().millisecondsSinceEpoch;
-            latestHunters[index] = hunter;
-          }
-          transaction.update(ref, {'hunters': latestHunters});
-        });
+        await ArenaBackendService.leaveRoom(roomId: ref.id);
       }
 
       if (mounted) {
@@ -747,7 +671,10 @@ class _HunterJoinScreenState extends State<HunterJoinScreen> with WidgetsBinding
     Future _flushPendingDamage() async {
     if (_isQuotaLockActive || _pendingDamage == 0 || _raidRef == null || _isFlushing) return;
     _isFlushing = true;
-    
+    _pendingBatchId ??=
+        '${_hunterSessionId}_${DateTime.now().microsecondsSinceEpoch}';
+    if (mounted) setState(() {});
+
     final int dmgToSend = _pendingDamage;
     final int sToSend = _pendingSquatReps;
     final int pToSend = _pendingPushupReps;
@@ -761,71 +688,16 @@ class _HunterJoinScreenState extends State<HunterJoinScreen> with WidgetsBinding
     _pendingLogs.clear();
 
     try {
-      await FirebaseFirestore.instance.runTransaction((transaction) async {
-        final snapshot = await transaction.get(_raidRef!);
-        if (!snapshot.exists) return;
-        
-        final data = snapshot.data() as Map<String, dynamic>;
-        final currentStatus = (data['status'] ?? 'waiting').toString();
-        
-        if (currentStatus != 'active') return;
-
-        final int currentHp = (data['current_hp'] as num?)?.toInt() ?? 5000;
-        final int nextHp = (currentHp - dmgToSend).clamp(0, 5000);
-        
-        final List logs = List.from(data['logs'] ?? []);
-        logs.insertAll(0, logsToSend);
-        if (logs.length > 30) logs.removeRange(30, logs.length);
-        
-        final List hunterList = List.from(data['hunters'] ?? []);
-        bool foundHunter = false;
-        for (int i = 0; i < hunterList.length; i++) {
-          if (hunterList[i] is Map && hunterList[i]['id'] == _hunterSessionId) {
-            final Map h = Map.from(hunterList[i]);
-            h['total_damage'] = ((h['total_damage'] as num?)?.toInt() ?? 0) + dmgToSend;
-            h['squat_reps'] = ((h['squat_reps'] as num?)?.toInt() ?? 0) + sToSend;
-            h['pushup_reps'] = ((h['pushup_reps'] as num?)?.toInt() ?? 0) + pToSend;
-            h['abs_reps'] = ((h['abs_reps'] as num?)?.toInt() ?? 0) + aToSend;
-            h['last_seen'] = DateTime.now().millisecondsSinceEpoch;
-            hunterList[i] = h;
-            foundHunter = true;
-            break;
-          }
-        }
-
-        if (!foundHunter && _confirmedHunterName.isNotEmpty) {
-          final int connectedCount = hunterList.where(
-            (hunter) => hunter is Map && hunter['is_connected'] != false,
-          ).length;
-          if (!ArenaRoomPolicy.canAcceptPlayer(
-            connectedCount: connectedCount,
-            alreadyConnected: false,
-          )) {
-            throw StateError('La salle est complète : 10 chasseurs maximum.');
-          }
-          hunterList.add({
-            'id': _hunterSessionId,
-            'name': _confirmedHunterName,
-            'rank': 'Rang E',
-            'mode_id': _selectedModeId,
-            'total_damage': dmgToSend,
-            'squat_reps': sToSend,
-            'pushup_reps': pToSend,
-            'abs_reps': aToSend,
-            'joined_at': DateTime.now().millisecondsSinceEpoch,
-            'last_seen': DateTime.now().millisecondsSinceEpoch,
-            'is_connected': true,
-          });
-        }
-        
-        transaction.update(_raidRef!, {
-          'current_hp': nextHp,
-          'logs': logs,
-          'hunters': hunterList,
-          if (nextHp <= 0) 'status': 'victory',
-          'updated_at': FieldValue.serverTimestamp(),
-        });
-      });
+      final strikes = logsToSend
+          .whereType<Map>()
+          .map((entry) => Map<String, dynamic>.from(entry))
+          .toList();
+      await ArenaBackendService.submitDamage(
+        roomId: _raidRef!.id,
+        batchId: _pendingBatchId!,
+        strikes: strikes,
+      );
+      _pendingBatchId = null;
     } catch (e) {
       // Ne perds pas les dégâts si le réseau échoue : ils restent en attente d'un nouvel envoi.
       _pendingDamage += dmgToSend;
@@ -1656,7 +1528,7 @@ class _HunterJoinScreenState extends State<HunterJoinScreen> with WidgetsBinding
     required bool isEnabled,
   }) {
     final bool isAntiCheatLocked = (_antiCheatCooldownSeconds > 0);
-    final bool canPress = isEnabled && !isAntiCheatLocked;
+    final bool canPress = isEnabled && !isAntiCheatLocked && !_isFlushing;
 
     final bool isTargetFor150 = (_comboStep == 1);
     final bool isTargetFor200 = (_comboStep == 2);

@@ -20,219 +20,74 @@ mixin _AdminLogic on _GameBase {
   }
 
 
-  /// Active une clé de licence Pro Monarque de façon sécurisée, liée à l'empreinte matérielle.
+  /// Activation Pro exclusivement validée par le serveur.
   Future<bool> activateProKey(String rawKey) async {
     final String cleanKey = rawKey.trim().toUpperCase();
-    debugPrint("[PRO_TRACE] Début activation clé : '$cleanKey'");
-
-    if (cleanKey.isEmpty) {
-      debugPrint("[PRO_TRACE] Échec : Clé vide.");
-      return false;
-    }
-
+    if (cleanKey.isEmpty) return false;
     if (cleanKey == "FREE" || cleanKey == "RESET-PRO") {
       revokePro();
-      debugPrint("[PRO_TRACE] Révocation effectuée.");
       return false;
     }
-
     try {
-      final colRef = FirebaseFirestore.instance.collection('pro_licenses');
-      DocumentReference? targetDocRef;
-      Map<String, dynamic>? data;
-
-      final directDocRef = colRef.doc(cleanKey);
-      final directSnap = await directDocRef.get(const GetOptions(source: Source.serverAndCache));
-
-      if (directSnap.exists) {
-        targetDocRef = directDocRef;
-        data = directSnap.data() as Map<String, dynamic>? ?? {};
-        debugPrint("[PRO_TRACE] Document trouvé via ID direct : ${directDocRef.id}");
-      } else {
-        debugPrint("[PRO_TRACE] ID direct introuvable, recherche de secours par champ 'key'...");
-        final querySnap = await colRef.where('key', isEqualTo: cleanKey).limit(1).get();
-        if (querySnap.docs.isNotEmpty) {
-          targetDocRef = querySnap.docs.first.reference;
-          data = querySnap.docs.first.data() as Map<String, dynamic>? ?? {};
-          debugPrint("[PRO_TRACE] Document trouvé via champ 'key' : ${targetDocRef.id}");
-        } else {
-          debugPrint("[PRO_TRACE] ERREUR : La clé [$cleanKey] est introuvable dans Firestore.");
-          return false;
-        }
-      }
-
-      final bool isAlreadyUsed = data['used'] == true;
-      final String hardwareId = await _getUniqueHardwareId();
-      final String? boundDevice = data['used_by']?.toString();
-
-      debugPrint("[PRO_TRACE] Données Firestore : used=$isAlreadyUsed, used_by=$boundDevice, Mon_HW=$hardwareId");
-
-      if (isAlreadyUsed) {
-        if (boundDevice != null && boundDevice.trim() == hardwareId.trim()) {
-          debugPrint("[PRO_TRACE] Restauration valide sur le même appareil.");
-          _isPro = true;
-          if (this is GameProvider) {
-            await (this as GameProvider).saveLicenseLocally(targetDocRef.id);
-          }
-          _notify();
-          await _forceSaveRealDisk();
-          return true;
-        } else {
-          debugPrint("[PRO_TRACE] Clé déjà liée à un autre appareil ($boundDevice).");
-          return false;
-        }
-      }
-
-      await targetDocRef.update({
-        'used': true,
-        'used_at': FieldValue.serverTimestamp(),
-        'used_by': hardwareId,
-        'user_name': _username,
-      });
-
-      debugPrint("[PRO_TRACE] Écriture Firestore réussie !");
-
+      final deviceId = await _getUniqueHardwareId();
+      final activatedKey = await ArenaBackendService.activateProLicense(
+        key: cleanKey,
+        deviceId: deviceId,
+      );
+      if (activatedKey == null || activatedKey.isEmpty) return false;
       _isPro = true;
       if (this is GameProvider) {
-        await (this as GameProvider).saveLicenseLocally(targetDocRef.id);
+        await (this as GameProvider).saveLicenseLocally(activatedKey);
       }
-
       _notify();
       await _forceSaveRealDisk();
-      debugPrint("[PRO_TRACE] Statut PRO validé et sauvegardé.");
       return true;
-    } catch (e, stack) {
-      debugPrint("[PRO_TRACE] EXCEPTION CRITIQUE FIRESTORE : $e\n$stack");
+    } catch (error, stack) {
+      debugPrint('[PRO] Activation serveur refusée : $error\\n$stack');
       return false;
     }
   }
 
-  /// Restaure une licence uniquement depuis une session Firebase authentifiée
-  /// dont l'adresse e-mail est vérifiée et correspond à la licence.
   Future<String?> restoreProLicenseByEmail(String emailInput) async {
-    final String cleanEmail = emailInput.trim().toLowerCase();
-    if (cleanEmail.isEmpty ||
-        !await AuthRecoveryService.hasVerifiedSessionForEmail(cleanEmail)) {
+    final email = emailInput.trim().toLowerCase();
+    if (email.isEmpty ||
+        !await AuthRecoveryService.hasVerifiedSessionForEmail(email)) {
       return null;
     }
-
     try {
-      final snapshot = await FirebaseFirestore.instance
-          .collection('pro_licenses')
-          .where('email', isEqualTo: cleanEmail)
-          .limit(1)
-          .get(const GetOptions(source: Source.server));
-
-      if (snapshot.docs.isEmpty) return null;
-
-      final licenseDoc = snapshot.docs.first;
-      final data = licenseDoc.data();
-      final String hardwareId = await _getUniqueHardwareId();
-      final bool alreadyUsed = data['used'] == true;
-      final String boundDevice = (data['used_by'] ?? '').toString().trim();
-
-      if (alreadyUsed && boundDevice != hardwareId.trim()) return null;
-
-      final String foundKey =
-          (data['key']?.toString().isNotEmpty == true)
-              ? data['key'].toString()
-              : licenseDoc.id;
-
-      if (!alreadyUsed) {
-        await licenseDoc.reference.update({
-          'used': true,
-          'used_at': FieldValue.serverTimestamp(),
-          'used_by': hardwareId,
-          'user_name': _username,
-        });
-      }
-
+      final deviceId = await _getUniqueHardwareId();
+      final key = await ArenaBackendService.restoreProLicense(
+        email: email,
+        deviceId: deviceId,
+      );
+      if (key == null || key.isEmpty) return null;
       _isPro = true;
-      if (this is GameProvider) {
-        await (this as GameProvider).saveLicenseLocally(foundKey);
-      }
-
+      if (this is GameProvider) await (this as GameProvider).saveLicenseLocally(key);
       _notify();
       await _forceSaveRealDisk();
-      return foundKey;
-    } catch (e) {
-      debugPrint("[RESTORE_TRACE] Restauration refusée : $e");
+      return key;
+    } catch (error) {
+      debugPrint('[PRO] Restauration serveur refusée : $error');
       return null;
     }
   }
 
-  /// Envoie le lien officiel de réinitialisation Firebase.
-  /// Ce lien ne restaure pas à lui seul une licence Pro.
   Future<bool> sendRecoveryEmail(String emailInput) async {
-    final String cleanEmail = emailInput.trim().toLowerCase();
-    if (cleanEmail.isEmpty) return false;
-
-    try {
-      return await AuthRecoveryService.sendOfficialRecoveryEmail(cleanEmail);
-    } catch (e) {
-      debugPrint("[AUTH_TRACE] Envoi du lien de récupération impossible : $e");
-      return false;
-    }
+    final email = emailInput.trim().toLowerCase();
+    if (email.isEmpty) return false;
+    return AuthRecoveryService.sendOfficialRecoveryEmail(email);
   }
 
-  /// Restaure la licence après connexion au compte Firebase vérifié.
   Future<String?> restoreProAfterVerifiedSignIn({
     required String emailInput,
   }) async {
-    final String cleanEmail = emailInput.trim().toLowerCase();
-    if (cleanEmail.isEmpty ||
-        !await AuthRecoveryService.hasVerifiedSessionForEmail(cleanEmail)) {
-      return null;
-    }
-
-    try {
-      final snapshot = await FirebaseFirestore.instance
-          .collection('pro_licenses')
-          .where('email', isEqualTo: cleanEmail)
-          .limit(1)
-          .get(const GetOptions(source: Source.server));
-
-      if (snapshot.docs.isEmpty) return null;
-
-      final docSnap = snapshot.docs.first;
-      final data = docSnap.data();
-      final String hardwareId = await _getUniqueHardwareId();
-      final bool alreadyUsed = data['used'] == true;
-      final String boundDevice = (data['used_by'] ?? '').toString().trim();
-
-      if (alreadyUsed && boundDevice != hardwareId.trim()) return null;
-
-      final String resolvedKey =
-          (data['key']?.toString().isNotEmpty == true)
-              ? data['key'].toString()
-              : docSnap.id;
-
-      if (!alreadyUsed) {
-        await docSnap.reference.update({
-          'used': true,
-          'used_at': FieldValue.serverTimestamp(),
-          'used_by': hardwareId,
-          'user_name': _username,
-        });
-      }
-
-      _isPro = true;
-      if (this is GameProvider) {
-        await (this as GameProvider).saveLicenseLocally(resolvedKey);
-      }
-
-      _notify();
-      await _forceSaveRealDisk();
-      return resolvedKey;
-    } catch (e) {
-      debugPrint("[RESTORE_TRACE] Validation du compte impossible : $e");
-      return null;
-    }
+    return restoreProLicenseByEmail(emailInput);
   }
 
   /// Dialogue modal complet avec le texte neutre "Lancer la vérification"
   Future<void> showOtpRecoveryDialog(BuildContext context) async {
     final emailController = TextEditingController();
+    final passwordController = TextEditingController();
     bool verificationLaunched = false;
     bool isLoading = false;
     String feedback = "";
@@ -271,7 +126,7 @@ mixin _AdminLogic on _GameBase {
                   children: [
                     Text(
                       verificationLaunched
-                          ? "Lien envoyé. Réinitialisez votre mot de passe, connectez-vous au compte Firebase vérifié, puis revenez ici."
+                          ? "Réinitialisez le mot de passe depuis le lien reçu, puis saisissez le nouveau mot de passe ci-dessous."
                           : "Entrez l'adresse utilisée lors de votre achat. Un lien officiel de réinitialisation Firebase sera envoyé.",
                       style: const TextStyle(color: Colors.white70, fontSize: 13),
                     ),
@@ -290,6 +145,23 @@ mixin _AdminLogic on _GameBase {
                         border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
                       ),
                     ),
+                    if (verificationLaunched) ...[
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: passwordController,
+                        obscureText: true,
+                        enabled: !isLoading,
+                        style: const TextStyle(color: Colors.white),
+                        decoration: InputDecoration(
+                          labelText: "NOUVEAU MOT DE PASSE",
+                          labelStyle: const TextStyle(color: Color(0xFF00E5FF), fontSize: 12),
+                          filled: true,
+                          fillColor: Colors.black26,
+                          prefixIcon: const Icon(Icons.lock, color: Color(0xFF00E5FF), size: 18),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                        ),
+                      ),
+                    ],
                     if (feedback.isNotEmpty) ...[
                       const SizedBox(height: 12),
                       Text(
@@ -331,15 +203,19 @@ mixin _AdminLogic on _GameBase {
                               isLoading = false;
                               if (success) {
                                 verificationLaunched = true;
-                                feedback = "Lien envoyé. Connectez-vous ensuite au compte Firebase vérifié avant de restaurer la licence.";
+                                feedback = "Lien envoyé. Réinitialisez le mot de passe, puis saisissez-le ici pour valider le compte.";
                               } else {
                                 feedback = "ERREUR : Aucun lien envoyé. Vérifiez l'adresse du compte.";
                               }
                             });
                           } else {
-                            final restoredKey = await restoreProAfterVerifiedSignIn(
-                              emailInput: emailController.text,
+                            final signedIn = await AuthRecoveryService.signInWithPassword(
+                              emailController.text,
+                              passwordController.text,
                             );
+                            final restoredKey = signedIn
+                                ? await restoreProAfterVerifiedSignIn(emailInput: emailController.text)
+                                : null;
                             setDialogState(() {
                               isLoading = false;
                               if (restoredKey != null) {
@@ -348,7 +224,9 @@ mixin _AdminLogic on _GameBase {
                                   Navigator.pop(ctx);
                                 });
                               } else {
-                                feedback = "Connexion Firebase vérifiée requise, ou licence déjà liée à un autre appareil.";
+                                feedback = signedIn
+                                    ? "Compte non vérifié ou licence liée à un autre appareil."
+                                    : "Connexion refusée. Vérifiez le mot de passe et l'adresse.";
                               }
                             });
                           }
@@ -367,6 +245,8 @@ mixin _AdminLogic on _GameBase {
         );
       },
     );
+    emailController.dispose();
+    passwordController.dispose();
   }
 
   Future<void> toggleGodModePersistPenalty() async {

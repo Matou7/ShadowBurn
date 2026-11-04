@@ -1,0 +1,36 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Public room state is readable only by an authenticated Arena client.
+    // All mutations are performed by trusted Cloud Functions (Admin SDK).
+    match /current_raids/{roomId} {
+      allow get, list: if request.auth != null;
+      allow create, update, delete: if false;
+    }
+
+    // Secrets (admin key, join token, TV instance token and per-hunter anti-cheat state).
+    match /arena_private/{roomId} {
+      allow read, write: if false;
+      match /{document=**} {
+        allow read, write: if false;
+      }
+    }
+
+    // Legacy collections are closed; no client-side access is permitted.
+    match /current_raid/{roomId} {
+      allow read, write: if false;
+    }
+    match /arena_tv/{roomId} {
+      allow read, write: if false;
+    }
+
+    // License keys and device bindings are never readable or writable by clients.
+    match /pro_licenses/{licenseKey} {
+      allow read, write: if false;
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

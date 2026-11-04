@@ -1,37 +1,44 @@
 // lib/services/auth_recovery_service.dart
 
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 
 class AuthRecoveryService {
   static final FirebaseAuth _auth = FirebaseAuth.instance;
-  static final FirebaseFirestore _db = FirebaseFirestore.instance;
 
-  /// Vérifie l'existence de la licence Pro puis envoie l'e-mail officiel Google
+  /// Sends the official Firebase password reset email.
   static Future<bool> sendOfficialRecoveryEmail(String email) async {
     final cleanEmail = email.trim().toLowerCase();
-
+    if (cleanEmail.isEmpty) return false;
     try {
-      final query = await _db
-          .collection('pro_licenses')
-          .where('email', isEqualTo: cleanEmail)
-          .limit(1)
-          .get();
-
-      if (query.docs.isEmpty) {
-        debugPrint("[AUTH_WARN] Aucune licence trouvée pour $cleanEmail");
-        return false;
-      }
-
       await _auth.sendPasswordResetEmail(email: cleanEmail);
-      debugPrint("[AUTH_OK] E-mail officiel expédié à $cleanEmail");
       return true;
-    } on FirebaseAuthException catch (e) {
-      debugPrint("[AUTH_ERROR] Code: ${e.code} | Message: ${e.message}");
+    } on FirebaseAuthException catch (error) {
+      debugPrint("[AUTH_ERROR] ${error.code} | ${error.message}");
       return false;
-    } catch (e) {
-      debugPrint("[AUTH_ERROR] Exception: $e");
+    } catch (error) {
+      debugPrint("[AUTH_ERROR] $error");
+      return false;
+    }
+  }
+
+  /// Signs into the existing email/password account after the user resets or
+  /// confirms their password. A verified email is still required for restore.
+  static Future<bool> signInWithPassword(String email, String password) async {
+    final cleanEmail = email.trim().toLowerCase();
+    if (cleanEmail.isEmpty || password.isEmpty) return false;
+    try {
+      final credential = await _auth.signInWithEmailAndPassword(
+        email: cleanEmail,
+        password: password,
+      );
+      await credential.user?.reload();
+      return _auth.currentUser?.emailVerified == true;
+    } on FirebaseAuthException catch (error) {
+      debugPrint("[AUTH_ERROR] ${error.code} | ${error.message}");
+      return false;
+    } catch (error) {
+      debugPrint("[AUTH_ERROR] $error");
       return false;
     }
   }

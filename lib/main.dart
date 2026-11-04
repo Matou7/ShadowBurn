@@ -26,6 +26,7 @@ import 'screens/intro_awakening_screen.dart';
 import 'screens/arena_tv_screen.dart';
 import 'screens/hunter_join_screen.dart';
 import 'screens/admin_screen.dart';
+import 'screens/raid_admin_panel_screen.dart';
 
 import 'widgets/urgent_quest_overlay.dart';
 import 'widgets/penalty_overlay.dart';
@@ -305,56 +306,80 @@ class ShadowBurnApp extends StatefulWidget {
   State<ShadowBurnApp> createState() => _ShadowBurnAppState();
 }
 
-class _ShadowBurnAppState extends State<ShadowBurnApp> {
-  static const MethodChannel _intentChannel = MethodChannel('com.shadowburn.app/intents');
+class _ShadowBurnAppState extends State<ShadowBurnApp>
+    with WidgetsBindingObserver {
+  static const MethodChannel _intentChannel = MethodChannel('com.shadowburn.app/lock');
+  final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
 
   @override
   void initState() {
     super.initState();
-    _handleIncomingIntent();
+    WidgetsBinding.instance.addObserver(this);
+    _consumeIncomingIntent();
+    _listenForNewIntents();
   }
 
-  Future<void> _handleIncomingIntent() async {
+  Future<void> _consumeIncomingIntent() async {
     try {
-      final String? initialLink = await _intentChannel.invokeMethod<String>('getInitialLink');
-      if (initialLink != null && initialLink.isNotEmpty) {
-        _routeDeepLink(initialLink);
-      }
-    } catch (_) {}
+      final String? link =
+          await _intentChannel.invokeMethod<String>('getInitialIntentUrl');
+      if (link != null && link.isNotEmpty) _routeDeepLink(link);
+    } catch (error) {
+      debugPrint('[DEEPLINK] Lecture du lien impossible : $error');
+    }
+  }
 
+  void _listenForNewIntents() {
     _intentChannel.setMethodCallHandler((call) async {
-      if (call.method == 'onNewIntent') {
-        final String? link = call.arguments as String?;
-        if (link != null && link.isNotEmpty) {
-          _routeDeepLink(link);
-        }
+      if (call.method == 'onNewIntent' && call.arguments is String) {
+        _routeDeepLink(call.arguments as String);
       }
     });
   }
 
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _consumeIncomingIntent();
+  }
+
   void _routeDeepLink(String link) {
     final uri = Uri.tryParse(link);
-    if (uri == null) return;
+    if (uri == null || (uri.host != 'admin' && !uri.path.contains('admin'))) return;
 
-    if (uri.host == 'admin' || uri.path.contains('admin')) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) return;
-        final game = Provider.of<GameProvider>(context, listen: false);
-        if (!game.isPro) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text("ACCÈS TÉLÉCOMMANDE REFUSÉ : STATUT MONARQUE REQUIS"),
-              backgroundColor: Colors.redAccent,
-            ),
-          );
-        }
-      });
-    }
+    final roomId = uri.queryParameters['room']?.trim() ?? '';
+    final adminKey = uri.queryParameters['key']?.trim() ?? '';
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (roomId.isEmpty || adminKey.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('LIEN MONARQUE INCOMPLET OU INVALIDE'),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+        return;
+      }
+      _navigatorKey.currentState?.push(
+        MaterialPageRoute(
+          builder: (_) => RaidAdminPanelScreen(
+            roomId: roomId,
+            adminKey: adminKey,
+          ),
+        ),
+      );
+    });
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      navigatorKey: _navigatorKey,
       title: 'ShadowBurn',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(

@@ -176,7 +176,8 @@ mixin _SaveLogic on _GameBase {
     _inventoryKeys = {"E": 0, "D": 0, "C": 0, "B": 0, "A": 0, "S": 0, "NATION": 0};
     asMap(j['keys']).forEach((k, v) => _inventoryKeys[k] = max(0, asInt(v)));
 
-    _isPro = asBool(j['isPro']);
+    // Pro is a server-validated entitlement; imported/local saves cannot grant it.
+    _isPro = false;
 
     _unlockedTitles = asList(j['unlockedTitles']).whereType<String>().toList();
     if (!_unlockedTitles.contains(Titles.defaultTitle)) {

@@ -82,8 +82,11 @@ class MainActivity: FlutterActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        intent.dataString?.let {
-            lastIntentUrl = it
+        intent.dataString?.let { url ->
+            lastIntentUrl = url
+            flutterEngine?.dartExecutor?.binaryMessenger?.let { messenger ->
+                MethodChannel(messenger, PRIMARY_CHANNEL).invokeMethod("onNewIntent", url)
+            }
         }
     }
 

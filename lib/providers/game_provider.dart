@@ -1,5 +1,6 @@
 // lib/providers/game_provider.dart
 import '../services/auth_recovery_service.dart';
+import '../services/arena_backend_service.dart';
 import 'package:flutter/foundation.dart';
 import 'dart:async';
 import 'dart:convert';
@@ -10,7 +11,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:vibration/vibration.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/balance.dart';
@@ -91,9 +91,13 @@ class GameProvider extends _GameBase
 
   GameProvider() {
     WidgetsBinding.instance.addObserver(this);
-    _restoreCachedLicense();
     _initAwakeningDate();
-    initializeGame();
+    unawaited(_initializeGameAndLicense());
+  }
+
+  Future<void> _initializeGameAndLicense() async {
+    await initializeGame();
+    await _restoreCachedLicense();
   }
 
   /// Initialise et grave définitivement la date du premier éveil sur le Hardware
@@ -116,13 +120,28 @@ class GameProvider extends _GameBase
   Future<void> _restoreCachedLicense() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final saved = prefs.getString('shadow_user_license_key');
-      if (saved != null && saved.trim().isNotEmpty) {
-        _persistedLicenseKey = saved.trim();
-        _isPro = true; // Rétablit le flag Pro immédiatement dès le lancement
+      final saved = prefs.getString('shadow_user_license_key')?.trim();
+      if (saved == null || saved.isEmpty) return;
+      final deviceId = await _getUniqueHardwareId();
+      final valid = await ArenaBackendService.validateProLicense(
+        key: saved,
+        deviceId: deviceId,
+      );
+      if (!valid) {
+        _isPro = false;
+        _persistedLicenseKey = null;
         notifyListeners();
+        return;
       }
-    } catch (_) {}
+      _persistedLicenseKey = saved;
+      _isPro = true;
+      notifyListeners();
+    } catch (error) {
+      // A cached key never grants Pro while the server cannot validate it.
+      _isPro = false;
+      notifyListeners();
+      debugPrint('[PRO] Validation distante indisponible : $error');
+    }
   }
 
   Future<void> saveLicenseLocally(String key) async {
