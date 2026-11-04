@@ -1,14 +1,10 @@
 name: ShadowBurn Quality Checks — Static Analysis, Tests, Web and APK
 
 concurrency:
-  group: shadowburn-quality-${{ github.head_ref || github.ref_name }}
+  group: shadowburn-quality-${{ github.run_id }}
   cancel-in-progress: true
 
 on:
-  push:
-    branches:
-      - master
-      - integration/multiplayer-master-2026-11-04
   pull_request:
     branches:
       - master
