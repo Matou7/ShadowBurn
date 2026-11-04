@@ -264,7 +264,10 @@ class _HunterJoinScreenState extends State<HunterJoinScreen> with WidgetsBinding
 
       // A missing token is never a valid portal credential. New Arena rooms
       // always issue a token; fail closed for incomplete or legacy documents.
-      if (expectedToken.isEmpty || receivedToken.isEmpty || receivedToken != expectedToken) {
+      if (!ArenaRoomPolicy.hasValidJoinToken(
+        expectedToken: expectedToken,
+        receivedToken: receivedToken,
+      )) {
         if (mounted) {
           setState(() {
             _isCheckingToken = false;
