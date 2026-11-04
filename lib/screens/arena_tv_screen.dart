@@ -51,8 +51,9 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
 
   static const int kMaxGlobalRooms = ArenaRoomPolicy.maxGlobalRooms;
   static const int kMaxHuntersPerRoom = ArenaRoomPolicy.maxPlayersPerRoom;
-  // Deployed Firestore rules require arena_last_seen to refresh inside 60 seconds.
-  static const int kHeartbeatIntervalSeconds = 45;
+  // Keep a 30-second margin against the 60-second Firestore liveness rule.
+  // This remains 33% lighter than the 20-second MASTER heartbeat.
+  static const int kHeartbeatIntervalSeconds = 30;
   static const int kRoomDeathThresholdMs = 15 * 60 * 1000;
   static const int kHunterInactiveThresholdMs = 90 * 1000;
   static const int kMaxInactivitySeconds = 60;
@@ -534,25 +535,11 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
         if (claim != null) return claim;
         if (_isQuotaLockActive) return null;
 
-        // A concurrent TV may have claimed this slot after the query.
-        // Refresh only on this rare race instead of rescanning on every attempt.
-        final refreshed = await firestore
-            .collection('current_raids')
-            .where(
-              'arena_last_seen',
-              isGreaterThan: Timestamp.fromDate(
-                DateTime.fromMillisecondsSinceEpoch(
-                  DateTime.now().millisecondsSinceEpoch - kRoomDeathThresholdMs,
-                ),
-              ),
-            )
-            .get();
-        final bool nowOccupied = refreshed.docs.any((doc) => doc.id == roomId);
-        if (nowOccupied) {
-          occupiedNumbers.add(candidate);
-          continue;
-        }
-        return null;
+        // A null claim means this candidate is already alive or another TV
+        // claimed it between the query and the transaction. Do not stop the
+        // entire allocation here: legacy rooms may store arena_last_seen as an
+        // integer and are therefore absent from the Timestamp query above.
+        // Continue to the next candidate; the transaction remains authoritative.
       }
       return null;
     } catch (error) {
