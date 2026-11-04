@@ -13,7 +13,7 @@ mixin _PenaltyLogic on _GameBase {
     _notify();
   }
 
-  void triggerDailyPenalty() {
+  Future<void> triggerDailyPenalty() async {
     // SÉCURITÉ ZONE BLANCHE : aucune pénalité ne peut être levée le jour de l'installation
     final String today = _todayKey();
     if (_calendarHistory[today]?['status'] == 'white_zone') {
@@ -24,7 +24,7 @@ mixin _PenaltyLogic on _GameBase {
       _isInPenaltyZone = true;
       _penaltySquatsDone = 0;
       _kPenaltyGoal = 100;
-      LockService.lockScreen();
+      await LockService.lockScreen();
       _notify();
       return;
     }
@@ -37,12 +37,12 @@ mixin _PenaltyLogic on _GameBase {
       _kPenaltyGoal += 100;
     }
 
-    _applyPenaltyLockAndPersist();
+    await _applyPenaltyLockAndPersist();
   }
 
-  void triggerPenaltyState(String reason) {
+  Future<void> triggerPenaltyState(String reason) async {
     dlog("Pénalité déclenchée : $reason");
-    triggerDailyPenalty();
+    await triggerDailyPenalty();
   }
 
   void sandboxTriggerDailyPenalty() {
@@ -74,7 +74,7 @@ mixin _PenaltyLogic on _GameBase {
     _notify();
   }
 
-  void triggerDungeonBreakPenalty() {
+  Future<void> triggerDungeonBreakPenalty() async {
     _isInPenaltyZone = true;
     _penaltySquatsDone = 0;
     _kPenaltyGoal = 150;
@@ -85,21 +85,21 @@ mixin _PenaltyLogic on _GameBase {
         squatsDone: 0,
         squatsGoal: 100,
       );
-      LockService.lockScreen();
+      await LockService.lockScreen();
       _notify();
       return;
     }
 
-    _applyPenaltyLockAndPersist();
+    await _applyPenaltyLockAndPersist();
   }
 
-  void _applyPenaltyLockAndPersist() {
+  Future<void> _applyPenaltyLockAndPersist() async {
     if (_sandbox && !SandboxManager.persistPenalty) {
-      unawaited(LockService.lockScreen());
+      await LockService.lockScreen();
       _notify();
       return;
     }
-    unawaited(_persistPenaltyActivation());
+    await _persistPenaltyActivation();
   }
 
   Future<void> _persistPenaltyActivation() async {
