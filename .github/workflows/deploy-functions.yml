@@ -1,0 +1,26 @@
+name: Deploy ShadowBurn Arena Cleanup
+
+on:
+  workflow_dispatch:
+
+jobs:
+  deploy-arena-cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Validate cleanup function syntax
+        run: node --check functions/index.js
+
+      - name: Deploy scheduled cleanup function
+        uses: w9jds/firebase-action@master
+        with:
+          args: deploy --only functions:cleanupInactiveArenaRooms --project shadowburn-1d8f8
+        env:
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
