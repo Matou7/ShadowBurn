@@ -179,7 +179,7 @@ class RaidAdminService {
   static Future resetToMidnight({required String roomId}) async {
     try {
       final now = DateTime.now();
-      final midnight = DateTime(now.year, now.month, now.day, 23, 59, 59);
+      final midnight = DateTime(now.year, now.month, now.day, 23, 0, 0);
       final docRef = _firestore.collection('current_raids').doc(roomId);
 
       await docRef.update({

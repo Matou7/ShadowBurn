@@ -5,6 +5,8 @@ import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../services/multiplayer_quota_guard.dart';
+import '../services/arena_room_policy.dart';
 
 class ArenaTvScreen extends StatefulWidget {
   const ArenaTvScreen({super.key});
@@ -33,6 +35,8 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
   bool _isAllocating = true;
   bool _isWorldSaturated = false;
   bool _isNightLockActive = false;
+  bool _isQuotaLockActive = false;
+  bool _quotaGuardLoaded = false;
   bool _isDespawnedForInactivity = false;
   bool _allocationInProgress = false;
 
@@ -45,29 +49,76 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
   double _lastKnownHp = 5000.0;
   String _lastKnownStatus = 'waiting';
 
-  static const int kMaxGlobalRooms = 100;
-  static const int kMaxHuntersPerRoom = 10;
-  static const int kHeartbeatIntervalSeconds = 20;
-  static const int kRoomDeathThresholdMs = 60000;
+  static const int kMaxGlobalRooms = ArenaRoomPolicy.maxGlobalRooms;
+  static const int kMaxHuntersPerRoom = ArenaRoomPolicy.maxPlayersPerRoom;
+  // Keep a 30-second margin against the 60-second Firestore liveness rule.
+  // This remains 33% lighter than the 20-second MASTER heartbeat.
+  static const int kHeartbeatIntervalSeconds = 30;
+  static const int kRoomDeathThresholdMs = 15 * 60 * 1000;
+  static const int kHunterInactiveThresholdMs = 90 * 1000;
   static const int kMaxInactivitySeconds = 60;
+  static const int kMaxVictoryPodiumSeconds = 180;
+
+  int get _currentInactivityLimitSeconds =>
+      _currentRaidStatus == 'victory' ? kMaxVictoryPodiumSeconds : kMaxInactivitySeconds;
+
+  static int _readArenaLastSeenMs(dynamic value) {
+    if (value is Timestamp) return value.millisecondsSinceEpoch;
+    if (value is DateTime) return value.millisecondsSinceEpoch;
+    // Read legacy numeric records so they can be reclaimed and rewritten as Timestamp.
+    if (value is num) return value.toInt();
+    return 0;
+  }
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _lastRoomActivityMs = DateTime.now().millisecondsSinceEpoch;
+    unawaited(_loadQuotaGuard());
 
     _localTickTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (!mounted) return;
+      if (!mounted || _isQuotaLockActive) return;
 
       final now = DateTime.now();
-      bool isNightClosed = now.hour >= 0 && now.hour < 6;
+      bool isNightClosed = now.hour < 6 || now.hour >= 23;
       if (isNightClosed != _isNightLockActive) {
-        setState(() {
-          _isNightLockActive = isNightClosed;
-        });
-        if (isNightClosed) {
+        // Une victoire conserve son podium pendant les 3 minutes prévues,
+        // même si l'horaire de fermeture de l'Arena vient d'être atteint.
+        final bool preserveVictoryPodium =
+            isNightClosed && _currentRaidStatus == 'victory' && !_isDespawnedForInactivity;
+        if (!preserveVictoryPodium && isNightClosed) {
+          setState(() {
+            _isNightLockActive = true;
+          });
           _despawnAndStopAllTimers();
+          return;
+        }
+
+        if (!isNightClosed) {
+          // À 6h, réinitialise l'état de la veille et alloue une nouvelle salle.
+          setState(() {
+            _isNightLockActive = false;
+            _roomId = null;
+            _raidRef = null;
+            _instanceToken = null;
+            _adminKey = null;
+            _joinToken = null;
+            _raidData = {};
+            _isRaidDataLoaded = false;
+            _isWorldSaturated = false;
+            _isAllocating = true;
+            _isDespawnedForInactivity = false;
+            _currentRaidStatus = 'waiting';
+            _currentBossHp = 5000.0;
+            _targetEndTimeMs = 0;
+            _remainingSeconds = 0;
+          });
+          _allocationInProgress = true;
+          _resolveRoomAllocation().whenComplete(() {
+            _allocationInProgress = false;
+            if (mounted) setState(() {});
+          });
           return;
         }
       }
@@ -76,8 +127,8 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
         final int nowMs = now.millisecondsSinceEpoch;
         _idleSecondsElapsed = ((nowMs - _lastRoomActivityMs) ~/ 1000).clamp(0, 9999);
 
-        if (_idleSecondsElapsed >= kMaxInactivitySeconds &&
-            (_currentRaidStatus == 'waiting' || _currentRaidStatus == 'active')) {
+        if (_idleSecondsElapsed >= _currentInactivityLimitSeconds &&
+            (_currentRaidStatus == 'waiting' || _currentRaidStatus == 'active' || _currentRaidStatus == 'victory')) {
           _triggerInactivityDespawn();
           return;
         }
@@ -97,6 +148,32 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
         }
       }
     });
+  }
+
+  Future<void> _loadQuotaGuard() async {
+    final bool paused = await MultiplayerQuotaGuard.isPaused();
+    if (!mounted) return;
+    setState(() {
+      _isQuotaLockActive = paused;
+      _quotaGuardLoaded = true;
+    });
+    if (!paused && !_isNightLockActive && _roomId == null && !_allocationInProgress) {
+      _allocationInProgress = true;
+      _resolveRoomAllocation().whenComplete(() {
+        _allocationInProgress = false;
+        if (mounted) setState(() {});
+      });
+    }
+  }
+
+  void _activateQuotaLock() {
+    _isQuotaLockActive = true;
+    unawaited(MultiplayerQuotaGuard.pauseUntilSafeRetry());
+    _localTickTimer?.cancel();
+    _arenaHeartbeatTimer?.cancel();
+    _queueRetryTimer?.cancel();
+    _raidSubscription?.cancel();
+    if (mounted) setState(() {});
   }
 
   void _recordActivity() {
@@ -120,6 +197,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
     final DocumentReference? ref = _raidRef;
     final String? ownerToken = _instanceToken;
     _raidRef = null;
+    if (_isQuotaLockActive) return;
     if (ref != null && ownerToken != null && ownerToken.isNotEmpty) {
       FirebaseFirestore.instance.runTransaction((transaction) async {
         final snapshot = await transaction.get(ref);
@@ -128,7 +206,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
         if (data['instance_token'] == ownerToken) {
           transaction.update(ref, {
             'status': 'closed',
-            'arena_last_seen': 0,
+            'arena_last_seen': Timestamp.fromDate(DateTime.fromMillisecondsSinceEpoch(0)),
             'updateTime': FieldValue.serverTimestamp(),
           });
         }
@@ -158,14 +236,15 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
   void didChangeDependencies() {
     super.didChangeDependencies();
     final now = DateTime.now();
-    if (now.hour >= 0 && now.hour < 6) {
+    if (now.hour < 6 || now.hour >= 23) {
       setState(() {
         _isNightLockActive = true;
         _isAllocating = false;
       });
       return;
     }
-    if (_roomId == null && !_isWorldSaturated && !_isNightLockActive && !_isDespawnedForInactivity && !_allocationInProgress) {
+    if (!_quotaGuardLoaded) return;
+    if (_roomId == null && !_isWorldSaturated && !_isNightLockActive && !_isQuotaLockActive && !_isDespawnedForInactivity && !_allocationInProgress) {
       _allocationInProgress = true;
       _resolveRoomAllocation().whenComplete(() {
         _allocationInProgress = false;
@@ -184,7 +263,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
 
   Future _resolveRoomAllocation() async {
     final now = DateTime.now();
-    if (now.hour >= 0 && now.hour < 6) {
+    if (now.hour < 6 || now.hour >= 23) {
       if (mounted) {
         setState(() {
           _isAllocating = false;
@@ -196,142 +275,61 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
 
     _recordActivity();
 
-    final fullUrl = Uri.decodeFull(Uri.base.toString());
-    String? explicitRoom;
-
-    final roomRegex = RegExp(r'[?&]room=([a-zA-Z0-9_]+)');
-    final match = roomRegex.firstMatch(fullUrl);
-    if (match != null) {
-      explicitRoom = match.group(1);
-    }
+    final String? explicitRoom = Uri.base.queryParameters['room'];
 
     final String myInstanceToken = 'inst_${_generateRandomToken(12)}';
-    String? chosenRoom;
+    Map<String, String>? allocation;
+    if (_isQuotaLockActive) return;
 
-    if (explicitRoom != null && explicitRoom.trim().isNotEmpty) {
-      chosenRoom = await _claimSpecificRoomSlot(explicitRoom.trim(), myInstanceToken);
+    final bool explicitRoomIsAllowed =
+        ArenaRoomPolicy.parseRoomNumber(explicitRoom) != null;
+    if (explicitRoomIsAllowed) {
+      allocation = await _claimSpecificRoomSlot(explicitRoom!.trim(), myInstanceToken);
     } else {
-      chosenRoom = await _claimNextAvailableRoomSlot(myInstanceToken);
+      allocation = await _claimNextAvailableRoomSlot(myInstanceToken);
     }
 
-    if (!mounted) return;
+    if (!mounted || _isQuotaLockActive) return;
 
-    if (chosenRoom == null) {
+    if (allocation == null) {
       setState(() {
         _isAllocating = false;
         _isWorldSaturated = true;
       });
-
       _queueRetryTimer?.cancel();
-      _queueRetryTimer = Timer(const Duration(seconds: 10), () {
-        if (mounted) {
-          setState(() {
-            _isAllocating = true;
-            _isWorldSaturated = false;
-          });
-          _allocationInProgress = false;
-          _resolveRoomAllocation();
-        }
+      _queueRetryTimer = Timer(const Duration(minutes: 10), () {
+        if (!mounted || _isQuotaLockActive) return;
+        setState(() {
+          _isAllocating = true;
+          _isWorldSaturated = false;
+        });
+        _allocationInProgress = false;
+        _resolveRoomAllocation();
       });
       return;
     }
 
     _queueRetryTimer?.cancel();
+    final String chosenRoom = allocation['roomId']!;
+    final String keyToUse = allocation['adminKey']!;
+    final String tokenToUse = allocation['joinToken']!;
+    final DocumentReference<Map<String, dynamic>> ref =
+        FirebaseFirestore.instance.collection('current_raids').doc(chosenRoom);
 
-    final ref = FirebaseFirestore.instance.collection('current_raids').doc(chosenRoom);
-    final midnight = DateTime(now.year, now.month, now.day, 23, 59, 59);
-
-    try {
-      final existingDoc = await ref.get();
-      String keyToUse = _generateRandomToken(6);
-      String tokenToUse = _generateRandomToken(8);
-
-      if (!existingDoc.exists) {
-        final Map<String, dynamic> roomData = {
-          'roomId': chosenRoom,
-          'boss_name': 'MONARQUE DU FEU',
-          'instance_token': myInstanceToken,
-          'join_token': tokenToUse,
-          'admin_key': keyToUse,
-          'status': 'waiting',
-          'preset_label': 'RAID STANDARD (5 000 PV)',
-          'current_hp': 5000,
-          'max_hp': 5000,
-          'hunters': [],
-          'logs': [],
-          'target_end_time': midnight.millisecondsSinceEpoch,
-          'arena_last_seen': DateTime.now().millisecondsSinceEpoch,
-          'updateTime': FieldValue.serverTimestamp(),
-        };
-        await ref.set(roomData);
-      } else {
-        final Map data = existingDoc.data() ?? {};
-        final int lastSeen = (data['arena_last_seen'] as num?)?.toInt() ?? 0;
-        final bool isStale = lastSeen == 0 || (now.millisecondsSinceEpoch - lastSeen > kRoomDeathThresholdMs);
-
-        if (!isStale) {
-          final String existingKey = (data['admin_key'] ?? '').toString().trim();
-          final String existingToken = (data['join_token'] ?? '').toString().trim();
-          if (existingKey.isNotEmpty) keyToUse = existingKey;
-          if (existingToken.isNotEmpty) tokenToUse = existingToken;
-        }
-
-        final Map<String, dynamic> updateData = {
-          'roomId': chosenRoom,
-          'boss_name': 'MONARQUE DU FEU',
-          'instance_token': myInstanceToken,
-          'join_token': tokenToUse,
-          'admin_key': keyToUse,
-          'status': isStale ? 'waiting' : (data['status'] ?? 'waiting'),
-          'preset_label': 'RAID STANDARD (5 000 PV)',
-          'current_hp': isStale ? 5000 : (data['current_hp'] ?? 5000),
-          'max_hp': 5000,
-          'hunters': isStale ? [] : (data['hunters'] ?? []),
-          'logs': isStale ? [] : (data['logs'] ?? []),
-          'target_end_time': isStale ? midnight.millisecondsSinceEpoch : (data['target_end_time'] ?? midnight.millisecondsSinceEpoch),
-          'arena_last_seen': DateTime.now().millisecondsSinceEpoch,
-          'updateTime': FieldValue.serverTimestamp(),
-        };
-
-        await ref.set(updateData, SetOptions(merge: true));
-      }
-
-      if (!mounted) return;
-
-      _recordActivity();
-
-      setState(() {
-        _roomId = chosenRoom;
-        _instanceToken = myInstanceToken;
-        _adminKey = keyToUse;
-        _joinToken = tokenToUse;
-        _raidRef = ref;
-        _isAllocating = false;
-        _isWorldSaturated = false;
-        _isDespawnedForInactivity = false;
-      });
-
-      _startArenaHeartbeat();
-      _startListeningToRaid();
-    } catch (e) {
-      if (!mounted) return;
-      if (e.toString().contains('resource-exhausted') || e.toString().contains('quota')) {
-        setState(() {
-          _isAllocating = false;
-          _isNightLockActive = true;
-        });
-      } else {
-        _queueRetryTimer?.cancel();
-        _queueRetryTimer = Timer(const Duration(seconds: 5), () {
-          if (mounted) {
-            _allocationInProgress = false;
-            _resolveRoomAllocation();
-          }
-        });
-      }
-    }
+    _recordActivity();
+    setState(() {
+      _roomId = chosenRoom;
+      _instanceToken = myInstanceToken;
+      _adminKey = keyToUse;
+      _joinToken = tokenToUse;
+      _raidRef = ref;
+      _isAllocating = false;
+      _isWorldSaturated = false;
+      _isDespawnedForInactivity = false;
+    });
+    _startArenaHeartbeat();
+    _startListeningToRaid();
   }
-
   void _startListeningToRaid() {
     _raidSubscription?.cancel();
     if (_raidRef == null) return;
@@ -342,6 +340,10 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
         final Map mapData = Map.from(doc.data() as Map? ?? {});
         final double hp = ((mapData['current_hp'] ?? 5000) as num).toDouble();
         final String st = (mapData['status'] ?? 'waiting').toString();
+        // Synchronise immédiatement l'état terminal pour protéger le podium
+        // si l'horloge atteint 23h avant le prochain rebuild visuel.
+        _currentRaidStatus = st;
+        _currentBossHp = hp;
         final dynamic rawHunters = mapData['hunters'];
         final int hunterCount = rawHunters is Iterable ? rawHunters.length : 0;
 
@@ -375,10 +377,8 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
         });
       }
     }, onError: (e) {
-      if (e.toString().contains('resource-exhausted') && mounted) {
-        setState(() {
-          _isNightLockActive = true;
-        });
+      if (e.toString().contains('resource-exhausted') || e.toString().contains('quota')) {
+        _activateQuotaLock();
       }
     });
   }
@@ -391,6 +391,17 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
     if (rawHunters is! Iterable || rawHunters.isEmpty) return;
 
     final int now = DateTime.now().millisecondsSinceEpoch;
+    // Ne déclenche aucune lecture transactionnelle tant qu'aucun chasseur
+    // ne semble réellement inactif : réduit fortement les lectures Firestore.
+    final bool hasExpiredHunter = rawHunters.any((hunter) {
+      if (hunter is! Map || hunter['is_connected'] == false || !hunter.containsKey('last_seen')) {
+        return false;
+      }
+      final int lastSeen = (hunter['last_seen'] as num?)?.toInt() ?? now;
+      return now - lastSeen > kHunterInactiveThresholdMs;
+    });
+    if (!hasExpiredHunter) return;
+
     FirebaseFirestore.instance.runTransaction((transaction) async {
       final snapshot = await transaction.get(ref);
       if (!snapshot.exists) return;
@@ -398,14 +409,32 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
       final dynamic latestRawHunters = latest['hunters'];
       if (latestRawHunters is! Iterable || latestRawHunters.isEmpty) return;
 
-      final List<dynamic> filtered = latestRawHunters.where((hunter) {
-        if (hunter is! Map || !hunter.containsKey('last_seen')) return true;
+      final List<dynamic> filtered = [];
+      bool changed = false;
+      for (final hunter in latestRawHunters) {
+        if (hunter is! Map || !hunter.containsKey('last_seen')) {
+          filtered.add(hunter);
+          continue;
+        }
         final int lastSeen = (hunter['last_seen'] as num?)?.toInt() ?? now;
-        final int totalDamage = (hunter['total_damage'] as num?)?.toInt() ?? 0;
-        return !(now - lastSeen > kRoomDeathThresholdMs && totalDamage == 0);
-      }).toList();
+        if (now - lastSeen <= kHunterInactiveThresholdMs || hunter['is_connected'] == false) {
+          filtered.add(hunter);
+          continue;
+        }
 
-      if (filtered.length != latestRawHunters.length) {
+        final int totalDamage = (hunter['total_damage'] as num?)?.toInt() ?? 0;
+        if (totalDamage == 0) {
+          changed = true;
+          continue;
+        }
+
+        final Map<String, dynamic> inactiveHunter = Map<String, dynamic>.from(hunter);
+        inactiveHunter['is_connected'] = false;
+        filtered.add(inactiveHunter);
+        changed = true;
+      }
+
+      if (changed) {
         transaction.update(ref, {
           'hunters': filtered,
           'updateTime': FieldValue.serverTimestamp(),
@@ -413,25 +442,29 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
       }
     }).catchError((Object error) {
       debugPrint('Nettoyage transactionnel des chasseurs impossible: $error');
+      if (error.toString().contains('resource-exhausted') || error.toString().contains('quota')) {
+        _activateQuotaLock();
+      }
     });
   }
 
-  Future<String?> _claimSpecificRoomSlot(String roomId, String instanceToken) async {
+  Future<Map<String, String>?> _claimSpecificRoomSlot(String roomId, String instanceToken) async {
+    if (ArenaRoomPolicy.parseRoomNumber(roomId) == null) return null;
     final DocumentReference<Map<String, dynamic>> ref =
         FirebaseFirestore.instance.collection('current_raids').doc(roomId);
     final DateTime now = DateTime.now();
-    final DateTime midnight = DateTime(now.year, now.month, now.day, 23, 59, 59);
+    final DateTime midnight = DateTime(now.year, now.month, now.day, 23, 0, 0);
     final String newKey = _generateRandomToken(6);
     final String newToken = _generateRandomToken(8);
 
     try {
-      final bool claimed = await FirebaseFirestore.instance.runTransaction<bool>((transaction) async {
+      final Map<String, String>? claimed = await FirebaseFirestore.instance.runTransaction<Map<String, String>?>((transaction) async {
         final snapshot = await transaction.get(ref);
         final Map<String, dynamic> data = snapshot.data() ?? <String, dynamic>{};
-        final int lastSeen = (data['arena_last_seen'] as num?)?.toInt() ?? 0;
+        final int lastSeen = _readArenaLastSeenMs(data['arena_last_seen']);
         final int nowMs = DateTime.now().millisecondsSinceEpoch;
         final bool stale = !snapshot.exists || lastSeen == 0 || nowMs - lastSeen > kRoomDeathThresholdMs;
-        if (snapshot.exists && !stale) return false;
+        if (snapshot.exists && !stale) return null;
 
         transaction.set(ref, {
           'roomId': roomId,
@@ -446,35 +479,49 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
           'hunters': [],
           'logs': [],
           'target_end_time': midnight.millisecondsSinceEpoch,
-          'arena_last_seen': nowMs,
+          'arena_last_seen': Timestamp.fromDate(DateTime.fromMillisecondsSinceEpoch(nowMs)),
           'updateTime': FieldValue.serverTimestamp(),
         });
-        return true;
+        return <String, String>{
+          'roomId': roomId,
+          'adminKey': newKey,
+          'joinToken': newToken,
+        };
       });
-      return claimed ? roomId : null;
+      return claimed;
     } catch (error) {
       debugPrint('Erreur réservation salle $roomId: $error');
+      if (error.toString().contains('resource-exhausted') || error.toString().contains('quota')) {
+        _activateQuotaLock();
+      }
       return null;
     }
   }
 
-  Future<String?> _claimNextAvailableRoomSlot(String instanceToken) async {
+  Future<Map<String, String>?> _claimNextAvailableRoomSlot(String instanceToken) async {
     final firestore = FirebaseFirestore.instance;
     final now = DateTime.now();
-    final midnight = DateTime(now.year, now.month, now.day, 23, 59, 59);
+    final int nowMs = now.millisecondsSinceEpoch;
 
     try {
-      final snapshot = await firestore.collection('current_raids').get();
-      final Set<int> occupiedNumbers = <int>{};
-      final int nowMs = now.millisecondsSinceEpoch;
+      // Only read rooms whose heartbeat is still alive. Empty/stale slots are
+      // absent from this query, so a mostly empty world costs only a few reads.
+      final activeRooms = await firestore
+          .collection('current_raids')
+          .where(
+            'arena_last_seen',
+            isGreaterThan: Timestamp.fromDate(DateTime.fromMillisecondsSinceEpoch(nowMs - kRoomDeathThresholdMs)),
+          )
+          .get();
 
-      for (final doc in snapshot.docs) {
+      final Set<int> occupiedNumbers = <int>{};
+      for (final doc in activeRooms.docs) {
         if (!doc.id.startsWith('room_')) continue;
         final int? number = int.tryParse(doc.id.substring('room_'.length));
-        if (number == null || number < 1 || number > kMaxGlobalRooms) continue;
-        final data = doc.data();
-        final int lastSeen = (data['arena_last_seen'] as num?)?.toInt() ?? 0;
-        if (lastSeen != 0 && nowMs - lastSeen <= kRoomDeathThresholdMs) {
+        if (number != null &&
+            number >= 1 &&
+            number <= kMaxGlobalRooms &&
+            doc.id == 'room_$number') {
           occupiedNumbers.add(number);
         }
       }
@@ -482,53 +529,33 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
       for (int candidate = 1; candidate <= kMaxGlobalRooms; candidate++) {
         if (occupiedNumbers.contains(candidate)) continue;
         final String roomId = 'room_$candidate';
-        final DocumentReference<Map<String, dynamic>> ref =
-            firestore.collection('current_raids').doc(roomId);
-        final String newKey = _generateRandomToken(6);
-        final String newToken = _generateRandomToken(8);
+        // Transactionally re-check the candidate: two TVs cannot claim it
+        // from the same stale query snapshot.
+        final claim = await _claimSpecificRoomSlot(roomId, instanceToken);
+        if (claim != null) return claim;
+        if (_isQuotaLockActive) return null;
 
-        final bool claimed = await firestore.runTransaction<bool>((transaction) async {
-          final roomSnapshot = await transaction.get(ref);
-          final Map<String, dynamic> data = roomSnapshot.data() ?? <String, dynamic>{};
-          final int lastSeen = (data['arena_last_seen'] as num?)?.toInt() ?? 0;
-          final int transactionNow = DateTime.now().millisecondsSinceEpoch;
-          final bool stale = !roomSnapshot.exists || lastSeen == 0 ||
-              transactionNow - lastSeen > kRoomDeathThresholdMs;
-          if (roomSnapshot.exists && !stale) return false;
-
-          transaction.set(ref, {
-            'roomId': roomId,
-            'boss_name': 'MONARQUE DU FEU',
-            'instance_token': instanceToken,
-            'join_token': newToken,
-            'admin_key': newKey,
-            'status': 'waiting',
-            'preset_label': 'RAID STANDARD (5 000 PV)',
-            'current_hp': 5000,
-            'max_hp': 5000,
-            'hunters': [],
-            'logs': [],
-            'target_end_time': midnight.millisecondsSinceEpoch,
-            'arena_last_seen': transactionNow,
-            'updateTime': FieldValue.serverTimestamp(),
-          });
-          return true;
-        });
-
-        if (claimed) return roomId;
+        // A null claim means this candidate is already alive or another TV
+        // claimed it between the query and the transaction. Do not stop the
+        // entire allocation here: legacy rooms may store arena_last_seen as an
+        // integer and are therefore absent from the Timestamp query above.
+        // Continue to the next candidate; the transaction remains authoritative.
       }
       return null;
     } catch (error) {
       debugPrint('Erreur allocation slot: $error');
+      if (error.toString().contains('resource-exhausted') ||
+          error.toString().contains('quota')) {
+        _activateQuotaLock();
+      }
       return null;
     }
   }
-
   void _sendHeartbeatNow() {
     final DocumentReference? ref = _raidRef;
     final String? ownerToken = _instanceToken;
     if (ref == null || ownerToken == null || ownerToken.isEmpty ||
-        _isDespawnedForInactivity || _isNightLockActive) return;
+        _isDespawnedForInactivity || _isNightLockActive || _isQuotaLockActive) return;
 
     FirebaseFirestore.instance.runTransaction((transaction) async {
       final snapshot = await transaction.get(ref);
@@ -536,11 +563,14 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
       final data = snapshot.data() as Map<String, dynamic>? ?? {};
       if (data['instance_token'] != ownerToken) return;
       transaction.update(ref, {
-        'arena_last_seen': DateTime.now().millisecondsSinceEpoch,
+        'arena_last_seen': Timestamp.fromDate(DateTime.now()),
         'updateTime': FieldValue.serverTimestamp(),
       });
     }).catchError((Object error) {
       debugPrint('Heartbeat de la salle impossible: $error');
+      if (error.toString().contains('resource-exhausted') || error.toString().contains('quota')) {
+        _activateQuotaLock();
+      }
     });
   }
 
@@ -584,6 +614,40 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
 
   @override
   Widget build(BuildContext context) {
+    if (_isQuotaLockActive) {
+      return Scaffold(
+        backgroundColor: const Color(0xFF02070D),
+        body: Center(
+          child: Container(
+            margin: const EdgeInsets.all(24),
+            padding: const EdgeInsets.all(32),
+            decoration: BoxDecoration(
+              color: const Color(0xFF04101E),
+              border: Border.all(color: const Color(0xFFFF9100), width: 2),
+            ),
+            child: const Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.shield_outlined, color: Color(0xFFFF9100), size: 64),
+                SizedBox(height: 20),
+                Text(
+                  "MULTIJOUEUR MIS EN PAUSE",
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Color(0xFFFF9100), fontFamily: 'monospace', fontSize: 20, fontWeight: FontWeight.bold, letterSpacing: 2),
+                ),
+                SizedBox(height: 12),
+                Text(
+                  "Firebase a refusé une requête pour quota atteint. Les échanges sont suspendus pour éviter de multiplier les tentatives. Vérifiez le quota du projet avant de relancer l'Arena.",
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Colors.white70, fontFamily: 'monospace', fontSize: 13, height: 1.5),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
     if (_isNightLockActive) {
       return Scaffold(
         backgroundColor: const Color(0xFF02070D),
@@ -601,7 +665,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
                 Icon(Icons.lock_clock, color: Color(0xFFFF2E56), size: 64),
                 SizedBox(height: 20),
                 Text(
-                  "[ SYSTÈME : PORTAILS SCELLÉS (00H00 - 06H00) ]",
+                  "[ SYSTÈME : PORTAILS SCELLÉS (23H00 - 06H00) ]",
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     color: Color(0xFFFF2E56),
@@ -641,9 +705,9 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
               children: [
                 const Icon(Icons.snooze, color: Color(0xFF00E5FF), size: 64),
                 const SizedBox(height: 20),
-                const Text(
-                  "PORTAIL MIS EN VEILLE (60S D'INACTIVITÉ)",
-                  style: TextStyle(
+                Text(
+                  "PORTAIL MIS EN VEILLE (${_currentInactivityLimitSeconds}S D'INACTIVITÉ)",
+                  style: const TextStyle(
                     color: Color(0xFF00E5FF),
                     fontFamily: 'monospace',
                     fontSize: 18,
@@ -652,11 +716,11 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
                   ),
                 ),
                 const SizedBox(height: 12),
-                const Text(
-                  "Aucune activité physique détectée pendant 60 secondes.\n"
+                Text(
+                  "Aucune activité détectée pendant ${_currentInactivityLimitSeconds} secondes.\n"
                   "La salle a été automatiquement purgée du serveur pour libérer le slot mondial.",
                   textAlign: TextAlign.center,
-                  style: TextStyle(color: Colors.white70, fontFamily: 'monospace', fontSize: 13, height: 1.5),
+                  style: const TextStyle(color: Colors.white70, fontFamily: 'monospace', fontSize: 13, height: 1.5),
                 ),
                 const SizedBox(height: 24),
                 ElevatedButton.icon(
@@ -716,7 +780,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
                 SizedBox(height: 12),
                 Text(
                   "Les 100 failles dimensionnelles sont actuellement engagées en combat.\n"
-                  "En attente de libération d'un slot... (Nouvelle tentative dans 10 secondes)",
+                  "En attente de libération d'un slot... (Nouvelle tentative dans 10 minutes)",
                   textAlign: TextAlign.center,
                   style: TextStyle(color: Colors.white70, fontFamily: 'monospace', fontSize: 13, height: 1.5),
                 ),
@@ -834,7 +898,8 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
       ],
     );
 
-    final int sleepCountdown = (kMaxInactivitySeconds - _idleSecondsElapsed).clamp(0, kMaxInactivitySeconds);
+    final int inactivityLimit = _currentInactivityLimitSeconds;
+    final int sleepCountdown = (inactivityLimit - _idleSecondsElapsed).clamp(0, inactivityLimit);
 
     return Scaffold(
       backgroundColor: const Color(0xFF02070D),
@@ -853,7 +918,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
                     border: Border.all(color: const Color(0xFFFF2E56)),
                   ),
                   child: const Text(
-                    "⚠ ALERTE : LE DONJON MONDIAL SE REFERME À MINUIT. FIN DE LA PÉRIODE D'ASSAUT IMMINENTE.",
+                    "⚠ ALERTE : LE DONJON MONDIAL SE REFERME À 23H00. FIN DE LA PÉRIODE D'ASSAUT IMMINENTE.",
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       color: Color(0xFFFF2E56),
