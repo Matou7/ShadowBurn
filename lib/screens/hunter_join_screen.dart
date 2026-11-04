@@ -7,6 +7,8 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../services/multiplayer_quota_guard.dart';
+import '../services/arena_room_policy.dart';
 
 const Color kSystemBlue = Color(0xFF00E5FF);
 const String kAppDownloadUrl = "https://shadowburn-1d8f8.web.app";
@@ -46,6 +48,8 @@ class _HunterJoinScreenState extends State<HunterJoinScreen> with WidgetsBinding
   bool _isTokenValid = false;
   bool _isWaitingQueue = false;
   bool _isNightLockActive = false;
+  bool _isQuotaLockActive = false;
+  bool _quotaGuardLoaded = false;
   String _denialReason = "VÉRIFICATION DU PORTAIL EN COURS...";
 
   bool _isJoined = false;
@@ -75,8 +79,9 @@ class _HunterJoinScreenState extends State<HunterJoinScreen> with WidgetsBinding
   Timer? _batchFlushTimer;
   bool _isFlushing = false;
 
-  static const int kMaxHuntersPerRoom = 10;
-  static const int kBatchIntervalSeconds = 6;
+  static const int kMaxHuntersPerRoom = ArenaRoomPolicy.maxPlayersPerRoom;
+  // 60s batches reduce Firestore writes and listener fan-out on the free quota.
+  static const int kBatchIntervalSeconds = 60;
 
   static const List trainingModes = [
     TrainingMode(
@@ -141,17 +146,38 @@ class _HunterJoinScreenState extends State<HunterJoinScreen> with WidgetsBinding
     final randomInt = Random().nextInt(999999);
     _hunterSessionId = 'chasseur_${DateTime.now().millisecondsSinceEpoch}_$randomInt';
     _autoDetectDeviceName(randomInt);
+    unawaited(_loadQuotaGuard());
   }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _parseIncomingParameters();
+    if (_quotaGuardLoaded) _parseIncomingParameters();
+  }
+
+  Future<void> _loadQuotaGuard() async {
+    final bool paused = await MultiplayerQuotaGuard.isPaused();
+    if (!mounted) return;
+    setState(() {
+      _isQuotaLockActive = paused;
+      _quotaGuardLoaded = true;
+    });
+    if (!paused) _parseIncomingParameters();
+  }
+
+  void _activateQuotaLock() {
+    _isQuotaLockActive = true;
+    unawaited(MultiplayerQuotaGuard.pauseUntilSafeRetry());
+    _inactivityWatchdogTimer?.cancel();
+    _queueRetryTimer?.cancel();
+    _batchFlushTimer?.cancel();
+    _raidSubscription?.cancel();
+    if (mounted) setState(() {});
   }
 
   void _parseIncomingParameters() {
     final now = DateTime.now();
-    if (now.hour >= 0 && now.hour < 6) {
+    if (now.hour < 6 || now.hour >= 23) {
       if (mounted) {
         setState(() {
           _isCheckingToken = false;
@@ -166,34 +192,28 @@ class _HunterJoinScreenState extends State<HunterJoinScreen> with WidgetsBinding
       rawUrl = Uri.decodeFull(rawUrl);
     } catch (_) {}
 
-    String? foundRoom;
-    String? foundToken;
-
-    final roomRegex = RegExp(r'[?&]room=([a-zA-Z0-9_]+)', caseSensitive: false);
-    final tokenRegex = RegExp(r'[?&]token=([a-zA-Z0-9_]+)', caseSensitive: false);
-
-    final roomMatch = roomRegex.firstMatch(rawUrl);
-    if (roomMatch != null) {
-      foundRoom = roomMatch.group(1);
-    }
-
-    final tokenMatch = tokenRegex.firstMatch(rawUrl);
-    if (tokenMatch != null) {
-      foundToken = tokenMatch.group(1);
-    }
-
-    foundRoom ??= Uri.base.queryParameters['room'];
-    foundToken ??= Uri.base.queryParameters['token'];
+    final String? foundRoom = Uri.base.queryParameters['room'];
+    final String? foundToken = Uri.base.queryParameters['token'];
 
     _roomId = (foundRoom != null && foundRoom.trim().isNotEmpty) ? foundRoom.trim() : '';
     _token = (foundToken != null && foundToken.trim().isNotEmpty) ? foundToken.trim() : '';
+
+    if (ArenaRoomPolicy.parseRoomNumber(_roomId) == null) {
+      setState(() {
+        _isCheckingToken = false;
+        _isTokenValid = false;
+        _denialReason = "ACCÈS REFUSÉ : IDENTIFIANT DE SALLE INVALIDE.\nLes salles autorisées vont de room_1 à room_100.";
+      });
+      return;
+    }
 
     _verifyPortalSecurity();
   }
 
   Future _verifyPortalSecurity() async {
+    if (_isQuotaLockActive) return;
     final now = DateTime.now();
-    if (now.hour >= 0 && now.hour < 6) {
+    if (now.hour < 6 || now.hour >= 23) {
       if (mounted) {
         setState(() {
           _isCheckingToken = false;
@@ -226,7 +246,7 @@ class _HunterJoinScreenState extends State<HunterJoinScreen> with WidgetsBinding
           });
         }
         _queueRetryTimer?.cancel();
-        _queueRetryTimer = Timer(const Duration(seconds: 10), () {
+        _queueRetryTimer = Timer(const Duration(seconds: 60), () {
           if (mounted) {
             setState(() {
               _isCheckingToken = true;
@@ -242,7 +262,12 @@ class _HunterJoinScreenState extends State<HunterJoinScreen> with WidgetsBinding
       final String expectedToken = (data['join_token'] ?? '').toString().trim().toUpperCase();
       final String receivedToken = _token.trim().toUpperCase();
 
-      if (expectedToken.isNotEmpty && receivedToken != expectedToken) {
+      // A missing token is never a valid portal credential. New Arena rooms
+      // always issue a token; fail closed for incomplete or legacy documents.
+      if (!ArenaRoomPolicy.hasValidJoinToken(
+        expectedToken: expectedToken,
+        receivedToken: receivedToken,
+      )) {
         if (mounted) {
           setState(() {
             _isCheckingToken = false;
@@ -255,7 +280,10 @@ class _HunterJoinScreenState extends State<HunterJoinScreen> with WidgetsBinding
 
       final dynamic rawHunters = data['hunters'];
       final List hunterList = rawHunters is Iterable ? rawHunters.toList() : [];
-      if (hunterList.length >= kMaxHuntersPerRoom) {
+      final int connectedHunters = hunterList.where(
+        (hunter) => hunter is Map && hunter['is_connected'] != false,
+      ).length;
+      if (connectedHunters >= kMaxHuntersPerRoom) {
         if (mounted) {
           setState(() {
             _isCheckingToken = false;
@@ -263,7 +291,7 @@ class _HunterJoinScreenState extends State<HunterJoinScreen> with WidgetsBinding
           });
         }
         _queueRetryTimer?.cancel();
-        _queueRetryTimer = Timer(const Duration(seconds: 10), () {
+        _queueRetryTimer = Timer(const Duration(seconds: 60), () {
           if (mounted) {
             setState(() {
               _isCheckingToken = true;
@@ -290,12 +318,8 @@ class _HunterJoinScreenState extends State<HunterJoinScreen> with WidgetsBinding
       }
     } catch (e) {
       if (e.toString().contains('resource-exhausted') || e.toString().contains('quota')) {
-        if (mounted) {
-          setState(() {
-            _isCheckingToken = false;
-            _isNightLockActive = true;
-          });
-        }
+        if (mounted) setState(() => _isCheckingToken = false);
+        _activateQuotaLock();
         return;
       }
       if (mounted) {
@@ -334,10 +358,8 @@ class _HunterJoinScreenState extends State<HunterJoinScreen> with WidgetsBinding
         _isRaidDataLoaded = true;
       });
     }, onError: (e) {
-      if (e.toString().contains('resource-exhausted') && mounted) {
-        setState(() {
-          _isNightLockActive = true;
-        });
+      if (e.toString().contains('resource-exhausted') || e.toString().contains('quota')) {
+        _activateQuotaLock();
       }
     });
   }
@@ -392,6 +414,7 @@ class _HunterJoinScreenState extends State<HunterJoinScreen> with WidgetsBinding
   }
 
   Future _joinRaid() async {
+    if (_isQuotaLockActive) return;
     final name = _nameController.text.trim();
     if (name.isEmpty || _raidRef == null) return;
 
@@ -416,12 +439,55 @@ class _HunterJoinScreenState extends State<HunterJoinScreen> with WidgetsBinding
         'abs_reps': 0,
         'joined_at': now,
         'last_seen': now,
+        'is_connected': true,
       };
 
-      await _raidRef!.set({
-        'roomId': _roomId,
-        'hunters': FieldValue.arrayUnion([hunterEntry]),
-      }, SetOptions(merge: true));
+      await FirebaseFirestore.instance.runTransaction((transaction) async {
+        final joinNow = DateTime.now();
+        if (joinNow.hour < 6 || joinNow.hour >= 23) {
+          throw StateError('Les portails sont fermés entre 23h et 6h.');
+        }
+        final latest = await transaction.get(_raidRef!);
+        if (!latest.exists) throw StateError('Cette salle n’existe plus.');
+        final Map<String, dynamic> latestData = latest.data() as Map<String, dynamic>? ?? {};
+        final String currentToken = (latestData['join_token'] ?? '').toString().trim().toUpperCase();
+        if (currentToken.isEmpty || currentToken != _token.trim().toUpperCase()) {
+          throw StateError('Le jeton du portail a expiré. Scannez à nouveau le QR code.');
+        }
+        final String currentStatus = (latestData['status'] ?? 'waiting').toString();
+        if (currentStatus != 'waiting' && currentStatus != 'active') {
+          throw StateError('Ce donjon n’accepte plus de nouveaux chasseurs.');
+        }
+        final dynamic rawLatestHunters = latestData['hunters'];
+        final List<dynamic> latestHunters = rawLatestHunters is Iterable
+            ? List<dynamic>.from(rawLatestHunters)
+            : <dynamic>[];
+        final int existingIndex = latestHunters.indexWhere(
+          (hunter) => hunter is Map && hunter['id'] == _hunterSessionId,
+        );
+        final int connectedCount = latestHunters.where(
+          (hunter) => hunter is Map && hunter['is_connected'] != false,
+        ).length;
+        final bool existingIsConnected = existingIndex != -1 &&
+            latestHunters[existingIndex] is Map &&
+            (latestHunters[existingIndex] as Map)['is_connected'] != false;
+        if (!ArenaRoomPolicy.canAcceptPlayer(
+          connectedCount: connectedCount,
+          alreadyConnected: existingIsConnected,
+        )) {
+          throw StateError('Cette salle est complète : 10 chasseurs maximum.');
+        }
+        if (existingIndex == -1) {
+          latestHunters.add(hunterEntry);
+        } else {
+          final Map<String, dynamic> existingHunter =
+              Map<String, dynamic>.from(latestHunters[existingIndex] as Map);
+          existingHunter['is_connected'] = true;
+          existingHunter['last_seen'] = now;
+          latestHunters[existingIndex] = existingHunter;
+        }
+        transaction.update(_raidRef!, {'hunters': latestHunters});
+      });
 
       setState(() {
         _isJoined = true;
@@ -432,8 +498,8 @@ class _HunterJoinScreenState extends State<HunterJoinScreen> with WidgetsBinding
       _startInactivityWatchdog();
     } catch (e) {
       setState(() => _isLoading = false);
-      if (e.toString().contains('resource-exhausted') && mounted) {
-        setState(() => _isNightLockActive = true);
+      if (e.toString().contains('resource-exhausted') || e.toString().contains('quota')) {
+        _activateQuotaLock();
         return;
       }
       if (mounted) {
@@ -459,10 +525,30 @@ class _HunterJoinScreenState extends State<HunterJoinScreen> with WidgetsBinding
 
     try {
       if (_raidRef != null && _raidData.isNotEmpty) {
-        final dynamic rawHunters = _raidData['hunters'];
-        final List hunterList = rawHunters is Iterable ? List.from(rawHunters) : [];
-        hunterList.removeWhere((h) => h is Map && h['id'] == _hunterSessionId && ((h['total_damage'] as num?)?.toInt() ?? 0) == 0);
-        await _raidRef!.update({'hunters': hunterList});
+        final DocumentReference ref = _raidRef!;
+        await FirebaseFirestore.instance.runTransaction((transaction) async {
+          final latest = await transaction.get(ref);
+          if (!latest.exists) return;
+          final Map<String, dynamic> data = latest.data() as Map<String, dynamic>? ?? {};
+          final dynamic rawLatestHunters = data['hunters'];
+          final List<dynamic> latestHunters = rawLatestHunters is Iterable
+              ? List<dynamic>.from(rawLatestHunters)
+              : <dynamic>[];
+          final int index = latestHunters.indexWhere(
+            (hunter) => hunter is Map && hunter['id'] == _hunterSessionId,
+          );
+          if (index == -1) return;
+          final Map<String, dynamic> hunter =
+              Map<String, dynamic>.from(latestHunters[index] as Map);
+          if ((hunter['total_damage'] as num?)?.toInt() == 0) {
+            latestHunters.removeAt(index);
+          } else {
+            hunter['is_connected'] = false;
+            hunter['last_seen'] = DateTime.now().millisecondsSinceEpoch;
+            latestHunters[index] = hunter;
+          }
+          transaction.update(ref, {'hunters': latestHunters});
+        });
       }
 
       if (mounted) {
@@ -659,7 +745,7 @@ class _HunterJoinScreenState extends State<HunterJoinScreen> with WidgetsBinding
   }
 
     Future _flushPendingDamage() async {
-    if (_pendingDamage == 0 || _raidRef == null || _isFlushing) return;
+    if (_isQuotaLockActive || _pendingDamage == 0 || _raidRef == null || _isFlushing) return;
     _isFlushing = true;
     
     final int dmgToSend = _pendingDamage;
@@ -708,6 +794,15 @@ class _HunterJoinScreenState extends State<HunterJoinScreen> with WidgetsBinding
         }
 
         if (!foundHunter && _confirmedHunterName.isNotEmpty) {
+          final int connectedCount = hunterList.where(
+            (hunter) => hunter is Map && hunter['is_connected'] != false,
+          ).length;
+          if (!ArenaRoomPolicy.canAcceptPlayer(
+            connectedCount: connectedCount,
+            alreadyConnected: false,
+          )) {
+            throw StateError('La salle est complète : 10 chasseurs maximum.');
+          }
           hunterList.add({
             'id': _hunterSessionId,
             'name': _confirmedHunterName,
@@ -719,6 +814,7 @@ class _HunterJoinScreenState extends State<HunterJoinScreen> with WidgetsBinding
             'abs_reps': aToSend,
             'joined_at': DateTime.now().millisecondsSinceEpoch,
             'last_seen': DateTime.now().millisecondsSinceEpoch,
+            'is_connected': true,
           });
         }
         
@@ -731,7 +827,22 @@ class _HunterJoinScreenState extends State<HunterJoinScreen> with WidgetsBinding
         });
       });
     } catch (e) {
+      // Ne perds pas les dégâts si le réseau échoue : ils restent en attente d'un nouvel envoi.
+      _pendingDamage += dmgToSend;
+      _pendingSquatReps += sToSend;
+      _pendingPushupReps += pToSend;
+      _pendingAbsReps += aToSend;
+      _pendingLogs.insertAll(0, logsToSend);
       debugPrint("[CHASSEUR] Erreur de synchronisation des dégâts : $e");
+      final bool quotaExhausted = e.toString().contains('resource-exhausted') || e.toString().contains('quota');
+      if (quotaExhausted) _activateQuotaLock();
+      if (!quotaExhausted && mounted && _isJoined) {
+        _batchFlushTimer?.cancel();
+        _batchFlushTimer = Timer(const Duration(seconds: kBatchIntervalSeconds), () {
+          _batchFlushTimer = null;
+          _flushPendingDamage();
+        });
+      }
     } finally {
       if (mounted) {
         setState(() => _isFlushing = false);
@@ -741,6 +852,40 @@ class _HunterJoinScreenState extends State<HunterJoinScreen> with WidgetsBinding
 
   @override
   Widget build(BuildContext context) {
+    if (_isQuotaLockActive) {
+      return Scaffold(
+        backgroundColor: const Color(0xFF02070D),
+        body: Center(
+          child: Container(
+            margin: const EdgeInsets.all(24),
+            padding: const EdgeInsets.all(32),
+            decoration: BoxDecoration(
+              color: const Color(0xFF04101E),
+              border: Border.all(color: const Color(0xFFFF9100), width: 2),
+            ),
+            child: const Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.shield_outlined, color: Color(0xFFFF9100), size: 64),
+                SizedBox(height: 20),
+                Text(
+                  "PORTAIL MULTIJOUEUR EN PAUSE",
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Color(0xFFFF9100), fontFamily: 'monospace', fontSize: 18, fontWeight: FontWeight.bold, letterSpacing: 2),
+                ),
+                SizedBox(height: 12),
+                Text(
+                  "Firebase a refusé une requête pour quota atteint. Les échanges sont suspendus. Vérifiez le quota du projet avant de relancer le portail.",
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Colors.white70, fontFamily: 'monospace', fontSize: 13, height: 1.5),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
     if (_isNightLockActive) {
       return Scaffold(
         backgroundColor: const Color(0xFF02070D),
@@ -758,7 +903,7 @@ class _HunterJoinScreenState extends State<HunterJoinScreen> with WidgetsBinding
                 Icon(Icons.lock_clock, color: Color(0xFFFF2E56), size: 64),
                 SizedBox(height: 20),
                 Text(
-                  "[ SYSTÈME : PORTAILS SCELLÉS (00H00 - 06H00) ]",
+                  "[ SYSTÈME : PORTAILS SCELLÉS (23H00 - 06H00) ]",
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     color: Color(0xFFFF2E56),
@@ -811,7 +956,7 @@ class _HunterJoinScreenState extends State<HunterJoinScreen> with WidgetsBinding
                 SizedBox(height: 12),
                 Text(
                   "La salle a atteint son quota maximal de 10 Chasseurs ou est en cours d'allocation.\n"
-                  "En attente de libération d'un slot... (Nouvelle tentative dans 10 secondes)",
+                  "En attente de libération d'un slot... (Nouvelle tentative dans 60 secondes)",
                   textAlign: TextAlign.center,
                   style: TextStyle(color: Colors.white70, fontFamily: 'monospace', fontSize: 13, height: 1.5),
                 ),
