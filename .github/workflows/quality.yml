@@ -17,6 +17,7 @@ on:
 jobs:
   flutter_checks:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -46,13 +47,13 @@ jobs:
       - name: Build Web (no deployment)
         run: flutter build web --release --no-wasm-dry-run
 
-      - name: Build Android APK (no publication)
-        run: flutter build apk --release
+      - name: Build Android APK (debug; no publication)
+        run: flutter build apk --debug
 
       - name: Upload APK for manual testing
         uses: actions/upload-artifact@v4
         with:
           name: shadowburn-test-apk
-          path: build/app/outputs/flutter-apk/app-release.apk
+          path: build/app/outputs/flutter-apk/app-debug.apk
           if-no-files-found: error
           retention-days: 7
