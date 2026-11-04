@@ -486,7 +486,11 @@ class _HunterJoinScreenState extends State<HunterJoinScreen> with WidgetsBinding
           existingHunter['last_seen'] = now;
           latestHunters[existingIndex] = existingHunter;
         }
-        transaction.update(_raidRef!, {'hunters': latestHunters});
+        transaction.update(_raidRef!, {
+          'hunters': latestHunters,
+          'last_activity_at': FieldValue.serverTimestamp(),
+          'updateTime': FieldValue.serverTimestamp(),
+        });
       });
 
       setState(() {
@@ -547,7 +551,11 @@ class _HunterJoinScreenState extends State<HunterJoinScreen> with WidgetsBinding
             hunter['last_seen'] = DateTime.now().millisecondsSinceEpoch;
             latestHunters[index] = hunter;
           }
-          transaction.update(ref, {'hunters': latestHunters});
+          transaction.update(ref, {
+            'hunters': latestHunters,
+            'last_activity_at': FieldValue.serverTimestamp(),
+            'updateTime': FieldValue.serverTimestamp(),
+          });
         });
       }
 
@@ -823,6 +831,7 @@ class _HunterJoinScreenState extends State<HunterJoinScreen> with WidgetsBinding
           'logs': logs,
           'hunters': hunterList,
           if (nextHp <= 0) 'status': 'victory',
+          'last_activity_at': FieldValue.serverTimestamp(),
           'updated_at': FieldValue.serverTimestamp(),
         });
       });
