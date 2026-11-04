@@ -1,4 +1,5 @@
 /// Shared, testable limits for the client-authoritative Arena.
+/// Used by both TV room allocation and hunter portal admission.
 class ArenaRoomPolicy {
   const ArenaRoomPolicy._();
 
