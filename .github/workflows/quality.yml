@@ -34,6 +34,14 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
+      - name: Setup Node.js for Firebase Functions validation
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Validate Firebase cleanup function syntax
+        run: node --check functions/index.js
+
       - name: Static analysis (report legacy issues without skipping runtime checks)
         run: flutter analyze --no-pub --no-fatal-infos --no-fatal-warnings
 
