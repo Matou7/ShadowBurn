@@ -13,6 +13,37 @@ void main() {
       expect(ArenaRoomPolicy.parseRoomNumber(null), isNull);
     });
 
+    test('requires a non-empty exact portal token', () {
+      expect(
+        ArenaRoomPolicy.hasValidJoinToken(
+          expectedToken: 'ABCD1234',
+          receivedToken: 'abcd1234',
+        ),
+        isTrue,
+      );
+      expect(
+        ArenaRoomPolicy.hasValidJoinToken(
+          expectedToken: '',
+          receivedToken: 'abcd1234',
+        ),
+        isFalse,
+      );
+      expect(
+        ArenaRoomPolicy.hasValidJoinToken(
+          expectedToken: 'ABCD1234',
+          receivedToken: '',
+        ),
+        isFalse,
+      );
+      expect(
+        ArenaRoomPolicy.hasValidJoinToken(
+          expectedToken: 'ABCD1234',
+          receivedToken: 'ABCD1235',
+        ),
+        isFalse,
+      );
+    });
+
     test('does not admit an eleventh connected hunter', () {
       expect(
         ArenaRoomPolicy.canAcceptPlayer(
