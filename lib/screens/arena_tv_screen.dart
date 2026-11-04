@@ -416,6 +416,9 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
   }
 
   Future<Map<String, String>?> _claimNextAvailableRoomSlot() async {
+    // The availability query is protected by Firestore rules and must run
+    // after the TV has obtained its anonymous Firebase Auth session.
+    await ArenaBackendService.ensureAuthenticated();
     final firestore = FirebaseFirestore.instance;
     final now = DateTime.now();
     final int nowMs = now.millisecondsSinceEpoch;
