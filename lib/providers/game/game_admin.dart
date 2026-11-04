@@ -107,41 +107,45 @@ mixin _AdminLogic on _GameBase {
     }
   }
 
-  /// Restauration directe appelée par les anciens contrôles
+  /// Restaure une licence uniquement depuis une session Firebase authentifiée
+  /// dont l'adresse e-mail est vérifiée et correspond à la licence.
   Future<String?> restoreProLicenseByEmail(String emailInput) async {
     final String cleanEmail = emailInput.trim().toLowerCase();
-    debugPrint("[RESTORE_TRACE] Début restauration pour l'email : '$cleanEmail'");
-
-    if (cleanEmail.isEmpty) return null;
+    if (cleanEmail.isEmpty ||
+        !await AuthRecoveryService.hasVerifiedSessionForEmail(cleanEmail)) {
+      return null;
+    }
 
     try {
-      final colRef = FirebaseFirestore.instance.collection('pro_licenses');
-      var snapshot = await colRef
+      final snapshot = await FirebaseFirestore.instance
+          .collection('pro_licenses')
           .where('email', isEqualTo: cleanEmail)
           .limit(1)
-          .get(const GetOptions(source: Source.serverAndCache));
-
-      if (snapshot.docs.isEmpty) {
-        snapshot = await colRef
-            .where('email', isEqualTo: emailInput.trim())
-            .limit(1)
-            .get(const GetOptions(source: Source.serverAndCache));
-      }
+          .get(const GetOptions(source: Source.server));
 
       if (snapshot.docs.isEmpty) return null;
 
       final licenseDoc = snapshot.docs.first;
-      final String foundKey = (licenseDoc.data()['key']?.toString().isNotEmpty == true)
-          ? licenseDoc.data()['key'].toString()
-          : licenseDoc.id;
+      final data = licenseDoc.data();
       final String hardwareId = await _getUniqueHardwareId();
+      final bool alreadyUsed = data['used'] == true;
+      final String boundDevice = (data['used_by'] ?? '').toString().trim();
 
-      await licenseDoc.reference.update({
-        'used': true,
-        'used_at': FieldValue.serverTimestamp(),
-        'used_by': hardwareId,
-        'user_name': _username,
-      });
+      if (alreadyUsed && boundDevice != hardwareId.trim()) return null;
+
+      final String foundKey =
+          (data['key']?.toString().isNotEmpty == true)
+              ? data['key'].toString()
+              : licenseDoc.id;
+
+      if (!alreadyUsed) {
+        await licenseDoc.reference.update({
+          'used': true,
+          'used_at': FieldValue.serverTimestamp(),
+          'used_by': hardwareId,
+          'user_name': _username,
+        });
+      }
 
       _isPro = true;
       if (this is GameProvider) {
@@ -151,71 +155,66 @@ mixin _AdminLogic on _GameBase {
       _notify();
       await _forceSaveRealDisk();
       return foundKey;
-    } catch (e, stack) {
-      debugPrint("[RESTORE_TRACE] EXCEPTION CRITIQUE : $e\n$stack");
+    } catch (e) {
+      debugPrint("[RESTORE_TRACE] Restauration refusée : $e");
       return null;
     }
   }
 
-  /// Déclenche la vérification et la synchronisation avec Firestore (sans bloquer sur l'e-mail)
-  Future<bool> requestOtpForEmail(String emailInput) async {
+  /// Envoie le lien officiel de réinitialisation Firebase.
+  /// Ce lien ne restaure pas à lui seul une licence Pro.
+  Future<bool> sendRecoveryEmail(String emailInput) async {
     final String cleanEmail = emailInput.trim().toLowerCase();
-    debugPrint("[AUTH_TRACE] Lancement de la vérification pour : '$cleanEmail'");
-
     if (cleanEmail.isEmpty) return false;
 
     try {
-      final bool success = await AuthRecoveryService.sendOfficialRecoveryEmail(cleanEmail);
-      if (success) {
-        debugPrint("[AUTH_TRACE] Vérification Firestore validée pour $cleanEmail");
-      } else {
-        debugPrint("[AUTH_TRACE] Échec de la vérification du compte.");
-      }
-      return success;
-    } catch (e, stack) {
-      debugPrint("[AUTH_TRACE] Erreur lors de la vérification : $e\n$stack");
+      return await AuthRecoveryService.sendOfficialRecoveryEmail(cleanEmail);
+    } catch (e) {
+      debugPrint("[AUTH_TRACE] Envoi du lien de récupération impossible : $e");
       return false;
     }
   }
 
-  /// Validation et restauration locale après action de l'utilisateur
-  Future<String?> verifyOtpAndRestore({
+  /// Restaure la licence après connexion au compte Firebase vérifié.
+  Future<String?> restoreProAfterVerifiedSignIn({
     required String emailInput,
-    required String enteredOtp,
   }) async {
     final String cleanEmail = emailInput.trim().toLowerCase();
-    debugPrint("[RESTORE_TRACE] Validation de la restauration pour '$cleanEmail'");
-
-    if (cleanEmail.isEmpty) return null;
+    if (cleanEmail.isEmpty ||
+        !await AuthRecoveryService.hasVerifiedSessionForEmail(cleanEmail)) {
+      return null;
+    }
 
     try {
-      final success = await AuthRecoveryService.restoreProStatusLocally(cleanEmail);
-      if (!success) {
-        debugPrint("[RESTORE_TRACE] Échec de la restauration du statut local.");
-        return null;
-      }
-
-      final colRef = FirebaseFirestore.instance.collection('pro_licenses');
-      final snapshot = await colRef
+      final snapshot = await FirebaseFirestore.instance
+          .collection('pro_licenses')
           .where('email', isEqualTo: cleanEmail)
           .limit(1)
-          .get(const GetOptions(source: Source.serverAndCache));
+          .get(const GetOptions(source: Source.server));
 
       if (snapshot.docs.isEmpty) return null;
 
       final docSnap = snapshot.docs.first;
       final data = docSnap.data();
       final String hardwareId = await _getUniqueHardwareId();
-      final String resolvedKey = (data['key']?.toString().isNotEmpty == true)
-          ? data['key'].toString()
-          : docSnap.id;
+      final bool alreadyUsed = data['used'] == true;
+      final String boundDevice = (data['used_by'] ?? '').toString().trim();
 
-      await docSnap.reference.update({
-        'used': true,
-        'used_at': FieldValue.serverTimestamp(),
-        'used_by': hardwareId,
-        'user_name': _username,
-      });
+      if (alreadyUsed && boundDevice != hardwareId.trim()) return null;
+
+      final String resolvedKey =
+          (data['key']?.toString().isNotEmpty == true)
+              ? data['key'].toString()
+              : docSnap.id;
+
+      if (!alreadyUsed) {
+        await docSnap.reference.update({
+          'used': true,
+          'used_at': FieldValue.serverTimestamp(),
+          'used_by': hardwareId,
+          'user_name': _username,
+        });
+      }
 
       _isPro = true;
       if (this is GameProvider) {
@@ -224,10 +223,9 @@ mixin _AdminLogic on _GameBase {
 
       _notify();
       await _forceSaveRealDisk();
-      debugPrint("[RESTORE_TRACE] RESTAURATION RÉUSSIE ! Licence $resolvedKey liée à $hardwareId");
       return resolvedKey;
-    } catch (e, stack) {
-      debugPrint("[RESTORE_TRACE] Erreur lors de la restauration : $e\n$stack");
+    } catch (e) {
+      debugPrint("[RESTORE_TRACE] Validation du compte impossible : $e");
       return null;
     }
   }
@@ -273,8 +271,8 @@ mixin _AdminLogic on _GameBase {
                   children: [
                     Text(
                       verificationLaunched
-                          ? "Vérification Firestore effectuée. Si votre e-mail correspond à une licence enregistrée, le système met à jour vos accès."
-                          : "Entrez l'e-mail utilisé lors de votre achat Stripe pour lancer la vérification du compte :",
+                          ? "Lien envoyé. Réinitialisez votre mot de passe, connectez-vous au compte Firebase vérifié, puis revenez ici."
+                          : "Entrez l'adresse utilisée lors de votre achat. Un lien officiel de réinitialisation Firebase sera envoyé.",
                       style: const TextStyle(color: Colors.white70, fontSize: 13),
                     ),
                     const SizedBox(height: 15),
@@ -328,20 +326,19 @@ mixin _AdminLogic on _GameBase {
                           });
 
                           if (!verificationLaunched) {
-                            final success = await requestOtpForEmail(emailController.text);
+                            final success = await sendRecoveryEmail(emailController.text);
                             setDialogState(() {
                               isLoading = false;
                               if (success) {
                                 verificationLaunched = true;
-                                feedback = "Vérification du compte effectuée avec succès !";
+                                feedback = "Lien envoyé. Connectez-vous ensuite au compte Firebase vérifié avant de restaurer la licence.";
                               } else {
-                                feedback = "ERREUR : Compte introuvable dans Firestore.";
+                                feedback = "ERREUR : Aucun lien envoyé. Vérifiez l'adresse du compte.";
                               }
                             });
                           } else {
-                            final restoredKey = await verifyOtpAndRestore(
+                            final restoredKey = await restoreProAfterVerifiedSignIn(
                               emailInput: emailController.text,
-                              enteredOtp: "",
                             );
                             setDialogState(() {
                               isLoading = false;
@@ -351,7 +348,7 @@ mixin _AdminLogic on _GameBase {
                                   Navigator.pop(ctx);
                                 });
                               } else {
-                                feedback = "Vérification en cours de validation.";
+                                feedback = "Connexion Firebase vérifiée requise, ou licence déjà liée à un autre appareil.";
                               }
                             });
                           }
@@ -362,7 +359,7 @@ mixin _AdminLogic on _GameBase {
                           height: 16,
                           child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black),
                         )
-                      : Text(verificationLaunched ? "VÉRIFIER LA RESTAURATION" : "LANCER LA VÉRIFICATION"),
+                      : Text(verificationLaunched ? "VÉRIFIER LE COMPTE CONNECTÉ" : "ENVOYER LE LIEN"),
                 ),
               ],
             );

@@ -36,28 +36,24 @@ class AuthRecoveryService {
     }
   }
 
-  /// Restaure la licence Pro sur l'appareil local
-  static Future<bool> restoreProStatusLocally(String email) async {
+  /// Exige une session Firebase réellement connectée et vérifiée.
+  /// Un lien de réinitialisation envoyé n'est pas une preuve d'identité.
+  static Future<bool> hasVerifiedSessionForEmail(String email) async {
     final cleanEmail = email.trim().toLowerCase();
-    try {
-      final query = await _db
-          .collection('pro_licenses')
-          .where('email', isEqualTo: cleanEmail)
-          .limit(1)
-          .get();
+    if (cleanEmail.isEmpty) return false;
 
-      if (query.docs.isNotEmpty) {
-        final doc = query.docs.first;
-        await doc.reference.update({
-          'used': true,
-          'last_restored_at': FieldValue.serverTimestamp(),
-        });
-        debugPrint("[RESTORE_SUCCESS] Statut restauré pour $cleanEmail");
-        return true;
-      }
-      return false;
+    try {
+      User? user = _auth.currentUser;
+      if (user == null) return false;
+
+      await user.reload();
+      user = _auth.currentUser;
+
+      return user != null &&
+          user.emailVerified &&
+          (user.email ?? '').trim().toLowerCase() == cleanEmail;
     } catch (e) {
-      debugPrint("[RESTORE_FAIL] Erreur: $e");
+      debugPrint("[AUTH_WARN] Session de récupération non vérifiée : $e");
       return false;
     }
   }
