@@ -8,15 +8,14 @@ mixin _AdminLogic on _GameBase {
   bool get isGodMode => _sandbox;
 
   Future<void> _forceSaveRealDisk() async {
-    final bool wasBlocked = StorageService.blockAllRealSaves;
-    StorageService.blockAllRealSaves = false;
-    final data = _toJson();
-    data['sandbox'] = false;
-    await StorageService.save(data);
+    // Never disable the global real-save guard to write Sandbox data.
     if (_sandbox) {
-      _sandboxSnapshot = Map<String, dynamic>.from(data);
+      if (_godModePersistPenalty && SandboxManager.persistPenalty) {
+        await SandboxManager.saveSandbox(_toJson());
+      }
+      return;
     }
-    StorageService.blockAllRealSaves = wasBlocked;
+    await StorageService.save(_toJson());
   }
 
 
