@@ -9,7 +9,7 @@ class DungeonDatabase {
     final cfg = Balance.of(rank);
     final int reps = cfg.dungeonReps;
     return {
-      'duration': Duration(minutes: cfg.dungeonMinutes),
+      'duration': Duration(seconds: cfg.dungeonSeconds),
       'tasks': [
         {"type": "POMPES", "amount": reps.toDouble(), "title": "Pompes"},
         {"type": "SQUATS", "amount": reps.toDouble(), "title": "Squats"},
