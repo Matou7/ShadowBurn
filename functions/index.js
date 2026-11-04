@@ -25,8 +25,8 @@ function timestampToMillis(value) {
 }
 
 function roomLastActivityMillis(data) {
-  // Real gameplay/admin activity wins over the TV heartbeat. This prevents
-  // an unattended TV tab from keeping an empty room alive indefinitely.
+  // Gameplay/admin activity takes precedence over the TV heartbeat.
+  // An unattended TV tab must not keep an empty room alive indefinitely.
   return (
     timestampToMillis(data.last_activity_at) ??
     timestampToMillis(data.arena_last_seen) ??
@@ -58,14 +58,37 @@ exports.cleanupInactiveArenaRooms = onSchedule(
   },
   async () => {
     const now = Date.now();
+    const oldestCandidate = admin.firestore.Timestamp.fromMillis(
+      now - TERMINAL_IDLE_MS
+    );
     let deletedCount = 0;
 
     for (const collectionName of ROOM_COLLECTIONS) {
-      const snapshot = await db.collection(collectionName).get();
+      const collection = db.collection(collectionName);
+
+      // Query only potentially expired documents. This avoids reading every
+      // room every minute and protects the project's Firestore read quota.
+      const [activitySnapshot, heartbeatSnapshot] = await Promise.all([
+        collection
+          .where("last_activity_at", "<=", oldestCandidate)
+          .get(),
+        collection
+          .where("arena_last_seen", "<=", oldestCandidate)
+          .get(),
+      ]);
+
+      const candidates = new Map();
+      for (const document of activitySnapshot.docs) {
+        candidates.set(document.ref.path, document);
+      }
+      for (const document of heartbeatSnapshot.docs) {
+        candidates.set(document.ref.path, document);
+      }
+
       let batch = db.batch();
       let batchSize = 0;
 
-      for (const document of snapshot.docs) {
+      for (const document of candidates.values()) {
         const data = document.data();
         const lastActivity = roomLastActivityMillis(data);
 
