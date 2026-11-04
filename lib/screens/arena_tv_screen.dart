@@ -55,7 +55,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
   // Keep a 30-second margin against the 60-second Firestore liveness rule.
   // This remains 33% lighter than the 20-second MASTER heartbeat.
   static const int kHeartbeatIntervalSeconds = 30;
-  static const int kRoomDeathThresholdMs = 60 * 1000;
+  static const int kRoomDeathThresholdMs = 2 * 60 * 1000;
   static const int kHunterInactiveThresholdMs = 90 * 1000;
   static const int kMaxInactivitySeconds = 60;
   static const int kMaxVictoryPodiumSeconds = 180;
@@ -286,7 +286,11 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
   Future _triggerDefeat() async {
     _currentRaidStatus = 'failed';
     if (_raidRef != null) {
-      await _raidRef!.update({'status': 'failed'}).catchError((_) {});
+      await _raidRef!.update({
+        'status': 'failed',
+        'last_activity_at': FieldValue.serverTimestamp(),
+        'updateTime': FieldValue.serverTimestamp(),
+      }).catchError((_) {});
     }
   }
 
@@ -431,6 +435,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
           _raidRef!.update({
             'status': 'victory',
             'current_hp': 0,
+            'last_activity_at': FieldValue.serverTimestamp(),
             'updateTime': FieldValue.serverTimestamp(),
           }).catchError((_) {});
           mapData['status'] = 'victory';
