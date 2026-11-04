@@ -258,7 +258,7 @@ mixin _DayLogic on _GameBase {
         // On ne force le lock que sur le premier jour manqué pour éviter une sur-couverture
         if (!penaltyTriggered) {
           penaltyTriggered = true;
-          triggerDailyPenalty();
+          await triggerDailyPenalty();
         }
       }
     }
