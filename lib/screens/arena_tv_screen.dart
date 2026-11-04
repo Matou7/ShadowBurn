@@ -54,8 +54,8 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
 
   static const int kMaxGlobalRooms = ArenaRoomPolicy.maxGlobalRooms;
   static const int kMaxHuntersPerRoom = ArenaRoomPolicy.maxPlayersPerRoom;
-  // Keep a 30-second margin against the 60-second Firestore liveness rule.
-  // This remains 33% lighter than the 20-second MASTER heartbeat.
+  // Heartbeat at half the 60-second Firestore liveness window.
+  // The cleanup threshold and the Firestore rules must remain aligned.
   static const int kHeartbeatIntervalSeconds = 30;
   static const int kRoomDeathThresholdMs = 60 * 1000;
   static const int kHunterInactiveThresholdMs = 90 * 1000;
