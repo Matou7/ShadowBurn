@@ -9,6 +9,10 @@ mixin _LifecycleLogic on _GameBase {
       final Map<String, dynamic>? godSave = await SandboxManager.loadSandbox();
       if (godSave != null && godSave['godModePersistPenalty'] == true) {
         _applyJson(godSave);
+        // Rehydrate the in-memory Sandbox gates after a process/device restart.
+        SandboxManager.isSandboxActive = true;
+        SandboxManager.persistPenalty = true;
+        StorageService.blockAllRealSaves = true;
       } else {
         final LoadedSave? loaded = await StorageService.load();
         if (loaded != null) {
