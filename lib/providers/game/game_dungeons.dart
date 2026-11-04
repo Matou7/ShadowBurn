@@ -143,12 +143,12 @@ mixin _DungeonLogic on _GameBase {
         completedAt: DateTime.now(),
         expiresAt: _activeDungeon!.expiresAt,
       );
-      _finishDungeon(victory: inTime);
+      unawaited(_finishDungeon(victory: inTime));
     }
   }
 
   @override
-  void _finishDungeon({required bool victory}) async {
+  Future<void> _finishDungeon({required bool victory}) async {
     if (_activeDungeon == null || _isDungeonFinishing) return;
     _isDungeonFinishing = true;
     try {

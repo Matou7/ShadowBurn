@@ -349,13 +349,13 @@ abstract class _GameBase extends ChangeNotifier {
   void _checkRankUp();
   void _rewardUrgentQuest();
   void _startDungeonTimer();
-  void _finishDungeon({required bool victory});
+  Future<void> _finishDungeon({required bool victory});
   void _checkDungeonStatus();
   void _checkCycleCompletion();
   void debugTriggerRankedQuest();
   void debugForceSpawnThreat({bool isRed = false});
   void processPenaltySquats(int count);
-  void triggerDailyPenalty();
+  Future<void> triggerDailyPenalty();
   void toggleRunTracking();
   void addReps(String type, int count);
   void incrementExercise(String type);
