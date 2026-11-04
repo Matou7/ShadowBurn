@@ -42,6 +42,7 @@ class RaidAdminService {
         'preset_label': 'RAID STANDARD (5 000 PV)',
         'logs': [],
         'hunters': resetHunters,
+        'last_activity_at': FieldValue.serverTimestamp(),
         'updated_at': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
     } catch (e) {
@@ -65,6 +66,8 @@ class RaidAdminService {
         final Map<String, dynamic> updates = {
           'current_hp': nextHp,
           'last_strike_at': FieldValue.serverTimestamp(),
+          'last_activity_at': FieldValue.serverTimestamp(),
+          'updated_at': FieldValue.serverTimestamp(),
         };
         if (nextHp <= 0) {
           updates['status'] = 'victory';
@@ -108,6 +111,7 @@ class RaidAdminService {
         'status': 'active',
         'logs': [],
         'hunters': resetHunters,
+        'last_activity_at': FieldValue.serverTimestamp(),
         'updated_at': FieldValue.serverTimestamp(),
       });
     } catch (e) {
@@ -120,6 +124,7 @@ class RaidAdminService {
       final docRef = _firestore.collection('current_raids').doc(roomId);
       final Map<String, dynamic> payload = {
         'status': status,
+        'last_activity_at': FieldValue.serverTimestamp(),
         'updated_at': FieldValue.serverTimestamp(),
       };
       if (status == 'waiting') {
@@ -149,6 +154,7 @@ class RaidAdminService {
       final newEndTime = baseTime.add(Duration(minutes: minutes));
       await docRef.update({
         'target_end_time': newEndTime.millisecondsSinceEpoch,
+        'last_activity_at': FieldValue.serverTimestamp(),
         'updated_at': FieldValue.serverTimestamp(),
       });
     } catch (e) {
@@ -169,6 +175,7 @@ class RaidAdminService {
 
       await docRef.update({
         'target_end_time': newEndTime.millisecondsSinceEpoch,
+        'last_activity_at': FieldValue.serverTimestamp(),
         'updated_at': FieldValue.serverTimestamp(),
       });
     } catch (e) {
@@ -185,6 +192,7 @@ class RaidAdminService {
       await docRef.update({
         'target_end_time': midnight.millisecondsSinceEpoch,
         'status': 'active',
+        'last_activity_at': FieldValue.serverTimestamp(),
         'updated_at': FieldValue.serverTimestamp(),
       });
     } catch (e) {
@@ -198,6 +206,7 @@ class RaidAdminService {
       await docRef.update({
         'target_end_time': DateTime.now().subtract(const Duration(seconds: 1)).millisecondsSinceEpoch,
         'status': 'failed',
+        'last_activity_at': FieldValue.serverTimestamp(),
         'updated_at': FieldValue.serverTimestamp(),
       });
     } catch (e) {
