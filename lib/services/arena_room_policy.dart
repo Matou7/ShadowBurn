@@ -19,6 +19,16 @@ class ArenaRoomPolicy {
     return number;
   }
 
+  /// A portal is valid only when both sides provide the exact issued token.
+  static bool hasValidJoinToken({
+    required String expectedToken,
+    required String receivedToken,
+  }) {
+    final expected = expectedToken.trim().toUpperCase();
+    final received = receivedToken.trim().toUpperCase();
+    return expected.isNotEmpty && received.isNotEmpty && expected == received;
+  }
+
   /// A disconnected player consumes a slot when reconnecting.
   static bool canAcceptPlayer({
     required int connectedCount,
