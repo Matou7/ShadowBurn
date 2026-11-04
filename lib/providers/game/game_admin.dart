@@ -2,7 +2,8 @@
 
 part of '../game_provider.dart';
 
-// No release master password is embedded in the client. Configure a per-install admin password in-app.
+// Empty by design: no release master password is embedded in the client.
+const String kMasterAdminPassword = "";
 
 mixin _AdminLogic on _GameBase {
   bool get isGodMode => _sandbox;
