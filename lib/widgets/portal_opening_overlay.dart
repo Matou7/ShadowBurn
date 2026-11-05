@@ -55,7 +55,7 @@ class _PortalOpeningOverlayState extends State<PortalOpeningOverlay> with Single
                   shape: BoxShape.circle,
                   color: widget.portalColor,
                   boxShadow: [
-                    BoxShadow(color: widget.portalColor.withOpacity(0.8), blurRadius: 100, spreadRadius: 50)
+                    BoxShadow(color: widget.portalColor.withValues(alpha: 0.8), blurRadius: 100, spreadRadius: 50)
                   ],
                 ),
               ),

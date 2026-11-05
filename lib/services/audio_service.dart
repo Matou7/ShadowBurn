@@ -1,32 +1,26 @@
 import 'package:audioplayers/audioplayers.dart';
+import '../core/log.dart';
 
+/// Les noms de fichiers correspondent EXACTEMENT à ceux du dossier assets/audio/.
 class AudioService {
   static final AudioPlayer _player = AudioPlayer();
 
-  static Future<void> playLevelUp() async {
-    await _player.play(AssetSource('audio/levelup.mp3'));
-  }
-
-  static Future<void> playVictory() async {
-    await _player.play(AssetSource('audio/victory.mp3'));
-  }
-
-  static Future<void> playDefeat() async {
-    await _player.play(AssetSource('audio/defeat.mp3'));
-  }
-
-  static Future<void> playNationGoal() async {
-    await _player.play(AssetSource('audio/nation.mp3'));
-  }
-
-  // --- SON DES POPUPS HOLOGRAPHIQUES ---
-  static Future<void> playSystemNotification() async {
+  static Future<void> _play(String file) async {
     try {
-      await _player.stop(); 
-      // Assure-toi que le fichier est bien dans assets/audio/
-      await _player.play(AssetSource('audio/notifications.mp3'));
+      await _player.stop();
+      await _player.setReleaseMode(ReleaseMode.stop);
+      await _player.play(
+        AssetSource('audio/$file'),
+        mode: PlayerMode.lowLatency,
+      );
     } catch (e) {
-      print("Erreur Audio Notification: $e");
+      dlog("Erreur audio ($file) :$e");
     }
   }
+
+  static Future<void> playLevelUp() => _play('level_up.mp3');
+  static Future<void> playVictory() => _play('victory.mp3');
+  static Future<void> playDefeat() => _play('defeat.mp3');
+  static Future<void> playNationGoal() => _play('goal.mp3');
+  static Future<void> playSystemNotification() => _play('notifications.mp3');
 }

@@ -1,9 +1,11 @@
+// lib/models/dungeon.dart
+
 class Dungeon {
   final String id;
   final String rank;
   final List<dynamic> tasks;
   final List<double> progress;
-  DateTime expiresAt; // Non-final pour mise à jour possible si extension de temps
+  DateTime expiresAt;
   final int xpReward;
   final int penaltyXp;
   final bool isRandomThreat;
@@ -19,25 +21,43 @@ class Dungeon {
     required this.isRandomThreat,
   });
 
+  double get maxBossHp {
+    double total = 0;
+    for (var task in tasks) {
+      if (task is Map && task.containsKey('amount')) {
+        total += (task['amount'] as num).toDouble();
+      }
+    }
+    return total > 0 ? total : 1.0;
+  }
+
+  double get currentBossHp {
+    double totalProgress = 0;
+    for (var p in progress) {
+      totalProgress += p;
+    }
+    return (maxBossHp - totalProgress).clamp(0.0, maxBossHp);
+  }
+
   Map<String, dynamic> toJson() => {
-    'id': id,
-    'rank': rank,
-    'tasks': tasks,
-    'progress': progress,
-    'expiresAt': expiresAt.toIso8601String(),
-    'xpReward': xpReward,
-    'penaltyXp': penaltyXp,
-    'isRandomThreat': isRandomThreat,
-  };
+        'id': id,
+        'rank': rank,
+        'tasks': tasks,
+        'progress': progress,
+        'expiresAt': expiresAt.toIso8601String(),
+        'xpReward': xpReward,
+        'penaltyXp': penaltyXp,
+        'isRandomThreat': isRandomThreat,
+      };
 
   factory Dungeon.fromJson(Map<String, dynamic> json) => Dungeon(
-    id: json['id'],
-    rank: json['rank'],
-    tasks: json['tasks'],
-    progress: List<double>.from(json['progress'].map((x) => x.toDouble())), // Conversion explicite double
-    expiresAt: DateTime.parse(json['expiresAt']),
-    xpReward: json['xpReward'],
-    penaltyXp: json['penaltyXp'],
-    isRandomThreat: json['isRandomThreat'] ?? false,
-  );
+        id: json['id'],
+        rank: json['rank'],
+        tasks: List<dynamic>.from(json['tasks'] ?? const []),
+        progress: List<double>.from((json['progress'] ?? const []).map((x) => (x as num).toDouble())),
+        expiresAt: DateTime.parse(json['expiresAt']),
+        xpReward: json['xpReward'] ?? 0,
+        penaltyXp: json['penaltyXp'] ?? 0,
+        isRandomThreat: json['isRandomThreat'] ?? false,
+      );
 }
