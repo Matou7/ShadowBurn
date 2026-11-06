@@ -110,6 +110,39 @@ class GameProvider extends _GameBase
     } catch (_) {}
   }
 
+  // Méthode d'autonettoyage Firestore pour supprimer les salles orphelines (> 60s ou terminées)
+  Future<void> purgeExpiredRaids() async {
+    try {
+      final firestore = FirebaseFirestore.instance;
+      final now = DateTime.now();
+
+      for (String collectionPath in ['current_raids', 'current_raid']) {
+        final snapshot = await firestore.collection(collectionPath).get();
+        for (var doc in snapshot.docs) {
+          final data = doc.data();
+          final Timestamp? lastSeen = data['arena_last_seen'] as Timestamp?;
+          final String status = data['status'] as String? ?? 'waiting';
+
+          bool shouldDelete = false;
+          if (['finished', 'abandoned', 'closed'].contains(status)) {
+            shouldDelete = true;
+          } else if (lastSeen != null) {
+            final difference = now.difference(lastSeen.toDate());
+            if (difference.inSeconds > 60) {
+              shouldDelete = true;
+            }
+          }
+
+          if (shouldDelete) {
+            await doc.reference.delete();
+          }
+        }
+      }
+    } catch (e) {
+      dlog("[NETTOYAGE RAID] Erreur lors de la purge des salles orphelines : $e");
+    }
+  }
+
   @override
   void setUrgentQuestProvider(UrgentQuestProvider provider) {
     urgentQuestProvider = provider;
