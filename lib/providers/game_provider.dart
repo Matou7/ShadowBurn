@@ -110,7 +110,7 @@ class GameProvider extends _GameBase
     } catch (_) {}
   }
 
-  // Méthode d'autonettoyage Firestore pour supprimer les salles orphelines (> 60s ou terminées)
+  // Autonettoyage robuste basé sur le TTL (Time-To-Live / arena_last_seen > 60s)
   Future<void> purgeExpiredRaids() async {
     try {
       final firestore = FirebaseFirestore.instance;
@@ -124,12 +124,12 @@ class GameProvider extends _GameBase
           final String status = data['status'] as String? ?? 'waiting';
 
           bool shouldDelete = false;
-          if (['finished', 'abandoned', 'closed'].contains(status)) {
+          if (['finished', 'abandoned', 'closed', 'victory'].contains(status)) {
             shouldDelete = true;
           } else if (lastSeen != null) {
             final difference = now.difference(lastSeen.toDate());
             if (difference.inSeconds > 60) {
-              shouldDelete = true;
+              shouldDelete = true; // Salle orpheline purgée automatiquement
             }
           }
 
