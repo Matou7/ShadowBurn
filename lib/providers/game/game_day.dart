@@ -20,6 +20,14 @@ mixin _DayLogic on _GameBase {
   @override
   void toggleRunTracking() {
     _isTracking = !_isTracking;
+    
+    // Gère le démarrage ou l'arrêt effectif du service de podomètre natif
+    if (_isTracking) {
+      _steps.start();
+    } else {
+      _steps.stop();
+    }
+
     _requestSave();
     _notify();
   }
@@ -361,6 +369,9 @@ mixin _DayLogic on _GameBase {
 
   @override
   void _onSteps(StepEvent e) {
+    // CONDITION STRICTE : Ignore les pas si le bouton Play (isTracking) n'est pas activé !
+    if (!_isTracking) return;
+
     final int diff = e.delta;
     if (diff <= 0) return;
 
@@ -369,10 +380,7 @@ mixin _DayLogic on _GameBase {
     _totalKm += kmAdded;
     _dailyKm += kmAdded;
     _dailySteps += diff;
-
-    if (_isTracking) {
-      _sessionKm += kmAdded;
-    }
+    _sessionKm += kmAdded;
 
     if (_isClassChangeStarted) {
       _classChangeKm += kmAdded;
