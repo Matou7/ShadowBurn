@@ -1,3 +1,4 @@
+// lib/providers/game/game_xp.dart
 part of '../game_provider.dart';
 
 mixin _XpLogic on _GameBase {

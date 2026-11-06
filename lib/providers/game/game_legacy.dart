@@ -1,3 +1,4 @@
+// lib/providers/game/game_legacy.dart
 part of '../game_provider.dart';
 
 /// COMPATIBILITÉ : membres exigés par les anciens écrans titles_screen.dart et arise_overlay.dart,

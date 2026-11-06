@@ -47,7 +47,7 @@ class GameProvider extends _GameBase
         _XpLogic {
   
   String _persistedLicenseKey = '';
-  String _awakeningDate = ''; // GRAVURE DU PREMIER ÉVEIL
+  String _awakeningDate = '';
 
   String get licenseKey => _persistedLicenseKey;
   String get awakeningDate => _awakeningDate.isNotEmpty ? _awakeningDate : '--/--/----';
@@ -71,7 +71,6 @@ class GameProvider extends _GameBase
     initializeGame();
   }
 
-  /// Initialise et grave définitivement la date du premier éveil sur le Hardware
   Future<void> _initAwakeningDate() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -94,7 +93,7 @@ class GameProvider extends _GameBase
       final saved = prefs.getString('shadow_user_license_key');
       if (saved != null && saved.trim().isNotEmpty) {
         _persistedLicenseKey = saved.trim();
-        _isPro = true; // Rétablit le flag Pro immédiatement dès le lancement
+        _isPro = true;
         notifyListeners();
       }
     } catch (_) {}
@@ -111,6 +110,7 @@ class GameProvider extends _GameBase
     } catch (_) {}
   }
 
+  @override
   void setUrgentQuestProvider(UrgentQuestProvider provider) {
     urgentQuestProvider = provider;
     urgentQuestProvider!.onTimeExpired = () {

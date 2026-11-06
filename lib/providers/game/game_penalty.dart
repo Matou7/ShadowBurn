@@ -1,9 +1,7 @@
 // lib/providers/game/game_penalty.dart
-
 part of '../game_provider.dart';
 
 mixin _PenaltyLogic on _GameBase {
-  /// Rétablissement direct des données de pénalité depuis le stockage natif (boot).
   void restorePenaltyState(int squatsDone, int squatsGoal) {
     if (_sandbox && !SandboxManager.persistPenalty) return;
 
@@ -14,7 +12,6 @@ mixin _PenaltyLogic on _GameBase {
   }
 
   void triggerDailyPenalty() {
-    // SÉCURITÉ ZONE BLANCHE : aucune pénalité ne peut être levée le jour de l'installation
     final String today = _todayKey();
     if (_calendarHistory[today]?['status'] == 'white_zone') {
       return;

@@ -1,3 +1,5 @@
+// lib/screens/permission_guide_screen.dart
+
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -140,10 +142,8 @@ class _PermissionGuideScreenState extends State<PermissionGuideScreen>
 
   Future<void> _handleBatteryDeep() async {
     setState(() => _isChecking = true);
-    // 1. Demande prioritaire via le dialogue système officiel
     final status = await Permission.ignoreBatteryOptimizations.request();
     
-    // 2. Si le dialogue natif ne s'ouvre pas ou échoue sous MIUI, routage vers PowerKeeper
     if (!status.isGranted) {
       try {
         await _platform.invokeMethod('openBatteryNoRestrictions');
@@ -223,7 +223,6 @@ class _PermissionGuideScreenState extends State<PermissionGuideScreen>
                 Expanded(
                   child: ListView(
                     children: [
-                      // SECTEUR 1
                       _buildSectorContainer(
                         title: "1. Forge Physique & Radar",
                         subtitle: "ACTIVITY_RECOGNITION • NOTIFICATIONS",
@@ -254,7 +253,6 @@ class _PermissionGuideScreenState extends State<PermissionGuideScreen>
                       ),
                       const SizedBox(height: 12),
 
-                      // SECTEUR 2
                       _buildSectorContainer(
                         title: "2. Confinement Cerbère",
                         subtitle: "SYSTEM_ALERT_WINDOW • PACKAGE_USAGE_STATS",
@@ -312,7 +310,6 @@ class _PermissionGuideScreenState extends State<PermissionGuideScreen>
                       ),
                       const SizedBox(height: 12),
 
-                      // SECTEUR 3 : ZÉRO SKIP SUR LA BATTERIE
                       _buildSectorContainer(
                         title: "3. Matrice de Réveil & Zéro Restriction",
                         subtitle: "BATTERY_OPTIMIZATIONS • MATÉRIEL",
@@ -347,7 +344,6 @@ class _PermissionGuideScreenState extends State<PermissionGuideScreen>
 
                 const SizedBox(height: 10),
 
-                // BOUTON DE SORTIE : DÉSACTIVÉ TANT QUE TOUT N'EST PAS AU VERT
                 ElevatedButton(
                   style: ElevatedButton.styleFrom(
                     backgroundColor: allGood ? const Color(0xFF00E5FF) : Colors.grey[900],
@@ -401,8 +397,8 @@ class _PermissionGuideScreenState extends State<PermissionGuideScreen>
         borderRadius: BorderRadius.circular(8),
         border: Border.all(
           color: isComplete
-              ? const Color(0xFF00E5FF).withValues(alpha: 0.6)
-              : Colors.redAccent.withValues(alpha: 0.4),
+              ? const Color(0xFF00E5FF).withOpacity(0.6)
+              : Colors.redAccent.withOpacity(0.4),
         ),
       ),
       child: Column(

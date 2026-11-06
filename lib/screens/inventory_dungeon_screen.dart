@@ -387,7 +387,6 @@ class InventoryDungeonScreen extends StatelessWidget {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            // CORRECTION DU CADENAS (stack propre et espacé)
             Stack(
               alignment: Alignment.center,
               children: [

@@ -1,5 +1,4 @@
 // lib/providers/game/game_day.dart
-
 part of '../game_provider.dart';
 
 mixin _DayLogic on _GameBase {
@@ -34,7 +33,6 @@ mixin _DayLogic on _GameBase {
       if (t.contains("squat")) {
         processPenaltySquats(count);
       }
-      // On bloque immédiatement : aucun gain d'XP ou d'effort quotidien n'est compté en zone de pénalité.
       return;
     }
 
@@ -154,16 +152,13 @@ mixin _DayLogic on _GameBase {
   Future<void> checkMidnightReset() async {
     final String today = _todayKey();
     
-    // BLINDAGE ANTI-VOYAGE TEMPOREL
     final prefs = await SharedPreferences.getInstance();
     final int lastKnownMs = prefs.getInt('shadow_last_known_ms') ?? 0;
     final int nowMs = DateTime.now().millisecondsSinceEpoch;
     
     if (nowMs < lastKnownMs) {
-      // Le téléphone a été reculé dans le temps de façon significative (plus de 5 minutes)
       if ((lastKnownMs - nowMs) > 300000) {
         dlog("[SÉCURITÉ] Anomalie Temporelle détectée. Le temps a été altéré.");
-        // Pour une app commerciale, on bloque silencieusement la validation des jours passés
         return; 
       }
     } else {
@@ -192,7 +187,6 @@ mixin _DayLogic on _GameBase {
 
     final int daysDiff = currentUtc.difference(lastUtc).inDays;
     
-    // ANTI-TRICHE : Empêcher le bond dans le futur
     if (daysDiff < 0) {
       dlog("[SÉCURITÉ] Retour dans le passé détecté sur la date civile.");
       return; 
@@ -248,7 +242,6 @@ mixin _DayLogic on _GameBase {
           'status': 'grey',
           'recordBroken': false,
         };
-        // On ne force le lock que sur le premier jour manqué pour éviter une sur-couverture
         if (i == 0 && !_isInPenaltyZone) {
           triggerDailyPenalty();
         }

@@ -60,7 +60,6 @@ class _ArenaTvScreenState extends State with WidgetsBindingObserver {
       if (!mounted) return;
 
       final now = DateTime.now();
-      // VERROUILLAGE NOCTURNE : Fermé de 00:00 à 06:00 du matin
       bool isNightClosed = now.hour >= 0 && now.hour < 6;
       if (isNightClosed != _isNightLockActive) {
         setState(() {
@@ -695,7 +694,6 @@ class _ArenaTvScreenState extends State with WidgetsBindingObserver {
           : _buildCombatWithMiniPodiumPanel(logs, hunters);
     }
 
-    // DISPOSITION GLOBALE AVEC PANNEAU LATÉRAL CONSTANT
     Widget mainContent = Row(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -1689,7 +1687,6 @@ class _ArenaTvScreenState extends State with WidgetsBindingObserver {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            // --- SECTION 1 : SCAN CHASSEUR (REJOINDRE) ---
             const Text(
               'SCAN CHASSEUR',
               style: TextStyle(
@@ -1731,7 +1728,6 @@ class _ArenaTvScreenState extends State with WidgetsBindingObserver {
             const Divider(color: Colors.white24, height: 1),
             const SizedBox(height: 14),
 
-            // --- SECTION 2 : TÉLÉCOMMANDE MAÎTRE ---
             const Text(
               'TÉLÉCOMMANDE',
               style: TextStyle(
@@ -1775,7 +1771,6 @@ class _ArenaTvScreenState extends State with WidgetsBindingObserver {
             const Divider(color: Colors.white24, height: 1),
             const SizedBox(height: 14),
 
-            // --- SECTION 3 : TÉLÉCHARGER L'APPLICATION APK ---
             const Text(
               'TÉLÉCHARGER APK',
               style: TextStyle(

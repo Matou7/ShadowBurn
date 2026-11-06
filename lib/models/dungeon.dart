@@ -1,5 +1,4 @@
 // lib/models/dungeon.dart
-
 class Dungeon {
   final String id;
   final String rank;
@@ -51,11 +50,11 @@ class Dungeon {
       };
 
   factory Dungeon.fromJson(Map<String, dynamic> json) => Dungeon(
-        id: json['id'],
-        rank: json['rank'],
+        id: json['id'] ?? '',
+        rank: json['rank'] ?? 'E',
         tasks: List<dynamic>.from(json['tasks'] ?? const []),
         progress: List<double>.from((json['progress'] ?? const []).map((x) => (x as num).toDouble())),
-        expiresAt: DateTime.parse(json['expiresAt']),
+        expiresAt: json['expiresAt'] != null ? DateTime.parse(json['expiresAt']) : DateTime.now(),
         xpReward: json['xpReward'] ?? 0,
         penaltyXp: json['penaltyXp'] ?? 0,
         isRandomThreat: json['isRandomThreat'] ?? false,

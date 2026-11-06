@@ -1,5 +1,4 @@
 // lib/providers/game/game_admin.dart
-
 part of '../game_provider.dart';
 
 const String kMasterAdminPassword = "tricheur";

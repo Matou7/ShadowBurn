@@ -1,3 +1,5 @@
+// lib/screens/titles_screen.dart
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/game_provider.dart';
@@ -21,7 +23,6 @@ class TitlesScreen extends StatelessWidget {
       ),
       body: Column(
         children: [
-          // BANDEAU DE SANCTION (Si titres désactivés suite à une mort)
           if (!game.areTitlesActive)
             Container(
               width: double.infinity,
@@ -41,7 +42,6 @@ class TitlesScreen extends StatelessWidget {
               ),
             ),
 
-          // LISTE DES TITRES
           Expanded(
             child: ListView.builder(
               itemCount: game.unlockedTitles.length,
@@ -69,7 +69,7 @@ class TitlesScreen extends StatelessWidget {
                     subtitle: Text(
                       _getTitleEffect(title), 
                       style: TextStyle(
-                        color: game.areTitlesActive ? Colors.grey : Colors.grey[800], // Grisé si inactif
+                        color: game.areTitlesActive ? Colors.grey : Colors.grey[800],
                         fontSize: 12
                       )
                     ),
@@ -78,7 +78,7 @@ class TitlesScreen extends StatelessWidget {
                       : TextButton(
                           onPressed: game.areTitlesActive 
                             ? () => context.read<GameProvider>().equipTitle(title)
-                            : null, // Bouton désactivé si sanction
+                            : null,
                           child: const Text("ÉQUIPER"),
                         ),
                   ),
@@ -91,7 +91,6 @@ class TitlesScreen extends StatelessWidget {
     );
   }
 
-  // Descriptions Cosmétiques
   String _getTitleEffect(String title) {
     switch (title) {
       case "Adversaire d'Acier": return "Bonus: +5 Force (Cosmétique)";

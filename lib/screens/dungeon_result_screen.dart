@@ -23,7 +23,7 @@ class DungeonResultScreen extends StatelessWidget {
         decoration: BoxDecoration(
           gradient: RadialGradient(
             colors: [
-              success ? Colors.blueAccent.withValues(alpha: 0.2) : Colors.redAccent.withValues(alpha: 0.2),
+              success ? Colors.blueAccent.withOpacity(0.2) : Colors.redAccent.withOpacity(0.2),
               Colors.black,
             ],
             radius: 1.0,
@@ -55,7 +55,7 @@ class DungeonResultScreen extends StatelessWidget {
                   padding: const EdgeInsets.all(26),
                   margin: const EdgeInsets.symmetric(horizontal: 32),
                   decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.05),
+                    color: Colors.white.withOpacity(0.05),
                     borderRadius: BorderRadius.circular(20),
                     border: Border.all(color: Colors.white10),
                   ),
@@ -106,7 +106,6 @@ class DungeonResultScreen extends StatelessWidget {
                   ),
                 ),
 
-                // ESPACEMENT FRANC POUR LE QR CODE DE TÉLÉCHARGEMENT DE L'APPLICATION
                 const SizedBox(height: 48),
 
                 Container(
@@ -115,7 +114,7 @@ class DungeonResultScreen extends StatelessWidget {
                   decoration: BoxDecoration(
                     color: const Color(0xFF0A121E),
                     borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: Colors.cyanAccent.withValues(alpha: 0.4)),
+                    border: Border.all(color: Colors.cyanAccent.withOpacity(0.4)),
                   ),
                   child: Column(
                     children: [

@@ -1,3 +1,5 @@
+// lib/screens/class_change_quest_screen.dart
+
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -57,10 +59,9 @@ class _ClassChangeQuestScreenState extends State<ClassChangeQuestScreen> {
               begin: Alignment.topCenter,
               end: Alignment.bottomCenter,
               colors: [
-                if (isCompleted) Colors.amber.shade900.withValues(alpha: 0.8)
-                else if (isFailed) Colors.red.shade900.withValues(alpha: 0.8)
-                else Colors.deepPurple.shade900.withValues(alpha: 0.8),
-                
+                if (isCompleted) Colors.amber.shade900.withOpacity(0.8)
+                else if (isFailed) Colors.red.shade900.withOpacity(0.8)
+                else Colors.deepPurple.shade900.withOpacity(0.8),
                 const Color(0xFF000000),
               ],
               stops: const [0.0, 0.6],
@@ -73,16 +74,14 @@ class _ClassChangeQuestScreenState extends State<ClassChangeQuestScreen> {
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
                   const SizedBox(height: 30),
-
-                  // --- EN-TÊTE ---
                   Text(
                     isFailed ? "ÉCHEC DE L'ÉPREUVE" : "ÉPREUVE DE CHANGEMENT DE CLASSE",
                     style: TextStyle(
-                      color: isFailed ? Colors.red : Colors.purpleAccent.withValues(alpha: 0.9),
+                      color: isFailed ? Colors.red : Colors.purpleAccent.withOpacity(0.9),
                       letterSpacing: 1.2,
                       fontSize: 12,
                       fontWeight: FontWeight.bold,
-                      shadows: [Shadow(color: Colors.black, blurRadius: 15)],
+                      shadows: const [Shadow(color: Colors.black, blurRadius: 15)],
                     ),
                   ),
                   const SizedBox(height: 10),
@@ -94,19 +93,17 @@ class _ClassChangeQuestScreenState extends State<ClassChangeQuestScreen> {
                       fontSize: 26,
                       fontWeight: FontWeight.bold,
                       letterSpacing: 1.2,
-                      fontFamily: 'Cinzel', 
+                      fontFamily: 'Cinzel',
                       shadows: [
                         Shadow(color: isCompleted ? Colors.orange : Colors.purple, blurRadius: 20)
-                      ]
+                      ],
                     ),
                   ),
                   const SizedBox(height: 20),
-
-                  // --- DESCRIPTION ---
                   Container(
                     padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.08),
+                      color: Colors.white.withOpacity(0.08),
                       borderRadius: BorderRadius.circular(10),
                       border: Border.all(color: Colors.white12),
                     ),
@@ -120,10 +117,7 @@ class _ClassChangeQuestScreenState extends State<ClassChangeQuestScreen> {
                       style: const TextStyle(color: Colors.white70, fontSize: 13, height: 1.5),
                     ),
                   ),
-
                   const SizedBox(height: 30),
-
-                  // --- BOUTON DEMARRER OU TIMER ---
                   AnimatedSwitcher(
                     duration: const Duration(milliseconds: 500),
                     child: !hasStarted
@@ -140,7 +134,7 @@ class _ClassChangeQuestScreenState extends State<ClassChangeQuestScreen> {
                                 borderRadius: BorderRadius.circular(12),
                                 border: Border.all(color: const Color(0xFFAB47BC), width: 2),
                                 boxShadow: [
-                                  BoxShadow(color: const Color(0xFFAB47BC).withValues(alpha: 0.6), blurRadius: 15, spreadRadius: 1)
+                                  BoxShadow(color: const Color(0xFFAB47BC).withOpacity(0.6), blurRadius: 15, spreadRadius: 1)
                                 ],
                               ),
                               child: const Text(
@@ -155,8 +149,8 @@ class _ClassChangeQuestScreenState extends State<ClassChangeQuestScreen> {
                             decoration: BoxDecoration(
                               color: const Color(0xFF1A0505),
                               borderRadius: BorderRadius.circular(12),
-                              border: Border.all(color: isFailed ? Colors.red : Colors.redAccent.withValues(alpha: 0.6), width: 1),
-                              boxShadow: [BoxShadow(color: Colors.redAccent.withValues(alpha: 0.2), blurRadius: 20, spreadRadius: 2)],
+                              border: Border.all(color: isFailed ? Colors.red : Colors.redAccent.withOpacity(0.6), width: 1),
+                              boxShadow: [BoxShadow(color: Colors.redAccent.withOpacity(0.2), blurRadius: 20, spreadRadius: 2)],
                             ),
                             child: Text(
                               game.formattedRemainingTime,
@@ -170,10 +164,7 @@ class _ClassChangeQuestScreenState extends State<ClassChangeQuestScreen> {
                             ),
                           ),
                   ),
-
                   const SizedBox(height: 30),
-
-                  // --- LISTE DES OBJECTIFS ---
                   Expanded(
                     child: ListView(
                       physics: const BouncingScrollPhysics(),
@@ -185,9 +176,6 @@ class _ClassChangeQuestScreenState extends State<ClassChangeQuestScreen> {
                       ],
                     ),
                   ),
-                  
-                  // --- BOUTONS D'ENTRAINEMENT (NOUVEAU DESIGN) ---
-                  // Uniquement visibles si l'épreuve a commencé, n'est pas finie et n'a pas échoué
                   if (hasStarted && isTimerRunning && !isCompleted)
                     Padding(
                       padding: const EdgeInsets.only(bottom: 20.0),
@@ -200,8 +188,6 @@ class _ClassChangeQuestScreenState extends State<ClassChangeQuestScreen> {
                         ],
                       ),
                     ),
-
-                  // --- BOUTON FINAL ---
                   if (isCompleted || isFailed)
                     GestureDetector(
                       onTap: () {
@@ -221,7 +207,7 @@ class _ClassChangeQuestScreenState extends State<ClassChangeQuestScreen> {
                             color: isCompleted ? Colors.yellowAccent : Colors.redAccent,
                             width: 2
                           ),
-                          boxShadow: [BoxShadow(color: (isCompleted ? Colors.orange : Colors.red).withValues(alpha: 0.5), blurRadius: 20)],
+                          boxShadow: [BoxShadow(color: (isCompleted ? Colors.orange : Colors.red).withOpacity(0.5), blurRadius: 20)],
                         ),
                         child: Center(
                           child: Text(
@@ -233,7 +219,6 @@ class _ClassChangeQuestScreenState extends State<ClassChangeQuestScreen> {
                     )
                   else
                     Container(height: 60), 
-
                   const SizedBox(height: 10),
                   const Text(
                     "Une fois le pouvoir extrait, votre ancienne vie prendra fin.",
@@ -250,23 +235,21 @@ class _ClassChangeQuestScreenState extends State<ClassChangeQuestScreen> {
     );
   }
 
-  // --- NOUVEAU WIDGET BOUTON RECTANGLE ---
   Widget _buildRectButton(String label, VoidCallback onTap) {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        // Design : Fond Noir, Contour Blanc, Rectangulaire
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         decoration: BoxDecoration(
           color: Colors.black, 
           border: Border.all(color: Colors.white, width: 1.0),
           borderRadius: BorderRadius.circular(4), 
           boxShadow: [
-             BoxShadow(color: Colors.white.withValues(alpha: 0.1), blurRadius: 4, offset: const Offset(0, 2))
+             BoxShadow(color: Colors.white.withOpacity(0.1), blurRadius: 4, offset: const Offset(0, 2))
           ]
         ),
         child: Text(
-          label, // Texte (ex: POMPES)
+          label,
           style: const TextStyle(
             color: Colors.white, 
             fontWeight: FontWeight.bold, 
@@ -278,7 +261,6 @@ class _ClassChangeQuestScreenState extends State<ClassChangeQuestScreen> {
     );
   }
 
-  // Widget des barres
   Widget _buildObjectiveBar(String label, double current, double max, String unit, Color color) {
     double progress = (max > 0) ? (current / max).clamp(0.0, 1.0) : 0.0;
     bool isDone = progress >= 1.0;
@@ -306,7 +288,7 @@ class _ClassChangeQuestScreenState extends State<ClassChangeQuestScreen> {
             children: [
               Container(
                 height: 6,
-                decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(3))
+                decoration: BoxDecoration(color: Colors.white.withOpacity(0.1), borderRadius: BorderRadius.circular(3))
               ),
               AnimatedContainer(
                 duration: const Duration(milliseconds: 300),
@@ -315,7 +297,7 @@ class _ClassChangeQuestScreenState extends State<ClassChangeQuestScreen> {
                 decoration: BoxDecoration(
                   color: color,
                   borderRadius: BorderRadius.circular(3),
-                  boxShadow: [BoxShadow(color: color.withValues(alpha: 0.5), blurRadius: 8, spreadRadius: 0)]
+                  boxShadow: [BoxShadow(color: color.withOpacity(0.5), blurRadius: 8, spreadRadius: 0)]
                 ),
               ),
             ],

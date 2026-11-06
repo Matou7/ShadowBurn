@@ -1,6 +1,7 @@
+// lib/core/titles.dart
 /// ============================================================
-///  CATALOGUE DES TITRES — pour en ajouter un, ajoute une ligne.
-///  Un titre se débloque automatiquement quand sa condition est vraie.
+///   CATALOGUE DES TITRES — pour en ajouter un, ajoute une ligne.
+///   Un titre se débloque automatiquement quand sa condition est vraie.
 /// ============================================================
 class TitleStats {
   final int rankIndex; // E=0, D=1, C=2, B=3, A=4, S=5, NATION=6, MONARQUE=7

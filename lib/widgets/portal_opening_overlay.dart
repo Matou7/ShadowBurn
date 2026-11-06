@@ -1,4 +1,5 @@
 // lib/widgets/portal_opening_overlay.dart
+
 import 'package:flutter/material.dart';
 
 class PortalOpeningOverlay extends StatefulWidget {

@@ -175,7 +175,6 @@ class PenaltyScreen extends StatelessWidget {
   }
 }
 
-// Bouton avec Cooldown anti-spam (2 secondes)
 class _HoldSquatsButton extends StatefulWidget {
   final Color penaltyRed;
   final VoidCallback onValidated;

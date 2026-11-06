@@ -1,3 +1,5 @@
+// lib/screens/system_check_screen.dart
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/game_provider.dart';
@@ -21,13 +23,10 @@ class _SystemCheckScreenState extends State<SystemCheckScreen> {
   }
 
   Future<void> _auditSystem() async {
-    // Simulation / Vérification des permissions natives requises pour le mode Chasseur
     await Future.delayed(const Duration(seconds: 1));
-    
-    // Ici tu pourras brancher les plugins de vérification de permissions réels (ex: permission_handler)
     setState(() {
-      _hasOverlayPermission = true; // Remplacer par la vérification native d'overlay
-      _hasStepPermission = true;    // Remplacer par la vérification des capteurs de pas
+      _hasOverlayPermission = true;
+      _hasStepPermission = true;
       _isLoading = false;
     });
   }

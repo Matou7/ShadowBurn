@@ -1,24 +1,25 @@
+// lib/core/balance.dart
 /// ============================================================
 ///   TABLE D'ÉQUILIBRAGE UNIQUE — une ligne par rang.
 /// ============================================================
 class RankConfig {
   final String id;
   final int index;
-  final double goalKm;            // objectif km quotidien
-  final int goalExo;              // objectif quotidien (pompes / abdos / squats)
+  final double goalKm;             // objectif km quotidien
+  final int goalExo;               // objectif quotidien (pompes / abdos / squats)
   final int maxHp;
-  final int attribute;            // force = endurance
-  final double xpFloor;           // XP minimum du rang
-  final double xpNext;            // XP pour monter au rang suivant
-  final int cycleReward;          // XP d'un cycle quotidien validé
-  final int urgentReward;         // XP d'une quête urgente réussie
-  final int urgentPenalty;        // perte d'XP si fuite / temps écoulé
-  final int missedDayPenalty;     // perte d'XP par jour raté
-  final int dungeonReward;        // XP d'un donjon réussi
-  final int dungeonPenalty;       // perte d'XP si fuite / temps écoulé
-  final int dungeonSeconds;       // DURÉE TEST : en secondes (10s pour test)
-  final double urgentMultiplier;  // difficulté des quêtes urgentes
-  final int colorValue;           // couleur du rang (ARGB)
+  final int attribute;             // force = endurance
+  final double xpFloor;            // XP minimum du rang
+  final double xpNext;             // XP pour monter au rang suivant
+  final int cycleReward;           // XP d'un cycle quotidien validé
+  final int urgentReward;          // XP d'une quête urgente réussie
+  final int urgentPenalty;         // perte d'XP si fuite / temps écoulé
+  final int missedDayPenalty;      // perte d'XP par jour raté
+  final int dungeonReward;         // XP d'un donjon réussi
+  final int dungeonPenalty;        // perte d'XP si fuite / temps écoulé
+  final int dungeonSeconds;        // DURÉE TEST : en secondes (10s pour test)
+  final double urgentMultiplier;   // difficulté des quêtes urgentes
+  final int colorValue;            // couleur du rang (ARGB)
 
   const RankConfig({
     required this.id,
@@ -85,7 +86,7 @@ class Balance {
     "S": RankConfig(
       id: "S", index: 5, goalKm: 10.0, goalExo: 100, maxHp: 5000, attribute: 500,
       xpFloor: 200000001, xpNext: 1000000000,
-      cycleReward: 250000, urgentReward: 50000, urgentPenalty: 200000, missedDayPenalty: 500000,
+      cycleReward: 2500500, urgentReward: 50000, urgentPenalty: 200000, missedDayPenalty: 500000,
       dungeonReward: 2500000, dungeonPenalty: 4000000, dungeonSeconds: 10,
       urgentMultiplier: 5.0, colorValue: 0xFFFFD700,
     ),

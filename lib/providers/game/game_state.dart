@@ -1,5 +1,4 @@
 // lib/providers/game/game_state.dart
-
 part of '../game_provider.dart';
 
 abstract class _GameBase extends ChangeNotifier {

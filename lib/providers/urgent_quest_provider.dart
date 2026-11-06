@@ -1,5 +1,4 @@
 // lib/providers/urgent_quest_provider.dart
-
 import 'dart:async';
 import 'dart:math';
 import 'package:flutter/material.dart';

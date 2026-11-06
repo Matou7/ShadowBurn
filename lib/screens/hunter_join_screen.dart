@@ -66,7 +66,6 @@ class _HunterJoinScreenState extends State<HunterJoinScreen> with WidgetsBinding
   int _antiCheatCooldownSeconds = 0;
   Timer? _antiCheatTimer;
 
-  // CONTOURNEMENT RADICAL : List brute sans chevrons complexes pour éviter tout conflit de parser
   int _pendingDamage = 0;
   int _pendingSquatReps = 0;
   int _pendingPushupReps = 0;

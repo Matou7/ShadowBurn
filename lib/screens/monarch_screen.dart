@@ -1,3 +1,5 @@
+// lib/screens/monarch_screen.dart
+
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -52,7 +54,7 @@ class _MonarchScreenState extends State<MonarchScreen> {
             gradient: LinearGradient(
               begin: Alignment.topCenter,
               end: Alignment.bottomCenter,
-              colors: [Colors.deepPurple.shade900.withValues(alpha: 0.8), Colors.black],
+              colors: [Colors.deepPurple.shade900.withOpacity(0.8), Colors.black],
             ),
           ),
           child: Padding(
@@ -78,14 +80,13 @@ class _MonarchScreenState extends State<MonarchScreen> {
                 ),
                 const SizedBox(height: 30),
 
-                // --- TIMER ---
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 15),
                   decoration: BoxDecoration(
-                    border: Border.all(color: Colors.redAccent.withValues(alpha: 0.8), width: 2),
+                    border: Border.all(color: Colors.redAccent.withOpacity(0.8), width: 2),
                     borderRadius: BorderRadius.circular(10),
                     color: Colors.black54,
-                    boxShadow: [BoxShadow(color: Colors.redAccent.withValues(alpha: 0.2), blurRadius: 10)],
+                    boxShadow: [BoxShadow(color: Colors.redAccent.withOpacity(0.2), blurRadius: 10)],
                   ),
                   child: Text(
                     game.formattedRemainingTime,
@@ -100,7 +101,6 @@ class _MonarchScreenState extends State<MonarchScreen> {
 
                 const SizedBox(height: 40),
 
-                // --- BARRES DE PROGRESSION (QUOTAS 400 REPS / 40 KM) ---
                 _buildQuestBar("ENDURANCE : COURSE", game.classChangeKm, goalMonarqueKm, "KM", Colors.cyanAccent),
                 const SizedBox(height: 20),
                 _buildQuestBar("FORCE : POMPES", game.classChangePompes.toDouble(), goalMonarquePompes.toDouble(), "REPS", Colors.redAccent),
@@ -111,7 +111,6 @@ class _MonarchScreenState extends State<MonarchScreen> {
 
                 const Spacer(),
 
-                // --- BOUTONS DEBUG ---
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                   children: [
@@ -122,7 +121,6 @@ class _MonarchScreenState extends State<MonarchScreen> {
                 ),
                 const SizedBox(height: 20),
 
-                // --- BOUTON DE VALIDATION ---
                 if (allGoalsMet)
                   ElevatedButton(
                     onPressed: () => game.completeClassChange(),

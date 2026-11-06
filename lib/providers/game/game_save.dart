@@ -1,5 +1,4 @@
 // lib/providers/game/game_save.dart
-
 part of '../game_provider.dart';
 
 const String _kShadowHmacSalt = "SHADOWBURN_ARCHITECT_CORE_HMAC_SIG_99812";
@@ -240,7 +239,10 @@ mixin _SaveLogic on _GameBase {
     _classChangeKm = max(0.0, asDouble(cc['k']));
 
     _calendarHistory = asMap(j['calendar']);
-    _saveHistory = asList(j['saveHistory']).map((e) => asMap(e)).toList();
+    _saveHistory = asList(j['saveHistory']).map((e) {
+      if (e is Map) return Map<String, dynamic>.from(e);
+      return <String, dynamic>{};
+    }).toList();
 
     _dungeonTimer?.cancel();
     _activeDungeon = null;
@@ -289,8 +291,6 @@ mixin _SaveLogic on _GameBase {
     }
   }
 
-  /// Algorithme de hachage double canal FNV-1a 32-bit + DJB2 32-bit
-  /// 100 % compatible Web (dart2js 53-bit max) et Natif Android/Windows
   String _generateSaveSignature(String payload) {
     int hash1 = 0x811c9dc5;
     int hash2 = 0x1505;
@@ -343,7 +343,7 @@ mixin _SaveLogic on _GameBase {
           final String expectedSig = _generateSaveSignature(body);
 
           if (providedSig != expectedSig) {
-            dlog("[SÉCURITÉ] Rejet Import : Empreinte de signature invalide (Sauvegarde corrompue ou falsifiée).");
+            dlog("[SÉCURITÉ] Rejet Import : Empreinte de signature invalide.");
             return false;
           }
           payload = body;
