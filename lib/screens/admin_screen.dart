@@ -1,5 +1,6 @@
 // lib/screens/admin_screen.dart
 
+import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -21,6 +22,8 @@ class _AdminScreenState extends State<AdminScreen> {
   bool _isChecking = true;
   bool _isAuthorized = false;
   String _denialReason = "VÉRIFICATION DES DROITS DU MONARQUE...";
+
+  static final String _adminSessionId = 'admin_${DateTime.now().millisecondsSinceEpoch}_${Random().nextInt(9999)}';
 
   @override
   void didChangeDependencies() {
@@ -56,7 +59,8 @@ class _AdminScreenState extends State<AdminScreen> {
     }
 
     try {
-      final doc = await FirebaseFirestore.instance.collection('current_raids').doc(_roomId).get();
+      final ref = FirebaseFirestore.instance.collection('current_raids').doc(_roomId);
+      final doc = await ref.get();
       if (!doc.exists) {
         if (mounted) {
           setState(() {
@@ -81,6 +85,28 @@ class _AdminScreenState extends State<AdminScreen> {
         }
         return;
       }
+
+      // VÉRIFICATION DE SESSION UNIQUE ADMIN (Anti-triche / Anti-intrusion sans Heartbeat)
+      final String? activeAdmin = data['active_admin_session'];
+      final int lastAdminHeartbeat = (data['admin_last_seen'] as num?)?.toInt() ?? 0;
+      final int now = DateTime.now().millisecondsSinceEpoch;
+
+      if (activeAdmin != null && activeAdmin != _adminSessionId && (now - lastAdminHeartbeat < 60000)) {
+        if (mounted) {
+          setState(() {
+            _isChecking = false;
+            _isAuthorized = false;
+            _denialReason = "ACCÈS BLOQUÉ : UNE SESSION ADMINISTRATEUR EST DÉJÀ ACTIVE SUR UN AUTRE APPAREIL.\nUn seul Maître du Jeu est autorisé par salle.";
+          });
+        }
+        return;
+      }
+
+      // Enregistrement unique à la connexion (Zéro écriture périodique par la suite)
+      await ref.set({
+        'active_admin_session': _adminSessionId,
+        'admin_last_seen': now,
+      }, SetOptions(merge: true));
 
       if (mounted) {
         setState(() {

@@ -2,9 +2,9 @@
 
 import 'dart:async';
 import 'dart:math';
-import 'dart:html' as html;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'arena_web_helper_stub.dart' if (dart.library.html) 'arena_web_helper_web.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../services/audio_service.dart';
 
@@ -42,14 +42,13 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
   double _currentBossHp = 5000.0;
 
   int _lastRoomActivityMs = 0;
-  int _idleSecondsElapsed = 0;
   int _lastKnownHunterCount = 0;
   double _lastKnownHp = 5000.0;
   String _lastKnownStatus = 'waiting';
 
   static const int kMaxGlobalRooms = 100;
   static const int kMaxHuntersPerRoom = 10;
-  static const int kHeartbeatIntervalSeconds = 20;
+  static const int kHeartbeatIntervalSeconds = 30; // Espacé pour économiser le quota
   static const int kRoomDeathThresholdMs = 45000;
 
   @override
@@ -58,9 +57,8 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
     WidgetsBinding.instance.addObserver(this);
     _lastRoomActivityMs = DateTime.now().millisecondsSinceEpoch;
 
-    // MODE CONVENTION : Nettoyage immédiat de la salle dans Firestore si l'onglet est fermé
     if (kIsWeb) {
-      html.window.onBeforeUnload.listen((event) {
+      ArenaWebHelper.registerBeforeUnload(() {
         _despawnAndStopAllTimers();
       });
     }
@@ -79,8 +77,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
           return;
         }
       }
-
-      // Note : La vérification d'inactivité de 60 secondes a été désactivée pour maintenir le portail ouvert en convention.
+     
 
       if (_targetEndTimeMs > 0 && !_isDespawnedForInactivity && !_isNightLockActive) {
         final nowMs = now.millisecondsSinceEpoch;
@@ -100,7 +97,6 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
 
   void _recordActivity() {
     _lastRoomActivityMs = DateTime.now().millisecondsSinceEpoch;
-    _idleSecondsElapsed = 0;
   }
 
   void _despawnAndStopAllTimers() {
@@ -281,7 +277,6 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
         _isDespawnedForInactivity = false;
       });
 
-      // Lancement automatique du flux radio
       if (!_isRadioPlaying) {
         _isRadioPlaying = true;
         AudioService.toggleNrjStream();
@@ -329,8 +324,6 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
           }
         }
 
-        _cleanInactiveHuntersIfNeeded(mapData);
-
         setState(() {
           _raidData = mapData;
           _isRaidDataLoaded = true;
@@ -348,32 +341,6 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
         });
       }
     });
-  }
-
-  void _cleanInactiveHuntersIfNeeded(Map mapData) {
-    if (_raidRef == null) return;
-    final dynamic rawHunters = mapData['hunters'];
-    if (rawHunters is! Iterable || rawHunters.isEmpty) return;
-
-    final List currentHunters = List.from(rawHunters);
-    final int now = DateTime.now().millisecondsSinceEpoch;
-    bool changed = false;
-
-    currentHunters.removeWhere((h) {
-      if (h is Map && h.containsKey('last_seen')) {
-        final int lastSeen = (h['last_seen'] as num).toInt();
-        final int totalDmg = (h['total_damage'] as num?)?.toInt() ?? 0;
-        if (now - lastSeen > 60000 && totalDmg == 0) {
-          changed = true;
-          return true;
-        }
-      }
-      return false;
-    });
-
-    if (changed) {
-      _raidRef!.update({'hunters': currentHunters}).catchError((_) {});
-    }
   }
 
   Future<String?> _claimNextAvailableRoomSlot(String instanceToken) async {
@@ -425,7 +392,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
   }
 
   void _sendHeartbeatNow() {
-    if (_raidRef != null && !_isDespawnedForInactivity && !_isNightLockActive) {
+    if (_raidRef != null && !_isNightLockActive) {
       _raidRef!.update({
         'arena_last_seen': DateTime.now().millisecondsSinceEpoch,
       }).catchError((_) {});
@@ -489,7 +456,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
                 Icon(Icons.lock_clock, color: Color(0xFFFF2E56), size: 64),
                 SizedBox(height: 20),
                 Text(
-                  "[ SYSTÈME : PORTAILS SCELLÉS (00H00 - 06H00) ]",
+                  "[ SYSTÈMES : PORTAILS SCELLÉS (00H00 - 06H00) ]",
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     color: Color(0xFFFF2E56),
@@ -505,67 +472,6 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
                   "Reposez votre Hardware. Réouverture automatique à 6h00 du matin.",
                   textAlign: TextAlign.center,
                   style: TextStyle(color: Colors.white70, fontFamily: 'monospace', fontSize: 13, height: 1.5),
-                ),
-              ],
-            ),
-          ),
-        ),
-      );
-    }
-
-    if (_isDespawnedForInactivity) {
-      return Scaffold(
-        backgroundColor: const Color(0xFF02070D),
-        body: Center(
-          child: Container(
-            margin: const EdgeInsets.all(24),
-            padding: const EdgeInsets.all(32),
-            decoration: BoxDecoration(
-              color: const Color(0xFF04101E),
-              border: Border.all(color: const Color(0xFF00E5FF), width: 2),
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(Icons.snooze, color: Color(0xFF00E5FF), size: 64),
-                const SizedBox(height: 20),
-                const Text(
-                  "PORTAIL MIS EN VEILLE (60S D'INACTIVITÉ)",
-                  style: TextStyle(
-                    color: Color(0xFF00E5FF),
-                    fontFamily: 'monospace',
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 2,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                const Text(
-                  "Aucune activité physique détectée pendant 60 secondes.\n"
-                  "La salle a été automatiquement purgée du serveur pour libérer le slot mondial.",
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: Colors.white70, fontFamily: 'monospace', fontSize: 13, height: 1.5),
-                ),
-                const SizedBox(height: 24),
-                ElevatedButton.icon(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF00E5FF),
-                    foregroundColor: Colors.black,
-                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
-                  ),
-                  onPressed: () {
-                    setState(() {
-                      _roomId = null;
-                      _isDespawnedForInactivity = false;
-                      _isAllocating = true;
-                    });
-                    _resolveRoomAllocation();
-                  },
-                  icon: const Icon(Icons.refresh),
-                  label: const Text(
-                    "RÉOUVRIR UNE SALLE DE RAID",
-                    style: TextStyle(fontFamily: 'monospace', fontWeight: FontWeight.bold),
-                  ),
                 ),
               ],
             ),
@@ -723,8 +629,6 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
       ],
     );
 
-    final int sleepCountdown = 0; // Mode convention : pas de décompte de veille par inactivité
-
     return Scaffold(
       backgroundColor: const Color(0xFF02070D),
       body: SafeArea(
@@ -753,8 +657,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
                     ),
                   ),
                 ),
-              // En-tête supérieur avec le bouton audio intégré dans le cadre
-              _buildTopHeader(currentHp, maxHp, isVictory, isDefeat, presetLabel, sleepCountdown),
+              _buildTopHeader(currentHp, maxHp, isVictory, isDefeat, presetLabel),
               const SizedBox(height: 16),
               Expanded(child: mainContent),
             ],
@@ -764,7 +667,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
     );
   }
 
-  Widget _buildTopHeader(double currentHp, double maxHp, bool isVictory, bool isDefeat, String presetLabel, int sleepCountdown) {
+  Widget _buildTopHeader(double currentHp, double maxHp, bool isVictory, bool isDefeat, String presetLabel) {
     final double safeMax = maxHp > 0 ? maxHp : 5000.0;
     final double hpRatio = (currentHp / safeMax).clamp(0.0, 1.0);
 
@@ -819,7 +722,6 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
                   ],
                 ),
               ),
-              // --- BOUTON AUDIO INTÉGRÉ DANS LE CADRE SUPÉRIEUR (COMPATIBLE TV FOCUS) ---
               Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -1154,59 +1056,30 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
                       final String action = (log['action'] ?? 'Frappe').toString();
                       final int damage = (log['damage'] as num?)?.toInt() ?? 0;
 
-                      final bool isGlow = (damage >= 150);
-
                       return Container(
                         margin: const EdgeInsets.symmetric(vertical: 3),
                         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                         decoration: BoxDecoration(
-                          color: isGlow ? const Color(0xFFFF2E56).withOpacity(0.18) : Colors.transparent,
-                          border: Border.all(
-                            color: isGlow ? const Color(0xFFFF2E56) : Colors.white10,
-                            width: isGlow ? 1.8 : 0.8,
-                          ),
+                          color: Colors.transparent,
+                          border: Border.all(color: Colors.white10, width: 0.8),
                           borderRadius: BorderRadius.circular(4),
-                          boxShadow: isGlow
-                              ? [BoxShadow(color: const Color(0xFFFF2E56).withOpacity(0.45), blurRadius: 10)]
-                              : [],
                         ),
                         child: Row(
                           children: [
-                            Icon(
-                              isGlow ? Icons.whatshot : Icons.flash_on,
-                              color: isGlow ? const Color(0xFFFF2E56) : const Color(0xFF00E5FF),
-                              size: 16,
-                            ),
+                            const Icon(Icons.flash_on, color: Color(0xFF00E5FF), size: 16),
                             const SizedBox(width: 8),
                             Expanded(
                               child: Row(
                                 children: [
                                   Text(
                                     name,
-                                    style: TextStyle(
-                                      color: isGlow ? const Color(0xFFFFD700) : Colors.white,
+                                    style: const TextStyle(
+                                      color: Colors.white,
                                       fontWeight: FontWeight.bold,
                                       fontSize: 12,
                                       fontFamily: 'monospace',
-                                      shadows: isGlow
-                                          ? [const Shadow(color: Color(0xFFFF9100), blurRadius: 10)]
-                                          : [],
                                     ),
                                   ),
-                                  if (isGlow) ...[
-                                    const SizedBox(width: 6),
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
-                                      decoration: BoxDecoration(
-                                        color: const Color(0xFFFF2E56),
-                                        borderRadius: BorderRadius.circular(2),
-                                      ),
-                                      child: Text(
-                                        damage >= 200 ? "BURST ULTIME" : "FRÉNÉSIE",
-                                        style: const TextStyle(color: Colors.white, fontSize: 8, fontWeight: FontWeight.bold),
-                                      ),
-                                    ),
-                                  ],
                                   const SizedBox(width: 6),
                                   Text(
                                     ': $action',
@@ -1217,11 +1090,11 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
                             ),
                             Text(
                               '-$damage PV',
-                              style: TextStyle(
-                                color: isGlow ? const Color(0xFFFF2E56) : const Color(0xFFFF9100),
+                              style: const TextStyle(
+                                color: Color(0xFFFF9100),
                                 fontWeight: FontWeight.bold,
                                 fontFamily: 'monospace',
-                                fontSize: isGlow ? 15 : 13,
+                                fontSize: 13,
                               ),
                             ),
                           ],
@@ -1246,8 +1119,6 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
     int globalPushups = 0;
     int globalAbs = 0;
 
-    bool hasHunterCumulativeStats = false;
-
     for (final h in hunters) {
       if (h is Map) {
         final String name = (h['name'] ?? 'Chasseur').toString();
@@ -1259,42 +1130,14 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
         final int hPu = (h['pushup_reps'] as num?)?.toInt() ?? 0;
         final int hAb = (h['abs_reps'] as num?)?.toInt() ?? 0;
 
-        if (hDmg > 0 || hSq > 0 || hPu > 0 || hAb > 0) {
-          hasHunterCumulativeStats = true;
-          totalDmg[name] = ((totalDmg[name] as int?) ?? 0) + hDmg;
-          squatReps[name] = ((squatReps[name] as int?) ?? 0) + hSq;
-          pushupReps[name] = ((pushupReps[name] as int?) ?? 0) + hPu;
-          absReps[name] = ((absReps[name] as int?) ?? 0) + hAb;
+        totalDmg[name] = ((totalDmg[name] as int?) ?? 0) + hDmg;
+        squatReps[name] = ((squatReps[name] as int?) ?? 0) + hSq;
+        pushupReps[name] = ((pushupReps[name] as int?) ?? 0) + hPu;
+        absReps[name] = ((absReps[name] as int?) ?? 0) + hAb;
 
-          globalSquats += hSq;
-          globalPushups += hPu;
-          globalAbs += hAb;
-        }
-      }
-    }
-
-    if (!hasHunterCumulativeStats) {
-      for (final l in logs) {
-        if (l is Map) {
-          final String name = (l['name'] ?? 'Chasseur').toString();
-          final int dmg = (l['damage'] as num?)?.toInt() ?? 0;
-          final String cat = (l['category'] ?? '').toString();
-          final int reps = (l['reps'] as num?)?.toInt() ?? 0;
-          final int count = reps > 0 ? reps : 5;
-
-          totalDmg[name] = ((totalDmg[name] as int?) ?? 0) + dmg;
-
-          if (cat == 'squat') {
-            squatReps[name] = ((squatReps[name] as int?) ?? 0) + count;
-            globalSquats += count;
-          } else if (cat == 'pushup') {
-            pushupReps[name] = ((pushupReps[name] as int?) ?? 0) + count;
-            globalPushups += count;
-          } else if (cat == 'abs') {
-            absReps[name] = ((absReps[name] as int?) ?? 0) + count;
-            globalAbs += count;
-          }
-        }
+        globalSquats += hSq;
+        globalPushups += hPu;
+        globalAbs += hAb;
       }
     }
 
@@ -1305,15 +1148,15 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
     if (grandTotalReps > 0) {
       if (globalSquats >= globalPushups && globalSquats >= globalAbs) {
         final pct = ((globalSquats / grandTotalReps) * 100).toStringAsFixed(1);
-        dominantZoneText = "DISCIPLINE DOMINANTE : VOIE DES JAMBES (SQUATS) — $globalSquats REPS ($pct% DE L'EFFORT)";
+        dominantZoneText = "DISCIPLINE DOMINANTE : VOIE DES JAMBES (SQUATS) — $globalSquats REPS ($pct%)";
         dominantColor = const Color(0xFF00E5FF);
       } else if (globalPushups >= globalSquats && globalPushups >= globalAbs) {
         final pct = ((globalPushups / grandTotalReps) * 100).toStringAsFixed(1);
-        dominantZoneText = "DISCIPLINE DOMINANTE : VOIE DU HAUT (POMPES) — $globalPushups REPS ($pct% DE L'EFFORT)";
+        dominantZoneText = "DISCIPLINE DOMINANTE : VOIE DU HAUT (POMPES) — $globalPushups REPS ($pct%)";
         dominantColor = const Color(0xFFFF9100);
       } else {
         final pct = ((globalAbs / grandTotalReps) * 100).toStringAsFixed(1);
-        dominantZoneText = "DISCIPLINE DOMINANTE : VOIE DU TRONC (ABDOS) — $globalAbs REPS ($pct% DE L'EFFORT)";
+        dominantZoneText = "DISCIPLINE DOMINANTE : VOIE DU TRONC (ABDOS) — $globalAbs REPS ($pct%)";
         dominantColor = const Color(0xFF00FF66);
       }
     }
@@ -1321,53 +1164,6 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
     final List sortedOverall = totalDmg.entries.toList()
       ..sort((a, b) => (b.value as int).compareTo(a.value as int));
     final List top10Overall = sortedOverall.take(10).toList();
-
-    final Map rankingMonarque = {};
-    final Map rankingSquats = {};
-    final Map rankingPushups = {};
-    final Map rankingAbs = {};
-    final Map rankingForceBrute = {};
-    final Map rankingJambesTronc = {};
-    final Map rankingHautTronc = {};
-
-    totalDmg.forEach((hunterName, dmg) {
-      final String modeId = (hunterChosenMode[hunterName] ?? 'all').toString();
-      final int sReps = (squatReps[hunterName] as int?) ?? 0;
-      final int pReps = (pushupReps[hunterName] as int?) ?? 0;
-      final int aReps = (absReps[hunterName] as int?) ?? 0;
-
-      final Map payload = {
-        'damage': dmg,
-        'squat_reps': sReps,
-        'pushup_reps': pReps,
-        'abs_reps': aReps,
-      };
-
-      switch (modeId) {
-        case 'squats_only':
-          rankingSquats[hunterName] = payload;
-          break;
-        case 'pushups_only':
-          rankingPushups[hunterName] = payload;
-          break;
-        case 'abs_only':
-          rankingAbs[hunterName] = payload;
-          break;
-        case 'squats_pushups':
-          rankingForceBrute[hunterName] = payload;
-          break;
-        case 'squats_abs':
-          rankingJambesTronc[hunterName] = payload;
-          break;
-        case 'pushups_abs':
-          rankingHautTronc[hunterName] = payload;
-          break;
-        case 'all':
-        default:
-          rankingMonarque[hunterName] = payload;
-          break;
-      }
-    });
 
     return Container(
       width: double.infinity,
@@ -1407,13 +1203,12 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
                       fontFamily: 'monospace',
                       fontWeight: FontWeight.bold,
                       fontSize: 11,
-                      letterSpacing: 1.1,
                     ),
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
                 Text(
-                  "TOTAL : $grandTotalReps REPS IMPACTÉES",
+                  "TOTAL : $grandTotalReps REPS",
                   style: const TextStyle(
                     color: Colors.white70,
                     fontFamily: 'monospace',
@@ -1426,196 +1221,96 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
           ),
           const SizedBox(height: 8),
           Expanded(
-            flex: 4,
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Expanded(
-                  flex: 1,
-                  child: Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: Colors.black45,
-                      border: Border.all(color: const Color(0xFFFFD700), width: 1.5),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Row(
-                          children: [
-                            Icon(Icons.military_tech, color: Color(0xFFFFD700), size: 16),
-                            SizedBox(width: 6),
-                            Text(
-                              "TOP 10 GÉNÉRAL DU DONJON",
-                              style: TextStyle(
-                                color: Color(0xFFFFD700),
-                                fontFamily: 'monospace',
-                                fontWeight: FontWeight.bold,
-                                fontSize: 11,
-                                letterSpacing: 1.1,
-                              ),
-                            ),
-                          ],
+            child: Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.black45,
+                border: Border.all(color: const Color(0xFFFFD700), width: 1.5),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Row(
+                    children: [
+                      Icon(Icons.military_tech, color: Color(0xFFFFD700), size: 16),
+                      SizedBox(width: 6),
+                      Text(
+                        "TOP 10 GÉNÉRAL DU DONJON",
+                        style: TextStyle(
+                          color: Color(0xFFFFD700),
+                          fontFamily: 'monospace',
+                          fontWeight: FontWeight.bold,
+                          fontSize: 11,
                         ),
-                        const Divider(color: Colors.white12, height: 8),
-                        Expanded(
-                          child: top10Overall.isEmpty
-                              ? const Center(
-                                  child: Text("Aucun participant", style: TextStyle(color: Colors.white24, fontSize: 10)),
-                                )
-                              : ListView.builder(
-                                  itemCount: top10Overall.length,
-                                  itemBuilder: (ctx, idx) {
-                                    final item = top10Overall[idx];
-                                    final rankColor = idx == 0
-                                        ? const Color(0xFFFFD700)
-                                        : (idx == 1
-                                            ? const Color(0xFFC0C0C0)
-                                            : (idx == 2 ? const Color(0xFFCD7F32) : Colors.white70));
-                                    return Padding(
-                                      padding: const EdgeInsets.symmetric(vertical: 2.0),
-                                      child: Row(
-                                        children: [
-                                          Container(
-                                            width: 18,
-                                            height: 18,
-                                            decoration: BoxDecoration(
-                                              color: rankColor.withOpacity(0.15),
-                                              border: Border.all(color: rankColor),
-                                            ),
-                                            child: Center(
-                                              child: Text(
-                                                "${idx + 1}",
-                                                style: TextStyle(
-                                                  color: rankColor,
-                                                  fontSize: 9,
-                                                  fontWeight: FontWeight.bold,
-                                                  fontFamily: 'monospace',
-                                                ),
-                                              ),
-                                            ),
-                                          ),
-                                          const SizedBox(width: 8),
-                                          Expanded(
-                                            child: Text(
-                                              item.key.toString(),
-                                              style: const TextStyle(
-                                                color: Colors.white,
-                                                fontFamily: 'monospace',
-                                                fontWeight: FontWeight.bold,
-                                                fontSize: 11,
-                                              ),
-                                              overflow: TextOverflow.ellipsis,
-                                            ),
-                                          ),
-                                          Text(
-                                            "${item.value} PV",
-                                            style: TextStyle(
-                                              color: rankColor,
-                                              fontFamily: 'monospace',
-                                              fontWeight: FontWeight.bold,
-                                              fontSize: 11,
-                                            ),
-                                          ),
-                                        ],
+                      ),
+                    ],
+                  ),
+                  const Divider(color: Colors.white12, height: 8),
+                  Expanded(
+                    child: top10Overall.isEmpty
+                        ? const Center(
+                            child: Text("Aucun participant", style: TextStyle(color: Colors.white24, fontSize: 10)),
+                          )
+                        : ListView.builder(
+                            itemCount: top10Overall.length,
+                            itemBuilder: (ctx, idx) {
+                              final item = top10Overall[idx];
+                              final rankColor = idx == 0
+                                  ? const Color(0xFFFFD700)
+                                  : (idx == 1 ? const Color(0xFFC0C0C0) : const Color(0xFFCD7F32));
+                              return Padding(
+                                padding: const EdgeInsets.symmetric(vertical: 2.0),
+                                child: Row(
+                                  children: [
+                                    Container(
+                                      width: 18,
+                                      height: 18,
+                                      decoration: BoxDecoration(
+                                        color: rankColor.withOpacity(0.15),
+                                        border: Border.all(color: rankColor),
                                       ),
-                                    );
-                                  },
+                                      child: Center(
+                                        child: Text(
+                                          "${idx + 1}",
+                                          style: TextStyle(
+                                            color: rankColor,
+                                            fontSize: 9,
+                                            fontWeight: FontWeight.bold,
+                                            fontFamily: 'monospace',
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: Text(
+                                        item.key.toString(),
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontFamily: 'monospace',
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 11,
+                                        ),
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                    Text(
+                                      "${item.value} PV",
+                                      style: TextStyle(
+                                        color: rankColor,
+                                        fontFamily: 'monospace',
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 11,
+                                      ),
+                                    ),
+                                  ],
                                 ),
-                        ),
-                      ],
-                    ),
+                              );
+                            },
+                          ),
                   ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  flex: 1,
-                  child: _buildPodiumCategoryCard(
-                    title: "ENTRAÎNEMENT DU MONARQUE (SQUATS + POMPES + ABDOS)",
-                    color: const Color(0xFFFFD700),
-                    icon: Icons.emoji_events,
-                    rankingMap: rankingMonarque,
-                    categoryType: 'monarque',
-                    isGlobal: true,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 8),
-          Expanded(
-            flex: 3,
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Expanded(
-                  child: _buildPodiumCategoryCard(
-                    title: "VOIE DES JAMBES (SQUATS)",
-                    color: const Color(0xFF00E5FF),
-                    icon: Icons.directions_run,
-                    rankingMap: rankingSquats,
-                    categoryType: 'squats',
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: _buildPodiumCategoryCard(
-                    title: "VOIE DU HAUT (POMPES)",
-                    color: const Color(0xFFFF9100),
-                    icon: Icons.fitness_center,
-                    rankingMap: rankingPushups,
-                    categoryType: 'pushups',
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: _buildPodiumCategoryCard(
-                    title: "VOIE DU TRONC (ABDOS)",
-                    color: const Color(0xFF00FF66),
-                    icon: Icons.shield,
-                    rankingMap: rankingAbs,
-                    categoryType: 'abs',
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 8),
-          Expanded(
-            flex: 3,
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Expanded(
-                  child: _buildPodiumCategoryCard(
-                    title: "FORCE BRUTE (SQUATS + POMPES)",
-                    color: const Color(0xFFFF2E56),
-                    icon: Icons.flash_on,
-                    rankingMap: rankingForceBrute,
-                    categoryType: 'squats_pushups',
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: _buildPodiumCategoryCard(
-                    title: "JAMBES & TRONC (SQUATS + ABDOS)",
-                    color: const Color(0xFFB388FF),
-                    icon: Icons.hub,
-                    rankingMap: rankingJambesTronc,
-                    categoryType: 'squats_abs',
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: _buildPodiumCategoryCard(
-                    title: "HAUT & TRONC (POMPES + ABDOS)",
-                    color: const Color(0xFF40C4FF),
-                    icon: Icons.military_tech,
-                    rankingMap: rankingHautTronc,
-                    categoryType: 'pushups_abs',
-                  ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ],
@@ -1663,7 +1358,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
             child: hunterList.isEmpty
                 ? const Center(
                     child: Text(
-                      'AUCUN CHASSEUR DÉTECTÉ\nEN ATTENTE DU SCAN... (Mode Convention : Portail permanent actif)',
+                      'AUCUN CHASSEUR DÉTECTÉ\nEN ATTENTE DU SCAN... (Mode Convention : Portail permanent)',
                       textAlign: TextAlign.center,
                       style: TextStyle(
                         color: Colors.white38,
@@ -1728,7 +1423,6 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
     );
   }
 
-  // --- PANNEAU LATÉRAL AVEC QR CODES MAXIMISÉS ET FILTRAGE DE FIN DE PARTIE ---
   Widget _buildDynamicMaximizedQrPanel(String raidStatus, {required bool isVictory}) {
     final String rawJoinUrl = 'https://shadowburn-1d8f8.web.app/#/join?room=$_roomId&token=${_joinToken ?? ""}';
     final joinQrData = Uri.encodeComponent(rawJoinUrl);
@@ -1750,7 +1444,6 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
           final double totalHeight = constraints.maxHeight;
           
           if (isVictory) {
-            // ÉTAT DE VICTOIRE : Un seul QR Code (Télécharger APK) occupant toute la zone avec taille maximale
             return Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
@@ -1809,7 +1502,6 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
               ],
             );
           } else {
-            // ÉTAT NORMAL / COMBAT / ATTENTE : Deux QR Codes maximisés occupant chacun 50% de l'espace vertical
             final double sectionHeight = (totalHeight - 20) / 2;
 
             return Column(
@@ -1931,142 +1623,6 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
             );
           }
         },
-      ),
-    );
-  }
-
-  Widget _buildPodiumCategoryCard({
-    required String title,
-    required Color color,
-    required IconData icon,
-    required Map rankingMap,
-    required String categoryType,
-    bool isGlobal = false,
-  }) {
-    final List sorted = rankingMap.entries.toList()
-      ..sort((a, b) => ((b.value as Map)['damage'] as int).compareTo((a.value as Map)['damage'] as int));
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: Colors.black45,
-        border: Border.all(color: color.withOpacity(0.6), width: isGlobal ? 1.5 : 1.0),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(icon, color: color, size: isGlobal ? 16 : 13),
-              const SizedBox(width: 6),
-              Expanded(
-                child: Text(
-                  title,
-                  style: TextStyle(
-                    color: color,
-                    fontFamily: 'monospace',
-                    fontWeight: FontWeight.bold,
-                    fontSize: isGlobal ? 11 : 9.5,
-                    letterSpacing: 1.1,
-                  ),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-            ],
-          ),
-          const Divider(color: Colors.white12, height: 8),
-          Expanded(
-            child: sorted.isEmpty
-                ? const Center(
-                    child: Text(
-                      "Aucun participant",
-                      style: TextStyle(color: Colors.white24, fontSize: 9.5, fontFamily: 'monospace'),
-                    ),
-                  )
-                : ListView.builder(
-                    itemCount: sorted.length > 3 ? 3 : sorted.length,
-                    itemBuilder: (context, index) {
-                      final entry = sorted[index];
-                      final String name = entry.key.toString();
-                      final Map valMap = entry.value as Map;
-                      final int dmg = valMap['damage'] as int;
-                      final int sq = valMap['squat_reps'] as int;
-                      final int pu = valMap['pushup_reps'] as int;
-                      final int ab = valMap['abs_reps'] as int;
-
-                      String detailStr = "-$dmg PV";
-                      if (categoryType == 'squats') {
-                        detailStr = "[-$dmg PV / $sq reps]";
-                      } else if (categoryType == 'pushups') {
-                        detailStr = "[-$dmg PV / $pu reps]";
-                      } else if (categoryType == 'abs') {
-                        detailStr = "[-$dmg PV / $ab reps]";
-                      } else if (categoryType == 'squats_pushups') {
-                        detailStr = "[-$dmg PV / $sq S, $pu P]";
-                      } else if (categoryType == 'squats_abs') {
-                        detailStr = "[-$dmg PV / $sq S, $ab A]";
-                      } else if (categoryType == 'pushups_abs') {
-                        detailStr = "[-$dmg PV / $pu P, $ab A]";
-                      } else if (categoryType == 'monarque') {
-                        detailStr = "[-$dmg PV / $sq S, $pu P, $ab A]";
-                      }
-
-                      final placeColor = index == 0
-                          ? const Color(0xFFFFD700)
-                          : (index == 1 ? const Color(0xFFC0C0C0) : const Color(0xFFCD7F32));
-
-                      return Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 2.0),
-                        child: Row(
-                          children: [
-                            Container(
-                              width: 16,
-                              height: 16,
-                              decoration: BoxDecoration(
-                                color: placeColor.withOpacity(0.2),
-                                border: Border.all(color: placeColor),
-                              ),
-                              child: Center(
-                                child: Text(
-                                  "${index + 1}",
-                                  style: TextStyle(
-                                    color: placeColor,
-                                    fontSize: 9,
-                                    fontWeight: FontWeight.bold,
-                                    fontFamily: 'monospace',
-                                  ),
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 6),
-                            Expanded(
-                              child: Text(
-                                name,
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontFamily: 'monospace',
-                                  fontSize: 10.5,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                            Text(
-                              detailStr,
-                              style: TextStyle(
-                                color: color,
-                                fontFamily: 'monospace',
-                                fontSize: 10,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ],
-                        ),
-                      );
-                    },
-                  ),
-          ),
-        ],
       ),
     );
   }

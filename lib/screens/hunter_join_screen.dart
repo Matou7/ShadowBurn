@@ -57,7 +57,6 @@ class _HunterJoinScreenState extends State<HunterJoinScreen> with WidgetsBinding
 
   Timer? _inactivityWatchdogTimer;
   Timer? _queueRetryTimer;
-  Timer? _heartbeatTimer; // Timer du battement de cœur (Heartbeat)
   Map _raidData = {};
   bool _isRaidDataLoaded = false;
 
@@ -353,7 +352,6 @@ class _HunterJoinScreenState extends State<HunterJoinScreen> with WidgetsBinding
     _frenzyTimer?.cancel();
     _antiCheatTimer?.cancel();
     _batchFlushTimer?.cancel();
-    _heartbeatTimer?.cancel(); // Nettoyage du timer Heartbeat
     _flushPendingDamage();
     super.dispose();
   }
@@ -392,20 +390,6 @@ class _HunterJoinScreenState extends State<HunterJoinScreen> with WidgetsBinding
     });
   }
 
-  // Active le signal de battement de cœur (Heartbeat) toutes les 15 secondes
-  void _startHeartbeat() {
-    _heartbeatTimer?.cancel();
-    _heartbeatTimer = Timer.periodic(const Duration(seconds: 15), (_) async {
-      if (_raidRef != null && _isJoined && mounted) {
-        try {
-          await _raidRef!.update({
-            'arena_last_seen': FieldValue.serverTimestamp(),
-          });
-        } catch (_) {}
-      }
-    });
-  }
-
   Future _joinRaid() async {
     final name = _nameController.text.trim();
     if (name.isEmpty || _raidRef == null) return;
@@ -435,7 +419,6 @@ class _HunterJoinScreenState extends State<HunterJoinScreen> with WidgetsBinding
 
       await _raidRef!.set({
         'roomId': _roomId,
-        'arena_last_seen': FieldValue.serverTimestamp(),
         'hunters': FieldValue.arrayUnion([hunterEntry]),
       }, SetOptions(merge: true));
 
@@ -446,7 +429,6 @@ class _HunterJoinScreenState extends State<HunterJoinScreen> with WidgetsBinding
       });
 
       _startInactivityWatchdog();
-      _startHeartbeat(); // Lancement du Heartbeat dès l'entrée dans le donjon
     } catch (e) {
       setState(() => _isLoading = false);
       if (e.toString().contains('resource-exhausted') && mounted) {
@@ -469,7 +451,6 @@ class _HunterJoinScreenState extends State<HunterJoinScreen> with WidgetsBinding
     _inactivityWatchdogTimer?.cancel();
     _frenzyTimer?.cancel();
     _antiCheatTimer?.cancel();
-    _heartbeatTimer?.cancel(); // Arrêt du Heartbeat
     _batchFlushTimer?.cancel();
     _batchFlushTimer = null;
 
@@ -485,7 +466,7 @@ class _HunterJoinScreenState extends State<HunterJoinScreen> with WidgetsBinding
           await _raidRef!.delete();
           await FirebaseFirestore.instance.collection('current_raid').doc(_roomId).delete();
         } else {
-          await _raidRef!.update({'hunters': hunterList, 'arena_last_seen': FieldValue.serverTimestamp()});
+          await _raidRef!.update({'hunters': hunterList});
         }
       }
 
@@ -748,7 +729,6 @@ class _HunterJoinScreenState extends State<HunterJoinScreen> with WidgetsBinding
 
       final Map<String, dynamic> updates = {
         'current_hp': FieldValue.increment(-dmgToSend),
-        'arena_last_seen': FieldValue.serverTimestamp(),
         'logs': logs,
         'hunters': hunterList,
       };
@@ -1024,7 +1004,7 @@ class _HunterJoinScreenState extends State<HunterJoinScreen> with WidgetsBinding
               style: TextStyle(color: Color(0xFFFF2E56), fontFamily: 'monospace', fontWeight: FontWeight.bold, fontSize: 15),
             ),
             SizedBox(height: 8),
-            Text("La salle a été fermée ou mise en veille automatique après 60s d'inactivité.", textAlign: TextAlign.center, style: TextStyle(color: Colors.white70, fontFamily: 'monospace', fontSize: 11)),
+            Text("La salle a été fermée ou mise en veille automatique.", textAlign: TextAlign.center, style: TextStyle(color: Colors.white70, fontFamily: 'monospace', fontSize: 11)),
           ],
         ),
       );
