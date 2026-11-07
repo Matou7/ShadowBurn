@@ -7,19 +7,60 @@
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
   <meta name="description" content="ShadowBurn Arène TV & Multijoueur">
 
-  <!-- iOS meta tags & icons -->
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
   <meta name="apple-mobile-web-app-title" content="shadowburn">
   <link rel="apple-touch-icon" href="icons/Icon-192.png">
 
-  <!-- Favicon -->
   <link rel="icon" type="image/png" href="favicon.png"/>
 
   <title>ShadowBurn Arena</title>
   <link rel="manifest" href="manifest.json">
+
+  <style>
+    body {
+      background-color: #02070D;
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      width: 100vw;
+      height: 100vh;
+    }
+  </style>
 </head>
-<body style="background-color: #02070D; margin: 0; padding: 0; overflow: hidden;">
+<body>
+  <!-- Élément HTML5 Audio natif pour le flux NRJ -->
+  <audio id="nrj-radio-stream" src="https://streaming.nrjaudio.fm/ouf274tx4thg?origine=fluxradios&aw_0_1st.station=NRJ-Extravadance-Summer-2026" preload="auto" loop crossorigin="anonymous"></audio>
+
+  <script>
+    window.toggleWebRadio = function() {
+      var audio = document.getElementById('nrj-radio-stream');
+      if (audio) {
+        if (audio.paused) {
+          audio.play().then(function() {
+            console.log("Radio lue avec succès.");
+          }).catch(function(error) {
+            console.log("Autoplay bloqué par le navigateur :", error);
+          });
+          return true; // En cours de lecture
+        } else {
+          audio.pause();
+          console.log("Radio mise en pause.");
+          return false; // En pause
+        }
+      }
+      return false;
+    };
+
+    window.stopWebRadio = function() {
+      var audio = document.getElementById('nrj-radio-stream');
+      if (audio) {
+        audio.pause();
+        audio.currentTime = 0;
+      }
+    };
+  </script>
+
   <script src="flutter_bootstrap.js" async></script>
 </body>
 </html>

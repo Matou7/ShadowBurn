@@ -2,18 +2,20 @@
 
 import 'dart:async';
 import 'dart:math';
+import 'dart:html' as html;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../services/audio_service.dart';
 
 class ArenaTvScreen extends StatefulWidget {
   const ArenaTvScreen({super.key});
 
   @override
-  State createState() => _ArenaTvScreenState();
+  State<ArenaTvScreen> createState() => _ArenaTvScreenState();
 }
 
-class _ArenaTvScreenState extends State with WidgetsBindingObserver {
+class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserver {
   String? _roomId;
   String? _adminKey;
   String? _joinToken;
@@ -34,6 +36,7 @@ class _ArenaTvScreenState extends State with WidgetsBindingObserver {
   bool _isWorldSaturated = false;
   bool _isNightLockActive = false;
   bool _isDespawnedForInactivity = false;
+  bool _isRadioPlaying = false;
 
   String _currentRaidStatus = 'waiting';
   double _currentBossHp = 5000.0;
@@ -48,13 +51,19 @@ class _ArenaTvScreenState extends State with WidgetsBindingObserver {
   static const int kMaxHuntersPerRoom = 10;
   static const int kHeartbeatIntervalSeconds = 20;
   static const int kRoomDeathThresholdMs = 45000;
-  static const int kMaxInactivitySeconds = 60;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _lastRoomActivityMs = DateTime.now().millisecondsSinceEpoch;
+
+    // MODE CONVENTION : Nettoyage immédiat de la salle dans Firestore si l'onglet est fermé
+    if (kIsWeb) {
+      html.window.onBeforeUnload.listen((event) {
+        _despawnAndStopAllTimers();
+      });
+    }
 
     _localTickTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (!mounted) return;
@@ -71,16 +80,7 @@ class _ArenaTvScreenState extends State with WidgetsBindingObserver {
         }
       }
 
-      if (!_isAllocating && !_isWorldSaturated && !_isNightLockActive && !_isDespawnedForInactivity) {
-        final int nowMs = now.millisecondsSinceEpoch;
-        _idleSecondsElapsed = ((nowMs - _lastRoomActivityMs) ~/ 1000).clamp(0, 9999);
-
-        if (_idleSecondsElapsed >= kMaxInactivitySeconds &&
-            (_currentRaidStatus == 'waiting' || _currentRaidStatus == 'active')) {
-          _triggerInactivityDespawn();
-          return;
-        }
-      }
+      // Note : La vérification d'inactivité de 60 secondes a été désactivée pour maintenir le portail ouvert en convention.
 
       if (_targetEndTimeMs > 0 && !_isDespawnedForInactivity && !_isNightLockActive) {
         final nowMs = now.millisecondsSinceEpoch;
@@ -103,19 +103,16 @@ class _ArenaTvScreenState extends State with WidgetsBindingObserver {
     _idleSecondsElapsed = 0;
   }
 
-  void _triggerInactivityDespawn() {
-    _despawnAndStopAllTimers();
-    if (mounted) {
-      setState(() {
-        _isDespawnedForInactivity = true;
-      });
-    }
-  }
-
   void _despawnAndStopAllTimers() {
     _arenaHeartbeatTimer?.cancel();
     _queueRetryTimer?.cancel();
     _raidSubscription?.cancel();
+
+    if (_isRadioPlaying) {
+      _isRadioPlaying = false;
+      AudioService.stopNrjStream();
+    }
+
     if (_raidRef != null) {
       _raidRef!.delete().catchError((_) {});
       _raidRef = null;
@@ -124,6 +121,10 @@ class _ArenaTvScreenState extends State with WidgetsBindingObserver {
 
   Future _triggerDefeat() async {
     _currentRaidStatus = 'failed';
+    if (_isRadioPlaying) {
+      _isRadioPlaying = false;
+      AudioService.stopNrjStream();
+    }
     if (_raidRef != null) {
       await _raidRef!.update({'status': 'failed'}).catchError((_) {});
     }
@@ -280,6 +281,12 @@ class _ArenaTvScreenState extends State with WidgetsBindingObserver {
         _isDespawnedForInactivity = false;
       });
 
+      // Lancement automatique du flux radio
+      if (!_isRadioPlaying) {
+        _isRadioPlaying = true;
+        AudioService.toggleNrjStream();
+      }
+
       _startArenaHeartbeat();
       _startListeningToRaid();
     } catch (e) {
@@ -315,6 +322,11 @@ class _ArenaTvScreenState extends State with WidgetsBindingObserver {
           _raidRef!.update({'status': 'victory', 'current_hp': 0}).catchError((_) {});
           mapData['status'] = 'victory';
           mapData['current_hp'] = 0;
+
+          if (_isRadioPlaying) {
+            _isRadioPlaying = false;
+            AudioService.stopNrjStream();
+          }
         }
 
         _cleanInactiveHuntersIfNeeded(mapData);
@@ -694,6 +706,8 @@ class _ArenaTvScreenState extends State with WidgetsBindingObserver {
           : _buildCombatWithMiniPodiumPanel(logs, hunters);
     }
 
+    final bool isVictoryState = isVictory;
+
     Widget mainContent = Row(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -704,12 +718,12 @@ class _ArenaTvScreenState extends State with WidgetsBindingObserver {
         const SizedBox(width: 16),
         Expanded(
           flex: 1,
-          child: _buildRightSideDoubleQrPanel(status),
+          child: _buildDynamicMaximizedQrPanel(status, isVictory: isVictoryState),
         ),
       ],
     );
 
-    final int sleepCountdown = (kMaxInactivitySeconds - _idleSecondsElapsed).clamp(0, kMaxInactivitySeconds);
+    final int sleepCountdown = 0; // Mode convention : pas de décompte de veille par inactivité
 
     return Scaffold(
       backgroundColor: const Color(0xFF02070D),
@@ -739,6 +753,7 @@ class _ArenaTvScreenState extends State with WidgetsBindingObserver {
                     ),
                   ),
                 ),
+              // En-tête supérieur avec le bouton audio intégré dans le cadre
               _buildTopHeader(currentHp, maxHp, isVictory, isDefeat, presetLabel, sleepCountdown),
               const SizedBox(height: 16),
               Expanded(child: mainContent),
@@ -793,9 +808,9 @@ class _ArenaTvScreenState extends State with WidgetsBindingObserver {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      "CONFIGURATION : $presetLabel (BOSS: ${currentHp.toInt()} / ${safeMax.toInt()} PV) | VEILLE AUTO : ${sleepCountdown}s",
+                      "CONFIGURATION : $presetLabel (BOSS: ${currentHp.toInt()} / ${safeMax.toInt()} PV)",
                       style: const TextStyle(
-                        color: Color(0xFFFF9100),
+                        color: Color(0xFF00FF66),
                         fontFamily: 'monospace',
                         fontSize: 11,
                         fontWeight: FontWeight.bold,
@@ -804,16 +819,59 @@ class _ArenaTvScreenState extends State with WidgetsBindingObserver {
                   ],
                 ),
               ),
-              Text(
-                'RÉINITIALISATION : ${_formatTimer(_remainingSeconds)}',
-                style: TextStyle(
-                  color: isDefeat || (_remainingSeconds <= 60 && !isVictory)
-                      ? const Color(0xFFFF2E56)
-                      : Colors.white70,
-                  fontFamily: 'monospace',
-                  fontSize: 13,
-                  fontWeight: isDefeat ? FontWeight.bold : FontWeight.normal,
-                ),
+              // --- BOUTON AUDIO INTÉGRÉ DANS LE CADRE SUPÉRIEUR (COMPATIBLE TV FOCUS) ---
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    margin: const EdgeInsets.only(right: 16),
+                    height: 36,
+                    child: OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: const Color(0xFF00E5FF),
+                        side: const BorderSide(color: Color(0xFF00E5FF), width: 1.2),
+                        backgroundColor: const Color(0xFF00E5FF).withOpacity(0.1),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                      ),
+                      onPressed: () async {
+                        bool playing = await AudioService.toggleNrjStream();
+                        setState(() {});
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(playing ? "[AUDIO] Lecture en cours..." : "[AUDIO] Musique en pause."),
+                              duration: const Duration(milliseconds: 800),
+                            ),
+                          );
+                        }
+                      },
+                      icon: Icon(
+                        AudioService.isPlaying ? Icons.pause : Icons.volume_up,
+                        size: 16,
+                      ),
+                      label: Text(
+                        AudioService.isPlaying ? "PAUSE AUDIO" : "ACTIVER AUDIO",
+                        style: const TextStyle(
+                          fontSize: 11,
+                          fontFamily: 'monospace',
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ),
+                  Text(
+                    'RÉINITIALISATION : ${_formatTimer(_remainingSeconds)}',
+                    style: TextStyle(
+                      color: isDefeat || (_remainingSeconds <= 60 && !isVictory)
+                          ? const Color(0xFFFF2E56)
+                          : Colors.white70,
+                      fontFamily: 'monospace',
+                      fontSize: 13,
+                      fontWeight: isDefeat ? FontWeight.bold : FontWeight.normal,
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
@@ -1605,7 +1663,7 @@ class _ArenaTvScreenState extends State with WidgetsBindingObserver {
             child: hunterList.isEmpty
                 ? const Center(
                     child: Text(
-                      'AUCUN CHASSEUR DÉTECTÉ\nEN ATTENTE DU SCAN... (Mise en veille auto après 60s sans activité)',
+                      'AUCUN CHASSEUR DÉTECTÉ\nEN ATTENTE DU SCAN... (Mode Convention : Portail permanent actif)',
                       textAlign: TextAlign.center,
                       style: TextStyle(
                         color: Colors.white38,
@@ -1670,146 +1728,209 @@ class _ArenaTvScreenState extends State with WidgetsBindingObserver {
     );
   }
 
-  Widget _buildRightSideDoubleQrPanel(String raidStatus) {
+  // --- PANNEAU LATÉRAL AVEC QR CODES MAXIMISÉS ET FILTRAGE DE FIN DE PARTIE ---
+  Widget _buildDynamicMaximizedQrPanel(String raidStatus, {required bool isVictory}) {
     final String rawJoinUrl = 'https://shadowburn-1d8f8.web.app/#/join?room=$_roomId&token=${_joinToken ?? ""}';
     final joinQrData = Uri.encodeComponent(rawJoinUrl);
+
+    final String rawAdminUrl = 'https://shadowburn-1d8f8.web.app/#/admin?room=$_roomId&key=${_adminKey ?? ""}';
+    final adminQrData = Uri.encodeComponent(rawAdminUrl);
 
     const String apkDownloadUrl = 'https://github.com/Matou7/shadowburn-webhook/releases/latest/download/app-release.apk';
     final apkQrData = Uri.encodeComponent(apkDownloadUrl);
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
       decoration: BoxDecoration(
-        color: const Color(0xFF04101E).withOpacity(0.8),
-        border: Border.all(color: const Color(0xFF00E5FF).withOpacity(0.5)),
+        color: const Color(0xFF04101E).withOpacity(0.9),
+        border: Border.all(color: const Color(0xFF00E5FF).withOpacity(0.6), width: 1.5),
       ),
-      child: SingleChildScrollView(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            const Text(
-              'SCAN CHASSEUR',
-              style: TextStyle(
-                color: Color(0xFF00E5FF),
-                fontFamily: 'monospace',
-                fontWeight: FontWeight.bold,
-                fontSize: 9.5,
-                letterSpacing: 1.1,
-              ),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 4),
-            Container(
-              width: 80,
-              height: 80,
-              padding: const EdgeInsets.all(2),
-              color: Colors.white,
-              child: Image.network(
-                'https://api.qrserver.com/v1/create-qr-code/?size=80x80&data=$joinQrData',
-                fit: BoxFit.contain,
-                errorBuilder: (context, error, stackTrace) => const Icon(
-                  Icons.qr_code_2,
-                  size: 60,
-                  color: Colors.black,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final double totalHeight = constraints.maxHeight;
+          
+          if (isVictory) {
+            // ÉTAT DE VICTOIRE : Un seul QR Code (Télécharger APK) occupant toute la zone avec taille maximale
+            return Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Text(
+                  'TÉLÉCHARGER APK',
+                  style: TextStyle(
+                    color: Color(0xFF00FF66),
+                    fontFamily: 'monospace',
+                    fontWeight: FontWeight.bold,
+                    fontSize: 14,
+                    letterSpacing: 1.5,
+                  ),
+                  textAlign: TextAlign.center,
                 ),
-              ),
-            ),
-            const SizedBox(height: 2),
-            Text(
-              raidStatus == 'waiting' ? '(En attente)' : '(Actif)',
-              style: TextStyle(
-                color: raidStatus == 'waiting' ? Colors.white54 : const Color(0xFF00FF66),
-                fontSize: 8.5,
-              ),
-              textAlign: TextAlign.center,
-            ),
-            
-            const SizedBox(height: 14),
-            const Divider(color: Colors.white24, height: 1),
-            const SizedBox(height: 14),
-
-            const Text(
-              'TÉLÉCOMMANDE',
-              style: TextStyle(
-                color: Color(0xFFFF9100),
-                fontFamily: 'monospace',
-                fontWeight: FontWeight.bold,
-                fontSize: 9.5,
-                letterSpacing: 1.1,
-              ),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 4),
-            Container(
-              width: 80,
-              height: 80,
-              padding: const EdgeInsets.all(2),
-              color: Colors.white,
-              child: Image.network(
-                'https://api.qrserver.com/v1/create-qr-code/?size=80x80&data=${Uri.encodeComponent('https://shadowburn-1d8f8.web.app/#/admin?room=$_roomId&key=${_adminKey ?? ""}')}',
-                fit: BoxFit.contain,
-                errorBuilder: (context, error, stackTrace) => const Icon(
-                  Icons.admin_panel_settings,
-                  size: 60,
-                  color: Colors.black,
+                const SizedBox(height: 12),
+                Expanded(
+                  child: Center(
+                    child: AspectRatio(
+                      aspectRatio: 1.0,
+                      child: Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(8),
+                          boxShadow: [
+                            BoxShadow(
+                              color: const Color(0xFF00FF66).withOpacity(0.4),
+                              blurRadius: 20,
+                              spreadRadius: 2,
+                            ),
+                          ],
+                        ),
+                        child: Image.network(
+                          'https://api.qrserver.com/v1/create-qr-code/?size=500x500&data=$apkQrData',
+                          fit: BoxFit.contain,
+                          errorBuilder: (context, error, stackTrace) => const Icon(
+                            Icons.android,
+                            size: 100,
+                            color: Colors.black,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
                 ),
-              ),
-            ),
-            const SizedBox(height: 2),
-            Text(
-              'Salle : $_roomId',
-              style: const TextStyle(
-                color: Color(0xFFFF9100),
-                fontSize: 8.5,
-                fontFamily: 'monospace',
-                fontWeight: FontWeight.bold,
-              ),
-              textAlign: TextAlign.center,
-            ),
-
-            const SizedBox(height: 14),
-            const Divider(color: Colors.white24, height: 1),
-            const SizedBox(height: 14),
-
-            const Text(
-              'TÉLÉCHARGER APK',
-              style: TextStyle(
-                color: Color(0xFF00FF66),
-                fontFamily: 'monospace',
-                fontWeight: FontWeight.bold,
-                fontSize: 9.5,
-                letterSpacing: 1.1,
-              ),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 4),
-            Container(
-              width: 80,
-              height: 80,
-              padding: const EdgeInsets.all(2),
-              color: Colors.white,
-              child: Image.network(
-                'https://api.qrserver.com/v1/create-qr-code/?size=80x80&data=$apkQrData',
-                fit: BoxFit.contain,
-                errorBuilder: (context, error, stackTrace) => const Icon(
-                  Icons.android,
-                  size: 60,
-                  color: Colors.black,
+                const SizedBox(height: 8),
+                const Text(
+                  '(Android Mobile)',
+                  style: TextStyle(
+                    color: Colors.white60,
+                    fontSize: 11,
+                    fontFamily: 'monospace',
+                  ),
+                  textAlign: TextAlign.center,
                 ),
-              ),
-            ),
-            const SizedBox(height: 2),
-            const Text(
-              '(Android Mobile)',
-              style: TextStyle(
-                color: Colors.white60,
-                fontSize: 8.5,
-                fontFamily: 'monospace',
-              ),
-              textAlign: TextAlign.center,
-            ),
-          ],
-        ),
+              ],
+            );
+          } else {
+            // ÉTAT NORMAL / COMBAT / ATTENTE : Deux QR Codes maximisés occupant chacun 50% de l'espace vertical
+            final double sectionHeight = (totalHeight - 20) / 2;
+
+            return Column(
+              children: [
+                SizedBox(
+                  height: sectionHeight,
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Text(
+                        'SCAN CHASSEUR',
+                        style: TextStyle(
+                          color: Color(0xFF00E5FF),
+                          fontFamily: 'monospace',
+                          fontWeight: FontWeight.bold,
+                          fontSize: 11,
+                          letterSpacing: 1.2,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 4),
+                      Expanded(
+                        child: Center(
+                          child: AspectRatio(
+                            aspectRatio: 1.0,
+                            child: Container(
+                              padding: const EdgeInsets.all(6),
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Image.network(
+                                'https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=$joinQrData',
+                                fit: BoxFit.contain,
+                                errorBuilder: (context, error, stackTrace) => const Icon(
+                                  Icons.qr_code_2,
+                                  size: 80,
+                                  color: Colors.black,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        raidStatus == 'waiting' ? '(En attente)' : '(Actif)',
+                        style: TextStyle(
+                          color: raidStatus == 'waiting' ? Colors.white54 : const Color(0xFF00FF66),
+                          fontSize: 10,
+                          fontFamily: 'monospace',
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                    ],
+                  ),
+                ),
+
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 4.0),
+                  child: Divider(color: Colors.white24, height: 1),
+                ),
+
+                SizedBox(
+                  height: sectionHeight,
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Text(
+                        'TÉLÉCOMMANDE',
+                        style: TextStyle(
+                          color: Color(0xFFFF9100),
+                          fontFamily: 'monospace',
+                          fontWeight: FontWeight.bold,
+                          fontSize: 11,
+                          letterSpacing: 1.2,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 4),
+                      Expanded(
+                        child: Center(
+                          child: AspectRatio(
+                            aspectRatio: 1.0,
+                            child: Container(
+                              padding: const EdgeInsets.all(6),
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Image.network(
+                                'https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=$adminQrData',
+                                fit: BoxFit.contain,
+                                errorBuilder: (context, error, stackTrace) => const Icon(
+                                  Icons.admin_panel_settings,
+                                  size: 80,
+                                  color: Colors.black,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        'Salle : $_roomId',
+                        style: const TextStyle(
+                          color: Color(0xFFFF9100),
+                          fontSize: 10,
+                          fontFamily: 'monospace',
+                          fontWeight: FontWeight.bold,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            );
+          }
+        },
       ),
     );
   }
