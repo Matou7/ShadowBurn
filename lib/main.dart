@@ -216,16 +216,16 @@ class ShadowBurnTvApp extends StatelessWidget {
         if (settings.name == '/admin' ||
             currentUrl.contains('admin') ||
             fragment.contains('admin')) {
-          return MaterialPageRoute(builder: (_) => const AdminScreen());
+          return MaterialPageRoute(builder: (_) => AdminScreen());
         }
 
         if (settings.name == '/join' ||
             currentUrl.contains('join') ||
             fragment.contains('join')) {
-          return MaterialPageRoute(builder: (_) => const HunterJoinScreen());
+          return MaterialPageRoute(builder: (_) => HunterJoinScreen());
         }
 
-        return MaterialPageRoute(builder: (_) => const ArenaTvScreen());
+        return MaterialPageRoute(builder: (_) => ArenaTvScreen());
       },
     );
   }

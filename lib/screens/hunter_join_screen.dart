@@ -9,6 +9,7 @@ import 'package:qr_flutter/qr_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../services/web_cleanup.dart' as web_cleanup;
+import '../services/quota_guard_service.dart';
 
 const Color kSystemBlue = Color(0xFF00E5FF);
 const String kAppDownloadUrl = "https://shadowburn-1d8f8.web.app";
@@ -158,7 +159,8 @@ class _HunterJoinScreenState extends State<HunterJoinScreen> with WidgetsBinding
 
   void _parseIncomingParameters() {
     final now = DateTime.now();
-    if (now.hour >= 0 && now.hour < 6) {
+    bool isNightClosed = (now.hour >= 0 && now.hour < 6) || (now.hour == 23 && now.minute >= 58);
+    if (isNightClosed) {
       if (mounted) {
         setState(() {
           _isCheckingToken = false;
@@ -196,7 +198,8 @@ class _HunterJoinScreenState extends State<HunterJoinScreen> with WidgetsBinding
 
   Future _verifyPortalSecurity() async {
     final now = DateTime.now();
-    if (now.hour >= 0 && now.hour < 6) {
+    bool isNightClosed = (now.hour >= 0 && now.hour < 6) || (now.hour == 23 && now.minute >= 58);
+    if (isNightClosed) {
       if (mounted) {
         setState(() {
           _isCheckingToken = false;
@@ -352,6 +355,7 @@ class _HunterJoinScreenState extends State<HunterJoinScreen> with WidgetsBinding
     _frenzyTimer?.cancel();
     _antiCheatTimer?.cancel();
     _batchFlushTimer?.cancel();
+    _batchFlushTimer = null;
     _flushPendingDamage();
     super.dispose();
   }
@@ -393,6 +397,17 @@ class _HunterJoinScreenState extends State<HunterJoinScreen> with WidgetsBinding
   Future _joinRaid() async {
     final name = _nameController.text.trim();
     if (name.isEmpty || _raidRef == null) return;
+
+    // Vérification du disjoncteur avant d'écrire l'entrée du chasseur
+    bool canWrite = await QuotaGuardService.checkAndIncrementWrite();
+    if (!canWrite) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("[QUOTA] Seuil de sécurité atteint (19 900). Inscription suspendue."), backgroundColor: Colors.red),
+        );
+      }
+      return;
+    }
 
     setState(() => _isLoading = true);
 
@@ -457,7 +472,8 @@ class _HunterJoinScreenState extends State<HunterJoinScreen> with WidgetsBinding
     await _flushPendingDamage();
 
     try {
-      if (_raidRef != null && _raidData.isNotEmpty) {
+      bool canWrite = await QuotaGuardService.checkAndIncrementWrite();
+      if (canWrite && _raidRef != null && _raidData.isNotEmpty) {
         final dynamic rawHunters = _raidData['hunters'];
         final List hunterList = rawHunters is Iterable ? List.from(rawHunters) : [];
         hunterList.removeWhere((h) => h is Map && h['id'] == _hunterSessionId);
@@ -657,6 +673,14 @@ class _HunterJoinScreenState extends State<HunterJoinScreen> with WidgetsBinding
 
   Future _flushPendingDamage() async {
     if (_pendingDamage == 0 || _raidRef == null || _isFlushing) return;
+    
+    // Vérification du disjoncteur avant d'envoyer l'écriture groupée sur Firestore
+    bool canWrite = await QuotaGuardService.checkAndIncrementWrite();
+    if (!canWrite) {
+      debugPrint("[QUOTA GUARD] Seuil de sécurité préventif atteint (19 900). Flush suspendu.");
+      return;
+    }
+
     _isFlushing = true;
     
     final int dmgToSend = _pendingDamage;
@@ -780,7 +804,7 @@ class _HunterJoinScreenState extends State<HunterJoinScreen> with WidgetsBinding
                 Icon(Icons.lock_clock, color: Color(0xFFFF2E56), size: 64),
                 SizedBox(height: 20),
                 Text(
-                  "[ SYSTÈME : PORTAILS SCELLÉS (00H00 - 06H00) ]",
+                  "[ SYSTÈMES : PORTAILS SCELLÉS (23H58 - 06H00) ]",
                   textAlign: TextAlign.center,
                   style: TextStyle(color: Color(0xFFFF2E56), fontFamily: 'monospace', fontSize: 20, fontWeight: FontWeight.bold, letterSpacing: 2),
                 ),

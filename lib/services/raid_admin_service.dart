@@ -2,18 +2,23 @@
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
+import 'quota_guard_service.dart';
 
 class RaidAdminService {
   static final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
-  // CALIBRAGE UNIQUE : Uniquement le Raid Standard 5 000 PV pour maximiser le quota gratuit Firebase (0 €)
   static const List raidPresets = [
     {'hp': 5000, 'label': 'RAID STANDARD (5 000 PV)'},
   ];
 
-  /// Applique le preset standard de 5 000 PV et purge les logs/scores précédents
   static Future applyPreset(int maxHp, String label, {required String roomId}) async {
     try {
+      bool canWrite = await QuotaGuardService.checkAndIncrementWrite();
+      if (!canWrite) {
+        debugPrint("[QUOTA GUARD] Seuil atteint. applyPreset bloqué.");
+        return;
+      }
+
       final docRef = _firestore.collection('current_raids').doc(roomId);
       final snap = await docRef.get();
       final List resetHunters = [];
@@ -51,9 +56,14 @@ class RaidAdminService {
     }
   }
 
-  /// Frappe atomique du Maître du Jeu sur le Boss
   static Future strikeBoss(int damage, {required String roomId}) async {
     try {
+      bool canWrite = await QuotaGuardService.checkAndIncrementWrite();
+      if (!canWrite) {
+        debugPrint("[QUOTA GUARD] Seuil atteint. strikeBoss bloqué.");
+        return;
+      }
+
       final docRef = _firestore.collection('current_raids').doc(roomId);
       final snap = await docRef.get();
       if (!snap.exists) return;
@@ -75,9 +85,11 @@ class RaidAdminService {
     }
   }
 
-  /// Réinitialise intégralement le Boss à 5 000 PV, vide les logs de la TV et remet les scores des Chasseurs à 0
   static Future resetBoss({required String roomId}) async {
     try {
+      bool canWrite = await QuotaGuardService.checkAndIncrementWrite();
+      if (!canWrite) return;
+
       final docRef = _firestore.collection('current_raids').doc(roomId);
       final snap = await docRef.get();
       if (!snap.exists) return;
@@ -115,9 +127,11 @@ class RaidAdminService {
     }
   }
 
-  /// Change le statut du raid de manière sécurisée
   static Future setRaidStatus(String status, {required String roomId}) async {
     try {
+      bool canWrite = await QuotaGuardService.checkAndIncrementWrite();
+      if (!canWrite) return;
+
       final docRef = _firestore.collection('current_raids').doc(roomId);
       final Map<String, dynamic> payload = {
         'status': status,
@@ -134,9 +148,11 @@ class RaidAdminService {
     }
   }
 
-  /// Prolonge le chronomètre du raid
   static Future extendRaidMinutes(int minutes, {required String roomId}) async {
     try {
+      bool canWrite = await QuotaGuardService.checkAndIncrementWrite();
+      if (!canWrite) return;
+
       final docRef = _firestore.collection('current_raids').doc(roomId);
       final snapshot = await docRef.get();
       if (!snapshot.exists) return;
@@ -159,9 +175,11 @@ class RaidAdminService {
     }
   }
 
-  /// Réduit le chronomètre du raid
   static Future reduceRaidMinutes(int minutes, {required String roomId}) async {
     try {
+      bool canWrite = await QuotaGuardService.checkAndIncrementWrite();
+      if (!canWrite) return;
+
       final docRef = _firestore.collection('current_raids').doc(roomId);
       final snapshot = await docRef.get();
       if (!snapshot.exists) return;
@@ -181,11 +199,13 @@ class RaidAdminService {
     }
   }
 
-  /// Réinitialise l'échéance à minuit le jour même
   static Future resetToMidnight({required String roomId}) async {
     try {
+      bool canWrite = await QuotaGuardService.checkAndIncrementWrite();
+      if (!canWrite) return;
+
       final now = DateTime.now();
-      final midnight = DateTime(now.year, now.month, now.day, 23, 59, 59);
+      final midnight = DateTime(now.year, now.month, now.day, 23, 58, 0);
       final docRef = _firestore.collection('current_raids').doc(roomId);
 
       await docRef.update({
@@ -198,9 +218,11 @@ class RaidAdminService {
     }
   }
 
-  /// Expire immédiatement le raid
   static Future expireRaidNow({required String roomId}) async {
     try {
+      bool canWrite = await QuotaGuardService.checkAndIncrementWrite();
+      if (!canWrite) return;
+
       final docRef = _firestore.collection('current_raids').doc(roomId);
       await docRef.update({
         'target_end_time': DateTime.now().subtract(const Duration(seconds: 1)).millisecondsSinceEpoch,

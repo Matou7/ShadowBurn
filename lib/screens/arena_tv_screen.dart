@@ -4,9 +4,10 @@ import 'dart:async';
 import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'arena_web_helper_stub.dart' if (dart.library.html) 'arena_web_helper_web.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../services/audio_service.dart';
+import '../services/quota_guard_service.dart';
+import 'arena_web_helper_stub.dart' if (dart.library.html) 'arena_web_helper_web.dart';
 
 class ArenaTvScreen extends StatefulWidget {
   const ArenaTvScreen({super.key});
@@ -24,7 +25,6 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
   StreamSubscription? _raidSubscription;
 
   Timer? _localTickTimer;
-  Timer? _arenaHeartbeatTimer;
   Timer? _queueRetryTimer;
 
   Map _raidData = {};
@@ -48,7 +48,6 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
 
   static const int kMaxGlobalRooms = 100;
   static const int kMaxHuntersPerRoom = 10;
-  static const int kHeartbeatIntervalSeconds = 30; // Espacé pour économiser le quota
   static const int kRoomDeathThresholdMs = 45000;
 
   @override
@@ -67,7 +66,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
       if (!mounted) return;
 
       final now = DateTime.now();
-      bool isNightClosed = now.hour >= 0 && now.hour < 6;
+      bool isNightClosed = (now.hour >= 0 && now.hour < 6) || (now.hour == 23 && now.minute >= 58);
       if (isNightClosed != _isNightLockActive) {
         setState(() {
           _isNightLockActive = isNightClosed;
@@ -77,7 +76,6 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
           return;
         }
       }
-     
 
       if (_targetEndTimeMs > 0 && !_isDespawnedForInactivity && !_isNightLockActive) {
         final nowMs = now.millisecondsSinceEpoch;
@@ -100,7 +98,6 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
   }
 
   void _despawnAndStopAllTimers() {
-    _arenaHeartbeatTimer?.cancel();
     _queueRetryTimer?.cancel();
     _raidSubscription?.cancel();
 
@@ -122,7 +119,10 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
       AudioService.stopNrjStream();
     }
     if (_raidRef != null) {
-      await _raidRef!.update({'status': 'failed'}).catchError((_) {});
+      bool canWrite = await QuotaGuardService.checkAndIncrementWrite();
+      if (canWrite) {
+        await _raidRef!.update({'status': 'failed'}).catchError((_) {});
+      }
     }
   }
 
@@ -130,8 +130,6 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.detached) {
       _despawnAndStopAllTimers();
-    } else if (state == AppLifecycleState.resumed && !_isDespawnedForInactivity && !_isNightLockActive) {
-      _sendHeartbeatNow();
     }
   }
 
@@ -139,7 +137,8 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
   void didChangeDependencies() {
     super.didChangeDependencies();
     final now = DateTime.now();
-    if (now.hour >= 0 && now.hour < 6) {
+    bool isNightClosed = (now.hour >= 0 && now.hour < 6) || (now.hour == 23 && now.minute >= 58);
+    if (isNightClosed) {
       setState(() {
         _isNightLockActive = true;
         _isAllocating = false;
@@ -159,7 +158,8 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
 
   Future _resolveRoomAllocation() async {
     final now = DateTime.now();
-    if (now.hour >= 0 && now.hour < 6) {
+    bool isNightClosed = (now.hour >= 0 && now.hour < 6) || (now.hour == 23 && now.minute >= 58);
+    if (isNightClosed) {
       if (mounted) {
         setState(() {
           _isAllocating = false;
@@ -212,8 +212,19 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
 
     _queueRetryTimer?.cancel();
 
+    bool canWrite = await QuotaGuardService.checkAndIncrementWrite();
+    if (!canWrite) {
+      if (mounted) {
+        setState(() {
+          _isAllocating = false;
+          _isNightLockActive = true;
+        });
+      }
+      return;
+    }
+
     final ref = FirebaseFirestore.instance.collection('current_raids').doc(chosenRoom);
-    final midnight = DateTime(now.year, now.month, now.day, 23, 59, 59);
+    final midnight = DateTime(now.year, now.month, now.day, 23, 58, 0);
 
     try {
       final existingDoc = await ref.get();
@@ -230,6 +241,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
           'preset_label': 'RAID STANDARD (5 000 PV)',
           'current_hp': 5000,
           'max_hp': 5000,
+          'audio_playing': false,
           'hunters': [],
           'logs': [],
           'target_end_time': midnight.millisecondsSinceEpoch,
@@ -253,6 +265,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
           'preset_label': 'RAID STANDARD (5 000 PV)',
           'current_hp': data['current_hp'] ?? 5000,
           'max_hp': 5000,
+          'audio_playing': data.containsKey('audio_playing') ? data['audio_playing'] : false,
           'hunters': data['hunters'] ?? [],
           'logs': data['logs'] ?? [],
           'target_end_time': data['target_end_time'] ?? midnight.millisecondsSinceEpoch,
@@ -277,12 +290,6 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
         _isDespawnedForInactivity = false;
       });
 
-      if (!_isRadioPlaying) {
-        _isRadioPlaying = true;
-        AudioService.toggleNrjStream();
-      }
-
-      _startArenaHeartbeat();
       _startListeningToRaid();
     } catch (e) {
       if (!mounted) return;
@@ -297,7 +304,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
     _raidSubscription?.cancel();
     if (_raidRef == null) return;
 
-    _raidSubscription = _raidRef!.snapshots().listen((doc) {
+    _raidSubscription = _raidRef!.snapshots().listen((doc) async {
       if (!mounted) return;
       if (doc.exists) {
         final Map mapData = Map.from(doc.data() as Map? ?? {});
@@ -305,6 +312,16 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
         final String st = (mapData['status'] ?? 'waiting').toString();
         final dynamic rawHunters = mapData['hunters'];
         final int hunterCount = rawHunters is Iterable ? rawHunters.length : 0;
+
+        final bool remoteAudioPlaying = (mapData['audio_playing'] == true);
+        if (remoteAudioPlaying != _isRadioPlaying) {
+          _isRadioPlaying = remoteAudioPlaying;
+          if (_isRadioPlaying) {
+            AudioService.toggleNrjStream();
+          } else {
+            AudioService.stopNrjStream();
+          }
+        }
 
         if (hunterCount != _lastKnownHunterCount || hp != _lastKnownHp || st != _lastKnownStatus) {
           _recordActivity();
@@ -314,7 +331,10 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
         }
 
         if (hp <= 0 && st == 'active') {
-          _raidRef!.update({'status': 'victory', 'current_hp': 0}).catchError((_) {});
+          bool canWrite = await QuotaGuardService.checkAndIncrementWrite();
+          if (canWrite) {
+            _raidRef!.update({'status': 'victory', 'current_hp': 0}).catchError((_) {});
+          }
           mapData['status'] = 'victory';
           mapData['current_hp'] = 0;
 
@@ -348,6 +368,9 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
     final now = DateTime.now().millisecondsSinceEpoch;
 
     try {
+      bool canWrite = await QuotaGuardService.checkAndIncrementWrite();
+      if (!canWrite) return null;
+
       final snapshot = await firestore.collection('current_raids').get();
       final Map occupiedNumbers = {};
 
@@ -389,21 +412,6 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
       debugPrint("Erreur allocation slot: $e");
       return null;
     }
-  }
-
-  void _sendHeartbeatNow() {
-    if (_raidRef != null && !_isNightLockActive) {
-      _raidRef!.update({
-        'arena_last_seen': DateTime.now().millisecondsSinceEpoch,
-      }).catchError((_) {});
-    }
-  }
-
-  void _startArenaHeartbeat() {
-    _arenaHeartbeatTimer?.cancel();
-    _arenaHeartbeatTimer = Timer.periodic(const Duration(seconds: kHeartbeatIntervalSeconds), (_) {
-      _sendHeartbeatNow();
-    });
   }
 
   void _syncTargetTime(dynamic cloudTime) {
@@ -456,20 +464,13 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
                 Icon(Icons.lock_clock, color: Color(0xFFFF2E56), size: 64),
                 SizedBox(height: 20),
                 Text(
-                  "[ SYSTÈMES : PORTAILS SCELLÉS (00H00 - 06H00) ]",
+                  "[ SYSTÈMES : PORTAILS SCELLÉS (23H58 - 06H00) ]",
                   textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: Color(0xFFFF2E56),
-                    fontFamily: 'monospace',
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 2,
-                  ),
+                  style: TextStyle(color: Color(0xFFFF2E56), fontFamily: 'monospace', fontSize: 20, fontWeight: FontWeight.bold, letterSpacing: 2),
                 ),
                 SizedBox(height: 12),
                 Text(
-                  "Le quota d'énergie du Donjon est en repos nocturne.\n"
-                  "Reposez votre Hardware. Réouverture automatique à 6h00 du matin.",
+                  "Le quota d'énergie du Donjon est en repos nocturne.\nReposez votre Hardware. Réouverture automatique à 6h00 du matin.",
                   textAlign: TextAlign.center,
                   style: TextStyle(color: Colors.white70, fontFamily: 'monospace', fontSize: 13, height: 1.5),
                 ),
@@ -498,18 +499,11 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
                 SizedBox(height: 24),
                 Text(
                   "PORTAILS MONDIAUX SATURÉS",
-                  style: TextStyle(
-                    color: Color(0xFFFF9100),
-                    fontFamily: 'monospace',
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 2,
-                  ),
+                  style: TextStyle(color: Color(0xFFFF9100), fontFamily: 'monospace', fontSize: 20, fontWeight: FontWeight.bold, letterSpacing: 2),
                 ),
                 SizedBox(height: 12),
                 Text(
-                  "Les 100 failles dimensionnelles sont actuellement engagées en combat.\n"
-                  "En attente de libération d'un slot... (Nouvelle tentative dans 10 secondes)",
+                  "Les 100 failles dimensionnelles sont actuellement engagées en combat.\nEn attente de libération d'un slot... (Nouvelle tentative dans 10 secondes)",
                   textAlign: TextAlign.center,
                   style: TextStyle(color: Colors.white70, fontFamily: 'monospace', fontSize: 13, height: 1.5),
                 ),
@@ -531,11 +525,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
               SizedBox(height: 16),
               Text(
                 "VERROUILLAGE DU PORTAIL...",
-                style: TextStyle(
-                  color: Color(0xFF00E5FF),
-                  fontFamily: 'monospace',
-                  letterSpacing: 2,
-                ),
+                style: TextStyle(color: Color(0xFF00E5FF), fontFamily: 'monospace', letterSpacing: 2),
               ),
             ],
           ),
@@ -560,13 +550,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
                 SizedBox(height: 16),
                 Text(
                   "LE PORTAIL S'EST REFERMÉ",
-                  style: TextStyle(
-                    color: Color(0xFFFF2E56),
-                    fontFamily: 'monospace',
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 2,
-                  ),
+                  style: TextStyle(color: Color(0xFFFF2E56), fontFamily: 'monospace', fontSize: 16, fontWeight: FontWeight.bold, letterSpacing: 2),
                 ),
               ],
             ),
@@ -612,22 +596,23 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
           : _buildCombatWithMiniPodiumPanel(logs, hunters);
     }
 
-    final bool isVictoryState = isVictory;
-
-    Widget mainContent = Row(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Expanded(
-          flex: 3,
-          child: innerContent,
-        ),
-        const SizedBox(width: 16),
-        Expanded(
-          flex: 1,
-          child: _buildDynamicMaximizedQrPanel(status, isVictory: isVictoryState),
-        ),
-      ],
-    );
+    // En cas de victoire, le podium s'étale sur 100% de la largeur sans le panneau QR latéral
+    Widget mainContent = isVictory
+        ? innerContent
+        : Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Expanded(
+                flex: 3,
+                child: innerContent,
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                flex: 1,
+                child: _buildDynamicMaximizedQrPanel(status, isVictory: isVictory),
+              ),
+            ],
+          );
 
     return Scaffold(
       backgroundColor: const Color(0xFF02070D),
@@ -646,15 +631,9 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
                     border: Border.all(color: const Color(0xFFFF2E56)),
                   ),
                   child: const Text(
-                    "⚠ ALERTE : LE DONJON MONDIAL SE REFERME À MINUIT. FIN DE LA PÉRIODE D'ASSAUT IMMINENTE.",
+                    "⚠ ALERTE : LE DONJON MONDIAL SE REFERME À 23H58. FIN DE LA PÉRIODE D'ASSAUT IMMINENTE.",
                     textAlign: TextAlign.center,
-                    style: TextStyle(
-                      color: Color(0xFFFF2E56),
-                      fontFamily: 'monospace',
-                      fontWeight: FontWeight.bold,
-                      fontSize: 11,
-                      letterSpacing: 1.2,
-                    ),
+                    style: TextStyle(color: Color(0xFFFF2E56), fontFamily: 'monospace', fontWeight: FontWeight.bold, fontSize: 11, letterSpacing: 1.2),
                   ),
                 ),
               _buildTopHeader(currentHp, maxHp, isVictory, isDefeat, presetLabel),
@@ -700,24 +679,13 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
                   children: [
                     Text(
                       titleText,
-                      style: TextStyle(
-                        color: themeColor,
-                        fontFamily: 'monospace',
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                        letterSpacing: 1.5,
-                      ),
+                      style: TextStyle(color: themeColor, fontFamily: 'monospace', fontSize: 18, fontWeight: FontWeight.bold, letterSpacing: 1.5),
                       overflow: TextOverflow.ellipsis,
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      "CONFIGURATION : $presetLabel (BOSS: ${currentHp.toInt()} / ${safeMax.toInt()} PV)",
-                      style: const TextStyle(
-                        color: Color(0xFF00FF66),
-                        fontFamily: 'monospace',
-                        fontSize: 11,
-                        fontWeight: FontWeight.bold,
-                      ),
+                      "CONFIGURATION : $presetLabel (BOSS: ${currentHp.toInt()} / ${safeMax.toInt()} PV) | MODE CONVENTION OPTIMISÉ",
+                      style: const TextStyle(color: Color(0xFF00FF66), fontFamily: 'monospace', fontSize: 11, fontWeight: FontWeight.bold),
                     ),
                   ],
                 ),
@@ -737,6 +705,16 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
                         padding: const EdgeInsets.symmetric(horizontal: 12),
                       ),
                       onPressed: () async {
+                        bool canWrite = await QuotaGuardService.checkAndIncrementWrite();
+                        if (!canWrite) {
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text("[QUOTA] Seuil de sécurité atteint. Écriture bloquée."), backgroundColor: Colors.red),
+                            );
+                          }
+                          return;
+                        }
+
                         bool playing = await AudioService.toggleNrjStream();
                         setState(() {});
                         if (mounted) {
@@ -754,20 +732,14 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
                       ),
                       label: Text(
                         AudioService.isPlaying ? "PAUSE AUDIO" : "ACTIVER AUDIO",
-                        style: const TextStyle(
-                          fontSize: 11,
-                          fontFamily: 'monospace',
-                          fontWeight: FontWeight.bold,
-                        ),
+                        style: const TextStyle(fontSize: 11, fontFamily: 'monospace', fontWeight: FontWeight.bold),
                       ),
                     ),
                   ),
                   Text(
                     'RÉINITIALISATION : ${_formatTimer(_remainingSeconds)}',
                     style: TextStyle(
-                      color: isDefeat || (_remainingSeconds <= 60 && !isVictory)
-                          ? const Color(0xFFFF2E56)
-                          : Colors.white70,
+                      color: isDefeat || (_remainingSeconds <= 60 && !isVictory) ? const Color(0xFFFF2E56) : Colors.white70,
                       fontFamily: 'monospace',
                       fontSize: 13,
                       fontWeight: isDefeat ? FontWeight.bold : FontWeight.normal,
@@ -843,13 +815,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
           const SizedBox(height: 12),
           const Text(
             "☠ ÉCHEC DU RAID : LE PORTAIL S'EST REFERMÉ ☠",
-            style: TextStyle(
-              color: Color(0xFFFF2E56),
-              fontFamily: 'monospace',
-              fontSize: 22,
-              fontWeight: FontWeight.bold,
-              letterSpacing: 2,
-            ),
+            style: TextStyle(color: Color(0xFFFF2E56), fontFamily: 'monospace', fontSize: 22, fontWeight: FontWeight.bold, letterSpacing: 2),
           ),
           const SizedBox(height: 8),
           const Text(
@@ -941,13 +907,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
                     SizedBox(width: 8),
                     Text(
                       "CLASSEMENT PROVISOIRE (TOP 3 EN DIRECT)",
-                      style: TextStyle(
-                        color: Color(0xFFFFD700),
-                        fontFamily: 'monospace',
-                        fontWeight: FontWeight.bold,
-                        fontSize: 11,
-                        letterSpacing: 1.2,
-                      ),
+                      style: TextStyle(color: Color(0xFFFFD700), fontFamily: 'monospace', fontWeight: FontWeight.bold, fontSize: 11, letterSpacing: 1.2),
                     ),
                   ],
                 ),
@@ -976,34 +936,19 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
                             children: [
                               Text(
                                 "#${idx + 1}",
-                                style: TextStyle(
-                                  color: medalColor,
-                                  fontFamily: 'monospace',
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 12,
-                                ),
+                                style: TextStyle(color: medalColor, fontFamily: 'monospace', fontWeight: FontWeight.bold, fontSize: 12),
                               ),
                               const SizedBox(width: 6),
                               Expanded(
                                 child: Text(
                                   item.key.toString(),
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontFamily: 'monospace',
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 11,
-                                  ),
+                                  style: const TextStyle(color: Colors.white, fontFamily: 'monospace', fontWeight: FontWeight.bold, fontSize: 11),
                                   overflow: TextOverflow.ellipsis,
                                 ),
                               ),
                               Text(
                                 "${item.value} PV",
-                                style: TextStyle(
-                                  color: medalColor,
-                                  fontFamily: 'monospace',
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 11,
-                                ),
+                                style: TextStyle(color: medalColor, fontFamily: 'monospace', fontWeight: FontWeight.bold, fontSize: 11),
                               ),
                             ],
                           ),
@@ -1020,22 +965,11 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
             children: [
               Text(
                 'REGISTRE DES ASSAUTS',
-                style: TextStyle(
-                  color: Color(0xFF00E5FF),
-                  fontFamily: 'monospace',
-                  fontSize: 15,
-                  fontWeight: FontWeight.bold,
-                ),
+                style: TextStyle(color: Color(0xFF00E5FF), fontFamily: 'monospace', fontSize: 15, fontWeight: FontWeight.bold),
               ),
               Text(
                 'DERNIÈRE FRAPPE EN HAUT ↑',
-                style: TextStyle(
-                  color: Color(0xFF00FF66),
-                  fontFamily: 'monospace',
-                  fontSize: 10,
-                  fontWeight: FontWeight.bold,
-                  letterSpacing: 1.1,
-                ),
+                style: TextStyle(color: Color(0xFF00FF66), fontFamily: 'monospace', fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 1.1),
               ),
             ],
           ),
@@ -1073,12 +1007,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
                                 children: [
                                   Text(
                                     name,
-                                    style: const TextStyle(
-                                      color: Colors.white,
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 12,
-                                      fontFamily: 'monospace',
-                                    ),
+                                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12, fontFamily: 'monospace'),
                                   ),
                                   const SizedBox(width: 6),
                                   Text(
@@ -1090,12 +1019,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
                             ),
                             Text(
                               '-$damage PV',
-                              style: const TextStyle(
-                                color: Color(0xFFFF9100),
-                                fontWeight: FontWeight.bold,
-                                fontFamily: 'monospace',
-                                fontSize: 13,
-                              ),
+                              style: const TextStyle(color: Color(0xFFFF9100), fontWeight: FontWeight.bold, fontFamily: 'monospace', fontSize: 13),
                             ),
                           ],
                         ),
@@ -1109,35 +1033,24 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
   }
 
   Widget _buildCompleteMultiWayPodium(List logs, List hunters) {
-    final Map hunterChosenMode = {};
-    final Map totalDmg = {};
-    final Map squatReps = {};
-    final Map pushupReps = {};
-    final Map absReps = {};
+    // Utilisation d'un type Map dynamique sans chevrons complexes pour garantir zéro erreur de parsing
+    final Map huntersByMode = {};
 
     int globalSquats = 0;
     int globalPushups = 0;
     int globalAbs = 0;
 
-    for (final h in hunters) {
-      if (h is Map) {
-        final String name = (h['name'] ?? 'Chasseur').toString();
-        final String modeId = (h['mode_id'] ?? 'all').toString();
-        hunterChosenMode[name] = modeId;
+    for (final rawH in hunters) {
+      if (rawH is Map) {
+        final Map<String, dynamic> hunterMap = Map<String, dynamic>.from(rawH);
+        final String modeLabel = (hunterMap['mode_label'] ?? 'Entraînement du Monarque').toString();
 
-        final int hDmg = (h['total_damage'] as num?)?.toInt() ?? 0;
-        final int hSq = (h['squat_reps'] as num?)?.toInt() ?? 0;
-        final int hPu = (h['pushup_reps'] as num?)?.toInt() ?? 0;
-        final int hAb = (h['abs_reps'] as num?)?.toInt() ?? 0;
+        huntersByMode.putIfAbsent(modeLabel, () => []);
+        huntersByMode[modeLabel]!.add(hunterMap);
 
-        totalDmg[name] = ((totalDmg[name] as int?) ?? 0) + hDmg;
-        squatReps[name] = ((squatReps[name] as int?) ?? 0) + hSq;
-        pushupReps[name] = ((pushupReps[name] as int?) ?? 0) + hPu;
-        absReps[name] = ((absReps[name] as int?) ?? 0) + hAb;
-
-        globalSquats += hSq;
-        globalPushups += hPu;
-        globalAbs += hAb;
+        globalSquats += (hunterMap['squat_reps'] as num?)?.toInt() ?? 0;
+        globalPushups += (hunterMap['pushup_reps'] as num?)?.toInt() ?? 0;
+        globalAbs += (hunterMap['abs_reps'] as num?)?.toInt() ?? 0;
       }
     }
 
@@ -1161,33 +1074,29 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
       }
     }
 
-    final List sortedOverall = totalDmg.entries.toList()
-      ..sort((a, b) => (b.value as int).compareTo(a.value as int));
-    final List top10Overall = sortedOverall.take(10).toList();
+    final List entries = huntersByMode.entries.toList();
 
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: const Color(0xFF04101E),
         border: Border.all(color: const Color(0xFFFFD700), width: 2),
       ),
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            "★ PANTHÉON DU DONJON : VICTOIRE & STATISTIQUES FINALES ★",
-            style: TextStyle(
-              color: Color(0xFFFFD700),
-              fontFamily: 'monospace',
-              fontSize: 16,
-              fontWeight: FontWeight.bold,
-              letterSpacing: 2,
+          const Center(
+            child: Text(
+              "★ PANTHÉON DU DONJON : VICTOIRE & PODIUMS PAR VOIES D'ENTRAÎNEMENT ★",
+              style: TextStyle(color: Color(0xFFFFD700), fontFamily: 'monospace', fontSize: 18, fontWeight: FontWeight.bold, letterSpacing: 2),
+              textAlign: TextAlign.center,
             ),
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: 10),
           Container(
             width: double.infinity,
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
             decoration: BoxDecoration(
               color: dominantColor.withOpacity(0.12),
               border: Border.all(color: dominantColor, width: 1.2),
@@ -1198,120 +1107,117 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
                 Expanded(
                   child: Text(
                     dominantZoneText,
-                    style: TextStyle(
-                      color: dominantColor,
-                      fontFamily: 'monospace',
-                      fontWeight: FontWeight.bold,
-                      fontSize: 11,
-                    ),
+                    style: TextStyle(color: dominantColor, fontFamily: 'monospace', fontWeight: FontWeight.bold, fontSize: 12),
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
                 Text(
-                  "TOTAL : $grandTotalReps REPS",
-                  style: const TextStyle(
-                    color: Colors.white70,
-                    fontFamily: 'monospace',
-                    fontWeight: FontWeight.bold,
-                    fontSize: 11,
-                  ),
+                  "TOTAL GLOBAL : $grandTotalReps REPS (Squats: $globalSquats | Pompes: $globalPushups | Abdos: $globalAbs)",
+                  style: const TextStyle(color: Colors.white70, fontFamily: 'monospace', fontWeight: FontWeight.bold, fontSize: 11),
                 ),
               ],
             ),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 14),
           Expanded(
-            child: Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: Colors.black45,
-                border: Border.all(color: const Color(0xFFFFD700), width: 1.5),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Row(
-                    children: [
-                      Icon(Icons.military_tech, color: Color(0xFFFFD700), size: 16),
-                      SizedBox(width: 6),
-                      Text(
-                        "TOP 10 GÉNÉRAL DU DONJON",
-                        style: TextStyle(
-                          color: Color(0xFFFFD700),
-                          fontFamily: 'monospace',
-                          fontWeight: FontWeight.bold,
-                          fontSize: 11,
+            child: entries.isEmpty
+                ? const Center(
+                    child: Text("Aucun participant enregistré dans les voies.", style: TextStyle(color: Colors.white38, fontFamily: 'monospace', fontSize: 13)),
+                  )
+                : ListView(
+                    children: entries.map((entry) {
+                      final String modeName = entry.key.toString();
+                      final List rawList = entry.value is List ? entry.value : [];
+                      final List modeHunters = rawList.map((e) => Map<String, dynamic>.from(e)).toList();
+
+                      modeHunters.sort((a, b) {
+                        final dmgA = (a['total_damage'] as num?)?.toInt() ?? 0;
+                        final dmgB = (b['total_damage'] as num?)?.toInt() ?? 0;
+                        return dmgB.compareTo(dmgA);
+                      });
+
+                      return Container(
+                        margin: const EdgeInsets.only(bottom: 16),
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Colors.black45,
+                          border: Border.all(color: const Color(0xFF00E5FF).withOpacity(0.4), width: 1.2),
+                          borderRadius: BorderRadius.circular(6),
                         ),
-                      ),
-                    ],
-                  ),
-                  const Divider(color: Colors.white12, height: 8),
-                  Expanded(
-                    child: top10Overall.isEmpty
-                        ? const Center(
-                            child: Text("Aucun participant", style: TextStyle(color: Colors.white24, fontSize: 10)),
-                          )
-                        : ListView.builder(
-                            itemCount: top10Overall.length,
-                            itemBuilder: (ctx, idx) {
-                              final item = top10Overall[idx];
-                              final rankColor = idx == 0
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                const Icon(Icons.fitness_center, color: Color(0xFF00E5FF), size: 16),
+                                const SizedBox(width: 8),
+                                Text(
+                                  "VOIE : ${modeName.toUpperCase()}",
+                                  style: const TextStyle(color: Color(0xFF00E5FF), fontFamily: 'monospace', fontWeight: FontWeight.bold, fontSize: 13, letterSpacing: 1.1),
+                                ),
+                              ],
+                            ),
+                            const Divider(color: Colors.white12, height: 10),
+                            ...List.generate(modeHunters.length, (idx) {
+                              final h = modeHunters[idx];
+                              final String name = (h['name'] ?? 'Chasseur').toString();
+                              final int dmg = (h['total_damage'] as num?)?.toInt() ?? 0;
+                              final int sq = (h['squat_reps'] as num?)?.toInt() ?? 0;
+                              final int pu = (h['pushup_reps'] as num?)?.toInt() ?? 0;
+                              final int ab = (h['abs_reps'] as num?)?.toInt() ?? 0;
+
+                              final Color rankColor = idx == 0
                                   ? const Color(0xFFFFD700)
                                   : (idx == 1 ? const Color(0xFFC0C0C0) : const Color(0xFFCD7F32));
+
                               return Padding(
-                                padding: const EdgeInsets.symmetric(vertical: 2.0),
+                                padding: const EdgeInsets.symmetric(vertical: 4.0),
                                 child: Row(
                                   children: [
                                     Container(
-                                      width: 18,
-                                      height: 18,
+                                      width: 24,
+                                      height: 24,
                                       decoration: BoxDecoration(
                                         color: rankColor.withOpacity(0.15),
                                         border: Border.all(color: rankColor),
                                       ),
                                       child: Center(
                                         child: Text(
-                                          "${idx + 1}",
-                                          style: TextStyle(
-                                            color: rankColor,
-                                            fontSize: 9,
-                                            fontWeight: FontWeight.bold,
-                                            fontFamily: 'monospace',
-                                          ),
+                                          "#${idx + 1}",
+                                          style: TextStyle(color: rankColor, fontSize: 10, fontWeight: FontWeight.bold, fontFamily: 'monospace'),
                                         ),
                                       ),
                                     ),
-                                    const SizedBox(width: 8),
+                                    const SizedBox(width: 10),
                                     Expanded(
-                                      child: Text(
-                                        item.key.toString(),
-                                        style: const TextStyle(
-                                          color: Colors.white,
-                                          fontFamily: 'monospace',
-                                          fontWeight: FontWeight.bold,
-                                          fontSize: 11,
-                                        ),
-                                        overflow: TextOverflow.ellipsis,
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            name.toUpperCase(),
+                                            style: const TextStyle(color: Colors.white, fontFamily: 'monospace', fontWeight: FontWeight.bold, fontSize: 12),
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                          Text(
+                                            "Squats: $sq | Pompes: $pu | Abdos: $ab",
+                                            style: const TextStyle(color: Colors.white54, fontFamily: 'monospace', fontSize: 10),
+                                          ),
+                                        ],
                                       ),
                                     ),
                                     Text(
-                                      "${item.value} PV",
-                                      style: TextStyle(
-                                        color: rankColor,
-                                        fontFamily: 'monospace',
-                                        fontWeight: FontWeight.bold,
-                                        fontSize: 11,
-                                      ),
+                                      "$dmg PV",
+                                      style: TextStyle(color: rankColor, fontFamily: 'monospace', fontWeight: FontWeight.bold, fontSize: 12),
                                     ),
                                   ],
                                 ),
                               );
-                            },
-                          ),
+                            }),
+                          ],
+                        ),
+                      );
+                    }).toList(),
                   ),
-                ],
-              ),
-            ),
           ),
         ],
       ),
@@ -1333,19 +1239,12 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
             children: [
               Text(
                 'PORTAIL ACTIF : SALLE [$_roomId]',
-                style: const TextStyle(
-                  color: Color(0xFF00E5FF),
-                  fontFamily: 'monospace',
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                ),
+                style: const TextStyle(color: Color(0xFF00E5FF), fontFamily: 'monospace', fontSize: 16, fontWeight: FontWeight.bold),
               ),
               Text(
                 '${hunterList.length} / $kMaxHuntersPerRoom CHASSEURS',
                 style: TextStyle(
-                  color: hunterList.length >= kMaxHuntersPerRoom
-                      ? const Color(0xFFFF2E56)
-                      : const Color(0xFF00FF66),
+                  color: hunterList.length >= kMaxHuntersPerRoom ? const Color(0xFFFF2E56) : const Color(0xFF00FF66),
                   fontFamily: 'monospace',
                   fontSize: 12,
                   fontWeight: FontWeight.bold,
@@ -1360,12 +1259,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
                     child: Text(
                       'AUCUN CHASSEUR DÉTECTÉ\nEN ATTENTE DU SCAN... (Mode Convention : Portail permanent)',
                       textAlign: TextAlign.center,
-                      style: TextStyle(
-                        color: Colors.white38,
-                        fontFamily: 'monospace',
-                        fontSize: 13,
-                        letterSpacing: 1.2,
-                      ),
+                      style: TextStyle(color: Colors.white38, fontFamily: 'monospace', fontSize: 13, letterSpacing: 1.2),
                     ),
                   )
                 : ListView.builder(
@@ -1390,27 +1284,14 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Text(
-                                    name,
-                                    style: const TextStyle(
-                                      color: Colors.white,
-                                      fontFamily: 'monospace',
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                  Text(
-                                    mode,
-                                    style: const TextStyle(color: Colors.white54, fontSize: 10),
-                                  ),
+                                  Text(name, style: const TextStyle(color: Colors.white, fontFamily: 'monospace', fontWeight: FontWeight.bold)),
+                                  Text(mode, style: const TextStyle(color: Colors.white54, fontSize: 10)),
                                 ],
                               ),
                             ),
                             const Text(
                               'PRÊT',
-                              style: TextStyle(
-                                color: Color(0xFF00E5FF),
-                                fontWeight: FontWeight.bold,
-                              ),
+                              style: TextStyle(color: Color(0xFF00E5FF), fontWeight: FontWeight.bold),
                             ),
                           ],
                         ),
@@ -1430,9 +1311,6 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
     final String rawAdminUrl = 'https://shadowburn-1d8f8.web.app/#/admin?room=$_roomId&key=${_adminKey ?? ""}';
     final adminQrData = Uri.encodeComponent(rawAdminUrl);
 
-    const String apkDownloadUrl = 'https://github.com/Matou7/shadowburn-webhook/releases/latest/download/app-release.apk';
-    final apkQrData = Uri.encodeComponent(apkDownloadUrl);
-
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
       decoration: BoxDecoration(
@@ -1442,186 +1320,94 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
       child: LayoutBuilder(
         builder: (context, constraints) {
           final double totalHeight = constraints.maxHeight;
-          
-          if (isVictory) {
-            return Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Text(
-                  'TÉLÉCHARGER APK',
-                  style: TextStyle(
-                    color: Color(0xFF00FF66),
-                    fontFamily: 'monospace',
-                    fontWeight: FontWeight.bold,
-                    fontSize: 14,
-                    letterSpacing: 1.5,
-                  ),
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 12),
-                Expanded(
-                  child: Center(
-                    child: AspectRatio(
-                      aspectRatio: 1.0,
-                      child: Container(
-                        padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(8),
-                          boxShadow: [
-                            BoxShadow(
-                              color: const Color(0xFF00FF66).withOpacity(0.4),
-                              blurRadius: 20,
-                              spreadRadius: 2,
+          final double sectionHeight = (totalHeight - 20) / 2;
+
+          return Column(
+            children: [
+              SizedBox(
+                height: sectionHeight,
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Text(
+                      'SCAN CHASSEUR',
+                      style: TextStyle(color: Color(0xFF00E5FF), fontFamily: 'monospace', fontWeight: FontWeight.bold, fontSize: 11, letterSpacing: 1.2),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 4),
+                    Expanded(
+                      child: Center(
+                        child: AspectRatio(
+                          aspectRatio: 1.0,
+                          child: Container(
+                            padding: const EdgeInsets.all(6),
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(6),
                             ),
-                          ],
-                        ),
-                        child: Image.network(
-                          'https://api.qrserver.com/v1/create-qr-code/?size=500x500&data=$apkQrData',
-                          fit: BoxFit.contain,
-                          errorBuilder: (context, error, stackTrace) => const Icon(
-                            Icons.android,
-                            size: 100,
-                            color: Colors.black,
+                            child: Image.network(
+                              'https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=$joinQrData',
+                              fit: BoxFit.contain,
+                              errorBuilder: (context, error, stackTrace) => const Icon(Icons.qr_code_2, size: 80, color: Colors.black),
+                            ),
                           ),
                         ),
                       ),
                     ),
-                  ),
+                    const SizedBox(height: 2),
+                    Text(
+                      raidStatus == 'waiting' ? '(En attente)' : '(Actif)',
+                      style: TextStyle(color: raidStatus == 'waiting' ? Colors.white54 : const Color(0xFF00FF66), fontSize: 10, fontFamily: 'monospace'),
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 8),
-                const Text(
-                  '(Android Mobile)',
-                  style: TextStyle(
-                    color: Colors.white60,
-                    fontSize: 11,
-                    fontFamily: 'monospace',
-                  ),
-                  textAlign: TextAlign.center,
-                ),
-              ],
-            );
-          } else {
-            final double sectionHeight = (totalHeight - 20) / 2;
-
-            return Column(
-              children: [
-                SizedBox(
-                  height: sectionHeight,
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const Text(
-                        'SCAN CHASSEUR',
-                        style: TextStyle(
-                          color: Color(0xFF00E5FF),
-                          fontFamily: 'monospace',
-                          fontWeight: FontWeight.bold,
-                          fontSize: 11,
-                          letterSpacing: 1.2,
-                        ),
-                        textAlign: TextAlign.center,
-                      ),
-                      const SizedBox(height: 4),
-                      Expanded(
-                        child: Center(
-                          child: AspectRatio(
-                            aspectRatio: 1.0,
-                            child: Container(
-                              padding: const EdgeInsets.all(6),
-                              decoration: BoxDecoration(
-                                color: Colors.white,
-                                borderRadius: BorderRadius.circular(6),
-                              ),
-                              child: Image.network(
-                                'https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=$joinQrData',
-                                fit: BoxFit.contain,
-                                errorBuilder: (context, error, stackTrace) => const Icon(
-                                  Icons.qr_code_2,
-                                  size: 80,
-                                  color: Colors.black,
-                                ),
-                              ),
+              ),
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 4.0),
+                child: Divider(color: Colors.white24, height: 1),
+              ),
+              SizedBox(
+                height: sectionHeight,
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Text(
+                      'TÉLÉCOMMANDE',
+                      style: TextStyle(color: Color(0xFFFF9100), fontFamily: 'monospace', fontWeight: FontWeight.bold, fontSize: 11, letterSpacing: 1.2),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 4),
+                    Expanded(
+                      child: Center(
+                        child: AspectRatio(
+                          aspectRatio: 1.0,
+                          child: Container(
+                            padding: const EdgeInsets.all(6),
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Image.network(
+                              'https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=$adminQrData',
+                              fit: BoxFit.contain,
+                              errorBuilder: (context, error, stackTrace) => const Icon(Icons.admin_panel_settings, size: 80, color: Colors.black),
                             ),
                           ),
                         ),
                       ),
-                      const SizedBox(height: 2),
-                      Text(
-                        raidStatus == 'waiting' ? '(En attente)' : '(Actif)',
-                        style: TextStyle(
-                          color: raidStatus == 'waiting' ? Colors.white54 : const Color(0xFF00FF66),
-                          fontSize: 10,
-                          fontFamily: 'monospace',
-                        ),
-                        textAlign: TextAlign.center,
-                      ),
-                    ],
-                  ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Salle : $_roomId',
+                      style: const TextStyle(color: Color(0xFFFF9100), fontSize: 10, fontFamily: 'monospace', fontWeight: FontWeight.bold),
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
                 ),
-
-                const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 4.0),
-                  child: Divider(color: Colors.white24, height: 1),
-                ),
-
-                SizedBox(
-                  height: sectionHeight,
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const Text(
-                        'TÉLÉCOMMANDE',
-                        style: TextStyle(
-                          color: Color(0xFFFF9100),
-                          fontFamily: 'monospace',
-                          fontWeight: FontWeight.bold,
-                          fontSize: 11,
-                          letterSpacing: 1.2,
-                        ),
-                        textAlign: TextAlign.center,
-                      ),
-                      const SizedBox(height: 4),
-                      Expanded(
-                        child: Center(
-                          child: AspectRatio(
-                            aspectRatio: 1.0,
-                            child: Container(
-                              padding: const EdgeInsets.all(6),
-                              decoration: BoxDecoration(
-                                color: Colors.white,
-                                borderRadius: BorderRadius.circular(6),
-                              ),
-                              child: Image.network(
-                                'https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=$adminQrData',
-                                fit: BoxFit.contain,
-                                errorBuilder: (context, error, stackTrace) => const Icon(
-                                  Icons.admin_panel_settings,
-                                  size: 80,
-                                  color: Colors.black,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        'Salle : $_roomId',
-                        style: const TextStyle(
-                          color: Color(0xFFFF9100),
-                          fontSize: 10,
-                          fontFamily: 'monospace',
-                          fontWeight: FontWeight.bold,
-                        ),
-                        textAlign: TextAlign.center,
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            );
-          }
+              ),
+            ],
+          );
         },
       ),
     );

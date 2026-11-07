@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../services/quota_guard_service.dart';
 
 const Color kSystemBlue = Color(0xFF00E5FF);
 
@@ -86,7 +87,6 @@ class _AdminScreenState extends State<AdminScreen> {
         return;
       }
 
-      // VÉRIFICATION DE SESSION UNIQUE ADMIN (Anti-triche / Anti-intrusion sans Heartbeat)
       final String? activeAdmin = data['active_admin_session'];
       final int lastAdminHeartbeat = (data['admin_last_seen'] as num?)?.toInt() ?? 0;
       final int now = DateTime.now().millisecondsSinceEpoch;
@@ -102,7 +102,19 @@ class _AdminScreenState extends State<AdminScreen> {
         return;
       }
 
-      // Enregistrement unique à la connexion (Zéro écriture périodique par la suite)
+      // Vérification du disjoncteur de quota avant l'écriture admin
+      bool canWrite = await QuotaGuardService.checkAndIncrementWrite();
+      if (!canWrite) {
+        if (mounted) {
+          setState(() {
+            _isChecking = false;
+            _isAuthorized = false;
+            _denialReason = "QUOTA DE SÉCURITÉ ATTEINT (19 900 ÉCRITURES).\nAccès administrateur suspendu jusqu'à demain pour éviter toute facturation.";
+          });
+        }
+        return;
+      }
+
       await ref.set({
         'active_admin_session': _adminSessionId,
         'admin_last_seen': now,
@@ -129,6 +141,40 @@ class _AdminScreenState extends State<AdminScreen> {
           _denialReason = "Erreur de communication avec le portail : $e";
         });
       }
+    }
+  }
+
+  Future<void> _toggleRemoteAudio() async {
+    if (_roomId.isEmpty) return;
+    try {
+      bool canWrite = await QuotaGuardService.checkAndIncrementWrite();
+      if (!canWrite) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text("[QUOTA] Seuil de sécurité atteint. Écriture bloquée."), backgroundColor: Colors.red),
+          );
+        }
+        return;
+      }
+
+      final ref = FirebaseFirestore.instance.collection('current_raids').doc(_roomId);
+      final doc = await ref.get();
+      if (doc.exists) {
+        final data = doc.data() as Map<String, dynamic>? ?? {};
+        bool currentAudio = data['audio_playing'] == true;
+        await ref.update({'audio_playing': !currentAudio});
+        
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(!currentAudio ? "[RADIO] Ordre d'activation envoyé à la TV" : "[RADIO] Ordre de pause envoyé à la TV"),
+              duration: const Duration(milliseconds: 800),
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      debugPrint("Erreur bascule audio distante: $e");
     }
   }
 
@@ -193,13 +239,7 @@ class _AdminScreenState extends State<AdminScreen> {
                   const SizedBox(height: 16),
                   const Text(
                     "CONTRÔLE MAÎTRE BLOQUÉ",
-                    style: TextStyle(
-                      color: Color(0xFFFF2E56),
-                      fontFamily: 'monospace',
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                      letterSpacing: 2,
-                    ),
+                    style: TextStyle(color: Color(0xFFFF2E56), fontFamily: 'monospace', fontSize: 16, fontWeight: FontWeight.bold, letterSpacing: 2),
                   ),
                   const SizedBox(height: 12),
                   Text(
@@ -248,34 +288,18 @@ class _AdminScreenState extends State<AdminScreen> {
                   const SizedBox(height: 14),
                   const Text(
                     "CONTRÔLE MAÎTRE DU JEU",
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontFamily: 'monospace',
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                      letterSpacing: 2,
-                    ),
+                    style: TextStyle(color: Colors.white, fontFamily: 'monospace', fontSize: 16, fontWeight: FontWeight.bold, letterSpacing: 2),
                   ),
                   const SizedBox(height: 6),
                   Text(
                     "SALLE : $_roomId",
-                    style: const TextStyle(
-                      color: Color(0xFFFF9100),
-                      fontFamily: 'monospace',
-                      fontWeight: FontWeight.bold,
-                      fontSize: 13,
-                    ),
+                    style: const TextStyle(color: Color(0xFFFF9100), fontFamily: 'monospace', fontWeight: FontWeight.bold, fontSize: 13),
                   ),
                   const SizedBox(height: 14),
                   const Text(
                     "Liaison chiffrée. La télécommande est exclusivement disponible sur l'application ShadowBurn installée.",
                     textAlign: TextAlign.center,
-                    style: TextStyle(
-                      color: Colors.white70,
-                      fontFamily: 'monospace',
-                      fontSize: 11,
-                      height: 1.4,
-                    ),
+                    style: TextStyle(color: Colors.white70, fontFamily: 'monospace', fontSize: 11, height: 1.4),
                   ),
                   const SizedBox(height: 20),
                   SizedBox(
@@ -293,26 +317,36 @@ class _AdminScreenState extends State<AdminScreen> {
                         fit: BoxFit.scaleDown,
                         child: Text(
                           "OUVRIR DANS L'APPLICATION",
-                          style: TextStyle(
-                            fontFamily: 'monospace',
-                            fontWeight: FontWeight.bold,
-                            letterSpacing: 1.2,
-                            fontSize: 12,
-                          ),
+                          style: TextStyle(fontFamily: 'monospace', fontWeight: FontWeight.bold, letterSpacing: 1.2, fontSize: 12),
                         ),
                       ),
                       onPressed: _launchNativeApp,
                     ),
                   ),
                   const SizedBox(height: 14),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 48,
+                    child: ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF00E5FF),
+                        foregroundColor: Colors.black,
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                        shape: const BeveledRectangleBorder(),
+                      ),
+                      icon: const Icon(Icons.volume_up, color: Colors.black, size: 20),
+                      label: const Text(
+                        "BASCULER LA RADIO (TV)",
+                        style: TextStyle(fontFamily: 'monospace', fontWeight: FontWeight.bold, letterSpacing: 1.2, fontSize: 12),
+                      ),
+                      onPressed: _toggleRemoteAudio,
+                    ),
+                  ),
+                  const SizedBox(height: 14),
                   Text(
                     "Token de sécurité : ${_key.isNotEmpty ? _key : "aucun"}",
                     textAlign: TextAlign.center,
-                    style: const TextStyle(
-                      color: Colors.white24,
-                      fontFamily: 'monospace',
-                      fontSize: 9,
-                    ),
+                    style: const TextStyle(color: Colors.white24, fontFamily: 'monospace', fontSize: 9),
                   ),
                 ],
               ),
