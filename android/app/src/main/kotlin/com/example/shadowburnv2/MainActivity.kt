@@ -12,6 +12,7 @@ import android.os.Looper
 import android.os.PowerManager
 import android.os.Process
 import android.provider.Settings
+import android.view.WindowManager
 import androidx.core.app.NotificationManagerCompat
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -30,6 +31,18 @@ class MainActivity: FlutterActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+            setShowWhenLocked(true)
+            setTurnScreenOn(true)
+        } else {
+            window.addFlags(
+                WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+                WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
+                WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+            )
+        }
+
         intent?.dataString?.let {
             lastIntentUrl = it
         }
@@ -176,6 +189,16 @@ class MainActivity: FlutterActivity() {
                     result.success(true)
                 }
 
+                "resetEmergencyExemption" -> {
+                    try {
+                        val graceIntent = Intent(this, CoreWatcherService::class.java).apply {
+                            action = "ACTION_EMERGENCY_GRACE"
+                        }
+                        startService(graceIntent)
+                    } catch (_: Exception) {}
+                    result.success(true)
+                }
+
                 "requestOverlayPermission" -> {
                     checkAndRequestPermissions()
                     result.success(true)
@@ -267,7 +290,7 @@ class MainActivity: FlutterActivity() {
         if (!isLocked || isAppInForeground || System.currentTimeMillis() < CoreWatcherService.emergencyGraceUntil) return
 
         val now = System.currentTimeMillis()
-        if (now - lastBringToFrontTime < 80) return
+        if (now - lastBringToFrontTime < 50) return
         lastBringToFrontTime = now
 
         try {
@@ -280,6 +303,8 @@ class MainActivity: FlutterActivity() {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or 
                         Intent.FLAG_ACTIVITY_SINGLE_TOP or 
                         Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or
+                        (0x00800000) or 
+                        (0x00200000) or 
                         Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED
             }
             startActivity(intent)

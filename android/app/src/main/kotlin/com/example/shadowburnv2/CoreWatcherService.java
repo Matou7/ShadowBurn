@@ -22,7 +22,6 @@ public class CoreWatcherService extends Service {
     private volatile boolean isRunning = false;
     private Thread patrolThread = null;
 
-    // Horodatage absolu de grâce d'urgence (3 secondes de répit intouchable)
     public static volatile long emergencyGraceUntil = 0L;
 
     private static final List<String> EMERGENCY_WHITELIST = Arrays.asList(
@@ -60,13 +59,16 @@ public class CoreWatcherService extends Service {
         }
 
         if ("ACTION_EMERGENCY_GRACE".equals(actionVal)) {
-            // Octroie 3 secondes pleines de répit pour laisser le temps à l'OS d'ouvrir le Dialer/SMS
             emergencyGraceUntil = System.currentTimeMillis() + 3000L;
             return START_STICKY;
         }
 
         Intent notificationIntent = new Intent(this, MainActivity.class);
-        notificationIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_REORDER_TO_FRONT);
+        notificationIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | 
+                                    Intent.FLAG_ACTIVITY_SINGLE_TOP | 
+                                    Intent.FLAG_ACTIVITY_REORDER_TO_FRONT |
+                                    0x00800000 | 
+                                    0x00200000);
         
         int pendingFlags = (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) 
             ? (PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT) 
@@ -79,6 +81,7 @@ public class CoreWatcherService extends Service {
                 .setContentText("Le Hardware est verrouillé. Accomplissez vos quêtes.")
                 .setSmallIcon(android.R.drawable.ic_dialog_alert)
                 .setContentIntent(pendingIntent)
+                .setFullScreenIntent(pendingIntent, true)
                 .setOngoing(true)
                 .setPriority(NotificationCompat.PRIORITY_MAX)
                 .setCategory(NotificationCompat.CATEGORY_SERVICE);
@@ -111,29 +114,25 @@ public class CoreWatcherService extends Service {
 
                 if (!isRunning) break;
 
-                // Si la grâce d'urgence est active, on suspend totalement la patrouille
                 if (System.currentTimeMillis() < emergencyGraceUntil) {
                     continue;
                 }
 
                 String currentPkg = getForegroundPackageName();
 
-                // Si l'utilisateur est dans l'application d'urgence ou sur notre application, on ne fait rien
+                // Si on est sur notre propre app ou dans la liste blanche d'urgence, on ne fait rien
                 if (isPackageWhitelisted(currentPkg) || currentPkg.equals(getPackageName())) {
                     continue;
                 }
 
-                // Si le package est vide (latence système pendant l'ouverture), on donne un cycle de répit
-                if (currentPkg.isEmpty()) {
-                    continue;
-                }
-
-                // Aspiration instantanée vers MainActivity
+                // Aspiration immédiate vers MainActivity, que ce soit le Bureau, les Paramètres ou les Récents
                 try {
                     Intent launchIntent = new Intent(CoreWatcherService.this, MainActivity.class);
                     launchIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | 
                                           Intent.FLAG_ACTIVITY_SINGLE_TOP | 
                                           Intent.FLAG_ACTIVITY_REORDER_TO_FRONT |
+                                          0x00800000 | 
+                                          0x00200000 | 
                                           Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
                     startActivity(launchIntent);
                 } catch (Exception ignored) {}
@@ -144,7 +143,6 @@ public class CoreWatcherService extends Service {
 
     private boolean isPackageWhitelisted(String pkg) {
         if (pkg == null || pkg.isEmpty()) return false;
-        
         String lower = pkg.toLowerCase();
         for (String allowed : EMERGENCY_WHITELIST) {
             if (lower.contains(allowed)) {
