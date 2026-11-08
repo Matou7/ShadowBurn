@@ -1,7 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- Permissions Système & Confinement Cerbère -->
     <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.REORDER_TASKS" />
@@ -12,6 +11,7 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_HEALTH" />
 
     <application
@@ -39,7 +39,6 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
-            <!-- Deeplink Maître du Jeu : shadowburn://admin?room=room_X -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
@@ -52,7 +51,15 @@
             android:name="flutterEmbedding"
             android:value="2" />
 
-        <!-- Service de premier plan : garde l'application active en arrière-plan -->
+        <service
+            android:name=".CoreWatcherService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="System security enforcement and hardware discipline constraint control." />
+        </service>
+
         <service
             android:name="com.dexterous.flutterlocalnotifications.ForegroundService"
             android:exported="false"
@@ -74,7 +81,6 @@
             </intent-filter>
         </receiver>
 
-        <!-- Récepteur de redémarrage automatique du Système -->
         <receiver 
             android:name=".BootReceiver" 
             android:exported="true" 
@@ -89,7 +95,6 @@
         </receiver>
     </application>
 
-    <!-- Autorise l'application à résoudre les canaux d'Appel et de SMS -->
     <queries>
         <intent>
             <action android:name="android.intent.action.DIAL" />

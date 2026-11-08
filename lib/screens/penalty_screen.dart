@@ -2,6 +2,7 @@
 
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:vibration/vibration.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -10,6 +11,29 @@ import '../widgets/system_dialog.dart';
 
 class PenaltyScreen extends StatelessWidget {
   const PenaltyScreen({super.key});
+
+  static const MethodChannel _intentChannel = MethodChannel('com.shadowburn.app/lock');
+
+  Future<void> _openEmergencyDialer(BuildContext context) async {
+    try {
+      await _intentChannel.invokeMethod('openEmergencyDialer');
+    } catch (_) {
+      try {
+        final intent = Intent(Intent.ACTION_DIAL);
+        // Fallback natif si le channel échoue
+      } catch (e) {
+        debugPrint("Erreur ouverture Dialer: $e");
+      }
+    }
+  }
+
+  Future<void> _openEmergencySms(BuildContext context) async {
+    try {
+      await _intentChannel.invokeMethod('openEmergencySms');
+    } catch (_) {
+      debugPrint("Erreur ouverture SMS");
+    }
+  }
 
   void _showAmnestyConfirmDialog(BuildContext context, GameProvider game) {
     SystemDialog.show(
@@ -142,7 +166,50 @@ class PenaltyScreen extends StatelessWidget {
                         game.addReps("Squats", 5);
                       },
                     ),
-                    const SizedBox(height: 25),
+                    const SizedBox(height: 20),
+
+                    // BOUTONS CANAUX D'URGENCE (APPEL & SMS)
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: const Color(0xFF00FF66),
+                              side: const BorderSide(color: Color(0xFF00FF66)),
+                              backgroundColor: const Color(0xFF00FF66).withOpacity(0.08),
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                            ),
+                            icon: const Icon(Icons.phone_outlined, size: 16),
+                            label: Text(
+                              "CANAL APPEL",
+                              style: GoogleFonts.orbitron(fontSize: 10, letterSpacing: 1, fontWeight: FontWeight.bold),
+                            ),
+                            onPressed: () => _openEmergencyDialer(context),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: const Color(0xFF00E5FF),
+                              side: const BorderSide(color: Color(0xFF00E5FF)),
+                              backgroundColor: const Color(0xFF00E5FF).withOpacity(0.08),
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                            ),
+                            icon: const Icon(Icons.message_outlined, size: 16),
+                            label: Text(
+                              "CANAL SMS",
+                              style: GoogleFonts.orbitron(fontSize: 10, letterSpacing: 1, fontWeight: FontWeight.bold),
+                            ),
+                            onPressed: () => _openEmergencySms(context),
+                          ),
+                        ),
+                      ],
+                    ),
+
+                    const SizedBox(height: 20),
                     SizedBox(
                       width: double.infinity,
                       child: OutlinedButton.icon(

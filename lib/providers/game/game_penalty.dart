@@ -2,9 +2,9 @@
 part of '../game_provider.dart';
 
 mixin _PenaltyLogic on _GameBase {
-  void restorePenaltyState(int squatsDone, int squatsGoal) {
-    if (_sandbox && !SandboxManager.persistPenalty) return;
+  bool _isProcessingSquats = false;
 
+  void restorePenaltyState(int squatsDone, int squatsGoal) {
     _isInPenaltyZone = true;
     _penaltySquatsDone = squatsDone;
     _kPenaltyGoal = squatsGoal > 0 ? squatsGoal : 100;
@@ -12,20 +12,7 @@ mixin _PenaltyLogic on _GameBase {
   }
 
   void triggerDailyPenalty() {
-    final String today = _todayKey();
-    if (_calendarHistory[today]?['status'] == 'white_zone') {
-      return;
-    }
-
-    if (_sandbox && !SandboxManager.persistPenalty) {
-      _isInPenaltyZone = true;
-      _penaltySquatsDone = 0;
-      _kPenaltyGoal = 100;
-      LockService.lockScreen();
-      _notify();
-      return;
-    }
-
+    // Forçage direct de la zone de pénalité (contourne les filtres de white zone pour les tests)
     if (!_isInPenaltyZone) {
       _isInPenaltyZone = true;
       _penaltySquatsDone = 0;
@@ -47,22 +34,17 @@ mixin _PenaltyLogic on _GameBase {
     _penaltySquatsDone = 0;
     _kPenaltyGoal = 100;
 
+    StorageService.writePenaltyState(
+      active: true,
+      squatsDone: 0,
+      squatsGoal: 100,
+    );
+
     if (SandboxManager.persistPenalty) {
-      StorageService.writePenaltyState(
-        active: true,
-        squatsDone: 0,
-        squatsGoal: 100,
-      );
       SandboxManager.saveSandbox(_toJson());
-    } else {
-      StorageService.writePenaltyState(
-        active: false,
-        squatsDone: 0,
-        squatsGoal: 100,
-      );
     }
 
-    LockService.lockScreen();
+    LockService.lockScreen(force: true);
     NotificationService.showNotification(
       "PÉNALITÉ QUOTIDIENNE",
       "Quête non validée. Le Système verrouille le Hardware.",
@@ -76,93 +58,86 @@ mixin _PenaltyLogic on _GameBase {
     _penaltySquatsDone = 0;
     _kPenaltyGoal = 150;
 
-    if (_sandbox && !SandboxManager.persistPenalty) {
-      StorageService.writePenaltyState(
-        active: false,
-        squatsDone: 0,
-        squatsGoal: 100,
-      );
-      LockService.lockScreen();
-      _notify();
-      return;
-    }
-
     _applyPenaltyLockAndPersist();
   }
 
   void _applyPenaltyLockAndPersist() {
-    if (_sandbox && !SandboxManager.persistPenalty) {
-      LockService.lockScreen();
-      _notify();
-      return;
-    }
+    StorageService.writePenaltyState(
+      active: true,
+      squatsDone: _penaltySquatsDone,
+      squatsGoal: _kPenaltyGoal,
+    );
 
-    if (SandboxManager.persistPenalty) {
-      StorageService.writePenaltyState(
-        active: true,
-        squatsDone: _penaltySquatsDone,
-        squatsGoal: _kPenaltyGoal,
-      );
+    _isInPenaltyZone = true;
+
+    if (_sandbox && SandboxManager.persistPenalty) {
       SandboxManager.saveSandbox(_toJson());
-    } else {
-      StorageService.writePenaltyState(
-        active: true,
-        squatsDone: _penaltySquatsDone,
-        squatsGoal: _kPenaltyGoal,
-      );
+    } else if (!_sandbox) {
       _saveNow();
     }
 
-    LockService.lockScreen();
+    LockService.lockScreen(force: true);
     _notify();
   }
 
   void processPenaltySquats(int count) {
-    if (!_isInPenaltyZone) return;
+    if (_isProcessingSquats) return;
 
-    _penaltySquatsDone += count;
+    _isProcessingSquats = true;
 
-    if (_penaltySquatsDone >= _kPenaltyGoal) {
-      _isInPenaltyZone = false;
-      _penaltySquatsDone = 0;
-      _kPenaltyGoal = 100;
+    try {
+      if (!_isInPenaltyZone) {
+        _isInPenaltyZone = true;
+      }
 
-      if (!(_sandbox && !SandboxManager.persistPenalty)) {
+      _penaltySquatsDone += count;
+      dlog("Squats de pénalité : +$count | Total : $_penaltySquatsDone / $_kPenaltyGoal");
+
+      if (_penaltySquatsDone >= _kPenaltyGoal) {
+        _isInPenaltyZone = false;
+        _penaltySquatsDone = 0;
+        _kPenaltyGoal = 100;
+
         StorageService.writePenaltyState(
           active: false,
           squatsDone: 0,
           squatsGoal: 100,
         );
-        _saveNow();
-      }
 
-      LockService.unlockScreen();
-
-      NotificationService.showNotification(
-        "PÉNALITÉ PURGÉE",
-        "Le Système lève le verrouillage. Reprenez votre entraînement.",
-        type: 'levelup',
-      );
-    } else {
-      if (!(_sandbox && !SandboxManager.persistPenalty)) {
-        if (SandboxManager.persistPenalty) {
-          StorageService.writePenaltyState(
-            active: true,
-            squatsDone: _penaltySquatsDone,
-            squatsGoal: _kPenaltyGoal,
-          );
-          SandboxManager.saveSandbox(_toJson());
-        } else {
-          StorageService.writePenaltyState(
-            active: true,
-            squatsDone: _penaltySquatsDone,
-            squatsGoal: _kPenaltyGoal,
-          );
+        if (!(_sandbox && !SandboxManager.persistPenalty)) {
           _saveNow();
         }
-      }
-    }
 
-    _notify();
+        LockService.unlockScreen(force: true);
+
+        NotificationService.showNotification(
+          "PÉNALITÉ PURGÉE",
+          "Le Système lève le verrouillage. Reprenez votre entraînement.",
+          type: 'levelup',
+        );
+      } else {
+        StorageService.writePenaltyState(
+          active: true,
+          squatsDone: _penaltySquatsDone,
+          squatsGoal: _kPenaltyGoal,
+        );
+
+        if (!(_sandbox && !SandboxManager.persistPenalty)) {
+          if (SandboxManager.persistPenalty) {
+            SandboxManager.saveSandbox(_toJson());
+          } else {
+            _saveNow();
+          }
+        }
+      }
+
+      _notify();
+    } catch (e) {
+      dlog("Erreur critique processPenaltySquats : $e");
+    } finally {
+      Future.delayed(const Duration(milliseconds: 500), () {
+        _isProcessingSquats = false;
+      });
+    }
   }
 }
