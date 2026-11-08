@@ -22,6 +22,7 @@ public class CoreWatcherService extends Service {
     private volatile boolean isRunning = false;
     private Thread patrolThread = null;
 
+    // Fenêtre de grâce exacte de 2 secondes pour éviter les faux positifs lors des lancements d'urgence
     public static volatile long emergencyGraceUntil = 0L;
 
     private static final List<String> EMERGENCY_WHITELIST = Arrays.asList(
@@ -59,7 +60,14 @@ public class CoreWatcherService extends Service {
         }
 
         if ("ACTION_EMERGENCY_GRACE".equals(actionVal)) {
-            emergencyGraceUntil = System.currentTimeMillis() + 3000L;
+            emergencyGraceUntil = System.currentTimeMillis() + 2000L; // 2 secondes strictes
+            return START_STICKY;
+        }
+
+        if ("ACTION_FORCE_BRING_TO_FRONT".equals(actionVal)) {
+            if (System.currentTimeMillis() >= emergencyGraceUntil) {
+                bringAppToFront();
+            }
             return START_STICKY;
         }
 
@@ -77,8 +85,8 @@ public class CoreWatcherService extends Service {
         PendingIntent pendingIntent = PendingIntent.getActivity(this, 0, notificationIntent, pendingFlags);
 
         NotificationCompat.Builder builder = new NotificationCompat.Builder(this, CHANNEL_ID)
-                .setContentTitle("SYSTÈME : ZONE DE PÉNALITÉ")
-                .setContentText("Le Hardware est verrouillé. Accomplissez vos quêtes.")
+                .setContentTitle("SYSTÈMES : ZONE DE PÉNALITÉ")
+                .setContentText("Le Hardware est verrouillé. L'aspiration est active.")
                 .setSmallIcon(android.R.drawable.ic_dialog_alert)
                 .setContentIntent(pendingIntent)
                 .setFullScreenIntent(pendingIntent, true)
@@ -100,6 +108,21 @@ public class CoreWatcherService extends Service {
         return START_STICKY;
     }
 
+    private void bringAppToFront() {
+        try {
+            Intent launchIntent = new Intent(this, MainActivity.class);
+            int showWhenLockedFlag = 0x00800000;
+            int turnScreenOnFlag = 0x00200000;
+            launchIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | 
+                                  Intent.FLAG_ACTIVITY_SINGLE_TOP | 
+                                  Intent.FLAG_ACTIVITY_REORDER_TO_FRONT |
+                                  showWhenLockedFlag | 
+                                  turnScreenOnFlag | 
+                                  Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
+            startActivity(launchIntent);
+        } catch (Exception ignored) {}
+    }
+
     private void startWatchdogLoop() {
         if (isRunning) return;
         isRunning = true;
@@ -107,34 +130,24 @@ public class CoreWatcherService extends Service {
         patrolThread = new Thread(() -> {
             while (isRunning) {
                 try {
-                    Thread.sleep(150);
+                    Thread.sleep(200);
+
+                    if (System.currentTimeMillis() < emergencyGraceUntil) {
+                        continue;
+                    }
+
+                    String currentPkg = getForegroundPackageName();
+
+                    // Si l'utilisateur est dans ShadowBurn ou dans la liste blanche d'urgence, on ne fait rien
+                    if (isPackageWhitelisted(currentPkg) || currentPkg.equals(getPackageName()) || currentPkg.isEmpty()) {
+                        continue;
+                    }
+
+                    // Aspiration immédiate et absolue dans n'importe quelle autre situation
+                    bringAppToFront();
+
                 } catch (InterruptedException e) {
                     break;
-                }
-
-                if (!isRunning) break;
-
-                if (System.currentTimeMillis() < emergencyGraceUntil) {
-                    continue;
-                }
-
-                String currentPkg = getForegroundPackageName();
-
-                // Si on est sur notre propre app ou dans la liste blanche d'urgence, on ne fait rien
-                if (isPackageWhitelisted(currentPkg) || currentPkg.equals(getPackageName())) {
-                    continue;
-                }
-
-                // Aspiration immédiate vers MainActivity, que ce soit le Bureau, les Paramètres ou les Récents
-                try {
-                    Intent launchIntent = new Intent(CoreWatcherService.this, MainActivity.class);
-                    launchIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | 
-                                          Intent.FLAG_ACTIVITY_SINGLE_TOP | 
-                                          Intent.FLAG_ACTIVITY_REORDER_TO_FRONT |
-                                          0x00800000 | 
-                                          0x00200000 | 
-                                          Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
-                    startActivity(launchIntent);
                 } catch (Exception ignored) {}
             }
         });

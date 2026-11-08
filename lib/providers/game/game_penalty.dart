@@ -12,7 +12,6 @@ mixin _PenaltyLogic on _GameBase {
   }
 
   void triggerDailyPenalty() {
-    // Forçage direct de la zone de pénalité (contourne les filtres de white zone pour les tests)
     if (!_isInPenaltyZone) {
       _isInPenaltyZone = true;
       _penaltySquatsDone = 0;
@@ -82,7 +81,6 @@ mixin _PenaltyLogic on _GameBase {
 
   void processPenaltySquats(int count) {
     if (_isProcessingSquats) return;
-
     _isProcessingSquats = true;
 
     try {
@@ -94,6 +92,7 @@ mixin _PenaltyLogic on _GameBase {
       dlog("Squats de pénalité : +$count | Total : $_penaltySquatsDone / $_kPenaltyGoal");
 
       if (_penaltySquatsDone >= _kPenaltyGoal) {
+        // Atteinte ou dépassement de l'objectif : Levée immédiate de la pénalité
         _isInPenaltyZone = false;
         _penaltySquatsDone = 0;
         _kPenaltyGoal = 100;
@@ -107,6 +106,9 @@ mixin _PenaltyLogic on _GameBase {
         if (!(_sandbox && !SandboxManager.persistPenalty)) {
           _saveNow();
         }
+
+        // Notification synchrone de l'état avant le déverrouillage natif
+        _notify();
 
         LockService.unlockScreen(force: true);
 
@@ -129,15 +131,13 @@ mixin _PenaltyLogic on _GameBase {
             _saveNow();
           }
         }
+        _notify();
       }
-
-      _notify();
     } catch (e) {
       dlog("Erreur critique processPenaltySquats : $e");
     } finally {
-      Future.delayed(const Duration(milliseconds: 500), () {
-        _isProcessingSquats = false;
-      });
+      // Garantit la libération absolue du verrou anti-rebond même en cas d'erreur
+      _isProcessingSquats = false;
     }
   }
 }

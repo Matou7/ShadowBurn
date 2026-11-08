@@ -1,5 +1,4 @@
 // lib/screens/penalty_screen.dart
-
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -12,26 +11,19 @@ import '../widgets/system_dialog.dart';
 class PenaltyScreen extends StatelessWidget {
   const PenaltyScreen({super.key});
 
-  static const MethodChannel _intentChannel = MethodChannel('com.shadowburn.app/lock');
-
   Future<void> _openEmergencyDialer(BuildContext context) async {
     try {
-      await _intentChannel.invokeMethod('openEmergencyDialer');
-    } catch (_) {
-      try {
-        final intent = Intent(Intent.ACTION_DIAL);
-        // Fallback natif si le channel échoue
-      } catch (e) {
-        debugPrint("Erreur ouverture Dialer: $e");
-      }
+      await LockService.openEmergencyDialer();
+    } catch (e) {
+      debugPrint("Erreur ouverture Dialer: $e");
     }
   }
 
   Future<void> _openEmergencySms(BuildContext context) async {
     try {
-      await _intentChannel.invokeMethod('openEmergencySms');
-    } catch (_) {
-      debugPrint("Erreur ouverture SMS");
+      await LockService.openEmergencySms();
+    } catch (e) {
+      debugPrint("Erreur ouverture SMS: $e");
     }
   }
 
@@ -167,8 +159,6 @@ class PenaltyScreen extends StatelessWidget {
                       },
                     ),
                     const SizedBox(height: 20),
-
-                    // BOUTONS CANAUX D'URGENCE (APPEL & SMS)
                     Row(
                       children: [
                         Expanded(
@@ -208,7 +198,6 @@ class PenaltyScreen extends StatelessWidget {
                         ),
                       ],
                     ),
-
                     const SizedBox(height: 20),
                     SizedBox(
                       width: double.infinity,
@@ -268,7 +257,9 @@ class _HoldSquatsButtonState extends State<_HoldSquatsButton> {
       _isOnCooldown = true;
     });
 
-    Vibration.vibrate(duration: 40);
+    try {
+      Vibration.vibrate(duration: 40);
+    } catch (_) {}
     widget.onValidated();
 
     _cooldownTimer?.cancel();

@@ -596,7 +596,6 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
           : _buildCombatWithMiniPodiumPanel(logs, hunters);
     }
 
-    // En cas de victoire, le podium s'étale sur 100% de la largeur sans le panneau QR latéral
     Widget mainContent = isVictory
         ? innerContent
         : Row(
@@ -684,7 +683,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      "CONFIGURATION : $presetLabel (BOSS: ${currentHp.toInt()} / ${safeMax.toInt()} PV) | MODE CONVENTION OPTIMISÉ",
+                      "CONFIGURATION : $presetLabel (BOSS: ${currentHp.toInt()} / ${safeMax.toInt()} PV)",
                       style: const TextStyle(color: Color(0xFF00FF66), fontFamily: 'monospace', fontSize: 11, fontWeight: FontWeight.bold),
                     ),
                   ],
@@ -814,7 +813,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
           const Icon(Icons.dangerous_outlined, color: Color(0xFFFF2E56), size: 72),
           const SizedBox(height: 12),
           const Text(
-            "☠ ÉCHEC DU RAID : LE PORTAIL S'EST REFERMÉ ☠",
+            "☠ ÉCHEC DU RAID ☠",
             style: TextStyle(color: Color(0xFFFF2E56), fontFamily: 'monospace', fontSize: 22, fontWeight: FontWeight.bold, letterSpacing: 2),
           ),
           const SizedBox(height: 8),
@@ -1032,8 +1031,8 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
     );
   }
 
+  // PODIUM MULTI-VOIES EN GRILLE STATIQUE (Cases en carré / blocs fixes pour s'adapter parfaitement)
   Widget _buildCompleteMultiWayPodium(List logs, List hunters) {
-    // Utilisation d'un type Map dynamique sans chevrons complexes pour garantir zéro erreur de parsing
     final Map huntersByMode = {};
 
     int globalSquats = 0;
@@ -1055,23 +1054,16 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
     }
 
     final int grandTotalReps = globalSquats + globalPushups + globalAbs;
-    String dominantZoneText = "AUCUNE ZONE DOMINANTE";
-    Color dominantColor = const Color(0xFFFFD700);
 
-    if (grandTotalReps > 0) {
-      if (globalSquats >= globalPushups && globalSquats >= globalAbs) {
-        final pct = ((globalSquats / grandTotalReps) * 100).toStringAsFixed(1);
-        dominantZoneText = "DISCIPLINE DOMINANTE : VOIE DES JAMBES (SQUATS) — $globalSquats REPS ($pct%)";
-        dominantColor = const Color(0xFF00E5FF);
-      } else if (globalPushups >= globalSquats && globalPushups >= globalAbs) {
-        final pct = ((globalPushups / grandTotalReps) * 100).toStringAsFixed(1);
-        dominantZoneText = "DISCIPLINE DOMINANTE : VOIE DU HAUT (POMPES) — $globalPushups REPS ($pct%)";
-        dominantColor = const Color(0xFFFF9100);
-      } else {
-        final pct = ((globalAbs / grandTotalReps) * 100).toStringAsFixed(1);
-        dominantZoneText = "DISCIPLINE DOMINANTE : VOIE DU TRONC (ABDOS) — $globalAbs REPS ($pct%)";
-        dominantColor = const Color(0xFF00FF66);
-      }
+    // Voies standard garanties pour avoir des cases statiques propres
+    final List<String> standardModes = [
+      "Voie de la Force Brute (Pompes)",
+      "Voie des Jambes de Fer (Squats)",
+      "Voie du Tronc (Abdos)"
+    ];
+
+    for (final m in standardModes) {
+      huntersByMode.putIfAbsent(m, () => []);
     }
 
     final List entries = huntersByMode.entries.toList();
@@ -1088,136 +1080,126 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
         children: [
           const Center(
             child: Text(
-              "★ PANTHÉON DU DONJON : VICTOIRE & PODIUMS PAR VOIES D'ENTRAÎNEMENT ★",
+              "★ PANTHÉON DU DONJON : PODIUMS MULTI-VOIES EN CASES STATIQUES ★",
               style: TextStyle(color: Color(0xFFFFD700), fontFamily: 'monospace', fontSize: 18, fontWeight: FontWeight.bold, letterSpacing: 2),
               textAlign: TextAlign.center,
             ),
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 8),
           Container(
             width: double.infinity,
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
             decoration: BoxDecoration(
-              color: dominantColor.withOpacity(0.12),
-              border: Border.all(color: dominantColor, width: 1.2),
+              color: const Color(0xFFFFD700).withOpacity(0.12),
+              border: Border.all(color: const Color(0xFFFFD700), width: 1.2),
             ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Expanded(
-                  child: Text(
-                    dominantZoneText,
-                    style: TextStyle(color: dominantColor, fontFamily: 'monospace', fontWeight: FontWeight.bold, fontSize: 12),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-                Text(
-                  "TOTAL GLOBAL : $grandTotalReps REPS (Squats: $globalSquats | Pompes: $globalPushups | Abdos: $globalAbs)",
-                  style: const TextStyle(color: Colors.white70, fontFamily: 'monospace', fontWeight: FontWeight.bold, fontSize: 11),
-                ),
-              ],
+            child: Text(
+              "TOTAL GLOBAL : $grandTotalReps REPS (Squats: $globalSquats | Pompes: $globalPushups | Abdos: $globalAbs)",
+              style: const TextStyle(color: Colors.white70, fontFamily: 'monospace', fontWeight: FontWeight.bold, fontSize: 11),
+              textAlign: TextAlign.center,
             ),
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 12),
           Expanded(
-            child: entries.isEmpty
-                ? const Center(
-                    child: Text("Aucun participant enregistré dans les voies.", style: TextStyle(color: Colors.white38, fontFamily: 'monospace', fontSize: 13)),
-                  )
-                : ListView(
-                    children: entries.map((entry) {
-                      final String modeName = entry.key.toString();
-                      final List rawList = entry.value is List ? entry.value : [];
-                      final List modeHunters = rawList.map((e) => Map<String, dynamic>.from(e)).toList();
-
-                      modeHunters.sort((a, b) {
-                        final dmgA = (a['total_damage'] as num?)?.toInt() ?? 0;
-                        final dmgB = (b['total_damage'] as num?)?.toInt() ?? 0;
-                        return dmgB.compareTo(dmgA);
-                      });
-
-                      return Container(
-                        margin: const EdgeInsets.only(bottom: 16),
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: Colors.black45,
-                          border: Border.all(color: const Color(0xFF00E5FF).withOpacity(0.4), width: 1.2),
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              children: [
-                                const Icon(Icons.fitness_center, color: Color(0xFF00E5FF), size: 16),
-                                const SizedBox(width: 8),
-                                Text(
-                                  "VOIE : ${modeName.toUpperCase()}",
-                                  style: const TextStyle(color: Color(0xFF00E5FF), fontFamily: 'monospace', fontWeight: FontWeight.bold, fontSize: 13, letterSpacing: 1.1),
-                                ),
-                              ],
-                            ),
-                            const Divider(color: Colors.white12, height: 10),
-                            ...List.generate(modeHunters.length, (idx) {
-                              final h = modeHunters[idx];
-                              final String name = (h['name'] ?? 'Chasseur').toString();
-                              final int dmg = (h['total_damage'] as num?)?.toInt() ?? 0;
-                              final int sq = (h['squat_reps'] as num?)?.toInt() ?? 0;
-                              final int pu = (h['pushup_reps'] as num?)?.toInt() ?? 0;
-                              final int ab = (h['abs_reps'] as num?)?.toInt() ?? 0;
-
-                              final Color rankColor = idx == 0
-                                  ? const Color(0xFFFFD700)
-                                  : (idx == 1 ? const Color(0xFFC0C0C0) : const Color(0xFFCD7F32));
-
-                              return Padding(
-                                padding: const EdgeInsets.symmetric(vertical: 4.0),
-                                child: Row(
-                                  children: [
-                                    Container(
-                                      width: 24,
-                                      height: 24,
-                                      decoration: BoxDecoration(
-                                        color: rankColor.withOpacity(0.15),
-                                        border: Border.all(color: rankColor),
-                                      ),
-                                      child: Center(
-                                        child: Text(
-                                          "#${idx + 1}",
-                                          style: TextStyle(color: rankColor, fontSize: 10, fontWeight: FontWeight.bold, fontFamily: 'monospace'),
-                                        ),
-                                      ),
-                                    ),
-                                    const SizedBox(width: 10),
-                                    Expanded(
-                                      child: Column(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
-                                        children: [
-                                          Text(
-                                            name.toUpperCase(),
-                                            style: const TextStyle(color: Colors.white, fontFamily: 'monospace', fontWeight: FontWeight.bold, fontSize: 12),
-                                            overflow: TextOverflow.ellipsis,
-                                          ),
-                                          Text(
-                                            "Squats: $sq | Pompes: $pu | Abdos: $ab",
-                                            style: const TextStyle(color: Colors.white54, fontFamily: 'monospace', fontSize: 10),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                    Text(
-                                      "$dmg PV",
-                                      style: TextStyle(color: rankColor, fontFamily: 'monospace', fontWeight: FontWeight.bold, fontSize: 12),
-                                    ),
-                                  ],
-                                ),
-                              );
-                            }),
-                          ],
-                        ),
-                      );
-                    }).toList(),
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                // Disposition en grille statique : cartes en carré/rectangle fixe adaptées à la largeur
+                return GridView.builder(
+                  padding: EdgeInsets.zero,
+                  itemCount: entries.length,
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 3, // 3 cases côte à côte sur la largeur
+                    crossAxisSpacing: 12,
+                    mainAxisSpacing: 12,
+                    childAspectRatio: 1.15, // Format carré/compact statique
                   ),
+                  itemBuilder: (context, index) {
+                    final entry = entries[index];
+                    final String modeName = entry.key.toString();
+                    final List rawList = entry.value is List ? entry.value : [];
+                    final List modeHunters = rawList.map((e) => Map<String, dynamic>.from(e)).toList();
+
+                    modeHunters.sort((a, b) {
+                      final dmgA = (a['total_damage'] as num?)?.toInt() ?? 0;
+                      final dmgB = (b['total_damage'] as num?)?.toInt() ?? 0;
+                      return dmgB.compareTo(dmgA);
+                    });
+
+                    return Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: Colors.black45,
+                        border: Border.all(color: const Color(0xFF00E5FF).withOpacity(0.5), width: 1.2),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              const Icon(Icons.fitness_center, color: Color(0xFF00E5FF), size: 14),
+                              const SizedBox(width: 6),
+                              Expanded(
+                                child: Text(
+                                  modeName.toUpperCase(),
+                                  style: const TextStyle(color: Color(0xFF00E5FF), fontFamily: 'monospace', fontWeight: FontWeight.bold, fontSize: 11),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const Divider(color: Colors.white12, height: 8),
+                          Expanded(
+                            child: modeHunters.isEmpty
+                                ? const Center(
+                                    child: Text(
+                                      "Aucun combattant",
+                                      style: TextStyle(color: Colors.white30, fontStyle: FontStyle.italic, fontSize: 10, fontFamily: 'monospace'),
+                                    ),
+                                  )
+                                : ListView(
+                                    padding: EdgeInsets.zero,
+                                    children: List.generate(modeHunters.length, (idx) {
+                                      final h = modeHunters[idx];
+                                      final String name = (h['name'] ?? 'Chasseur').toString();
+                                      final int dmg = (h['total_damage'] as num?)?.toInt() ?? 0;
+
+                                      final Color rankColor = idx == 0
+                                          ? const Color(0xFFFFD700)
+                                          : (idx == 1 ? const Color(0xFFC0C0C0) : const Color(0xFFCD7F32));
+
+                                      return Padding(
+                                        padding: const EdgeInsets.symmetric(vertical: 2.0),
+                                        child: Row(
+                                          children: [
+                                            Text(
+                                              "#${idx + 1} ",
+                                              style: TextStyle(color: rankColor, fontSize: 10, fontWeight: FontWeight.bold, fontFamily: 'monospace'),
+                                            ),
+                                            Expanded(
+                                              child: Text(
+                                                name,
+                                                style: const TextStyle(color: Colors.white, fontFamily: 'monospace', fontSize: 10),
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                            ),
+                                            Text(
+                                              "$dmg PV",
+                                              style: TextStyle(color: rankColor, fontFamily: 'monospace', fontSize: 10, fontWeight: FontWeight.bold),
+                                            ),
+                                          ],
+                                        ),
+                                      );
+                                    }),
+                                  ),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                );
+              },
+            ),
           ),
         ],
       ),

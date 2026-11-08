@@ -57,7 +57,6 @@ class MainActivity: FlutterActivity() {
 
             if (isPrefPrefixed || isPrefRaw) {
                 isLocked = true
-                setExcludeFromRecents(true)
                 startCoreWatcherService()
             }
         } catch (e: Exception) {
@@ -76,32 +75,21 @@ class MainActivity: FlutterActivity() {
     override fun onResume() {
         super.onResume()
         isAppInForeground = true
-        if (isLocked) {
-            setExcludeFromRecents(true)
-        }
     }
 
     override fun onPause() {
         super.onPause()
         isAppInForeground = false
-        if (isLocked && System.currentTimeMillis() >= CoreWatcherService.emergencyGraceUntil) {
-            bringToFrontForced()
-        }
     }
 
     override fun onStop() {
         super.onStop()
         isAppInForeground = false
-        if (isLocked && System.currentTimeMillis() >= CoreWatcherService.emergencyGraceUntil) {
-            bringToFrontForced()
-        }
     }
 
     override fun onUserLeaveHint() {
         super.onUserLeaveHint()
-        if (isLocked && System.currentTimeMillis() >= CoreWatcherService.emergencyGraceUntil) {
-            bringToFrontForced()
-        }
+        isAppInForeground = false
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -117,7 +105,6 @@ class MainActivity: FlutterActivity() {
 
                 "lockScreen" -> {
                     isLocked = true
-                    setExcludeFromRecents(true)
                     startCoreWatcherService()
 
                     try {
@@ -134,7 +121,6 @@ class MainActivity: FlutterActivity() {
                 "unlockScreen" -> {
                     isLocked = false
                     stopCoreWatcherService()
-                    setExcludeFromRecents(false)
 
                     try {
                         val prefs = getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
@@ -274,41 +260,6 @@ class MainActivity: FlutterActivity() {
         } catch (_: Exception) {
             true
         }
-    }
-
-    private fun setExcludeFromRecents(exclude: Boolean) {
-        try {
-            val am = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
-            val tasks = am.appTasks
-            if (!tasks.isNullOrEmpty()) {
-                tasks[0].setExcludeFromRecents(exclude)
-            }
-        } catch (_: Exception) {}
-    }
-
-    private fun bringToFrontForced() {
-        if (!isLocked || isAppInForeground || System.currentTimeMillis() < CoreWatcherService.emergencyGraceUntil) return
-
-        val now = System.currentTimeMillis()
-        if (now - lastBringToFrontTime < 50) return
-        lastBringToFrontTime = now
-
-        try {
-            val activityManager = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
-            activityManager.moveTaskToFront(taskId, ActivityManager.MOVE_TASK_WITH_HOME)
-        } catch (_: Exception) {}
-
-        try {
-            val intent = Intent(this, MainActivity::class.java).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or 
-                        Intent.FLAG_ACTIVITY_SINGLE_TOP or 
-                        Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or
-                        (0x00800000) or 
-                        (0x00200000) or 
-                        Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED
-            }
-            startActivity(intent)
-        } catch (_: Exception) {}
     }
 
     private fun hasUsageStatsPermission(): Boolean {

@@ -1,3 +1,5 @@
+// lib/screens/profile_screen.dart
+
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -420,40 +422,6 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
                 ),
 
                 const SizedBox(height: 25),
-
-                // BOUTON DIRECT DE TEST DE LA ZONE DE PÉNALITÉ (CORRIGÉ)
-                SizedBox(
-                  width: double.infinity,
-                  height: 50,
-                  child: ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.red.shade900,
-                      side: const BorderSide(color: Colors.redAccent, width: 2),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
-                    ),
-                    onPressed: () {
-                      game.triggerDailyPenalty();
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text("ALERTE : Déclenchement direct de la Zone de Pénalité !"),
-                          backgroundColor: Colors.redAccent,
-                          duration: Duration(seconds: 2),
-                        ),
-                      );
-                    },
-                    child: Text(
-                      "DÉCLENCHER ZONE DE PÉNALITÉ (TEST)",
-                      style: GoogleFonts.orbitron(
-                        color: Colors.white,
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold,
-                        letterSpacing: 1.2,
-                      ),
-                    ),
-                  ),
-                ),
-
-                const SizedBox(height: 30),
                 Text("HISTORIQUE DE DÉVELOPPEMENT",
                     style: GoogleFonts.orbitron(
                         color: systemBlue, fontSize: 12, letterSpacing: 2, fontWeight: FontWeight.bold)),
@@ -941,22 +909,6 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
         const SizedBox(height: 10),
         Row(
           children: [
-            Expanded(
-              child: _holoButton(
-                "TEST QUÊTE",
-                Colors.orangeAccent,
-                () {
-                  Future.delayed(const Duration(seconds: 5), () {
-                    game.sandboxTriggerDailyPenalty();
-                  });
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text("Pénalité imminente dans 5s...")),
-                  );
-                },
-                icon: Icons.assignment_outlined,
-              ),
-            ),
-            const SizedBox(width: 10),
             Expanded(
               child: _holoButton(
                 "TEST DONJON",
