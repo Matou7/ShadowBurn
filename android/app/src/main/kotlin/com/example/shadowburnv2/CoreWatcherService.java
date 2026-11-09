@@ -1,5 +1,6 @@
 package com.example.shadowburnv2;
 
+import android.app.AlarmManager;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
@@ -9,6 +10,7 @@ import android.app.usage.UsageEvents;
 import android.app.usage.UsageStatsManager;
 import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.os.Build;
 import android.os.IBinder;
 import android.os.PowerManager;
@@ -22,7 +24,6 @@ public class CoreWatcherService extends Service {
     private volatile boolean isRunning = false;
     private Thread patrolThread = null;
 
-    // Fenêtre de grâce exacte de 2 secondes pour éviter les faux positifs lors des lancements d'urgence
     public static volatile long emergencyGraceUntil = 0L;
 
     private static final List<String> EMERGENCY_WHITELIST = Arrays.asList(
@@ -54,13 +55,14 @@ public class CoreWatcherService extends Service {
         String actionVal = (intent != null) ? intent.getAction() : null;
         
         if ("ACTION_STOP_COREWATCHER".equals(actionVal)) {
+            cancelAlarmResurrection();
             stopForeground(true);
             stopSelf();
             return START_NOT_STICKY;
         }
 
         if ("ACTION_EMERGENCY_GRACE".equals(actionVal)) {
-            emergencyGraceUntil = System.currentTimeMillis() + 2000L; // 2 secondes strictes
+            emergencyGraceUntil = System.currentTimeMillis() + 2000L;
             return START_STICKY;
         }
 
@@ -103,9 +105,75 @@ public class CoreWatcherService extends Service {
             wakeLock.acquire(60L * 60L * 1000L);
         }
 
+        scheduleAlarmResurrection();
         startWatchdogLoop();
 
         return START_STICKY;
+    }
+
+    private void scheduleAlarmResurrection() {
+        try {
+            Intent alarmIntent = new Intent(getApplicationContext(), BootReceiver.class);
+            alarmIntent.setAction("ACTION_CERBERUS_RESURRECT");
+            int flags = (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) 
+                ? (PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT) 
+                : PendingIntent.FLAG_UPDATE_CURRENT;
+            
+            PendingIntent pi = PendingIntent.getBroadcast(getApplicationContext(), 9999, alarmIntent, flags);
+            AlarmManager am = (AlarmManager) getSystemService(Context.ALARM_SERVICE);
+            
+            if (am != null) {
+                // Répétition agressive toutes les 1000ms pour contrer tout gel en cas de spam intense
+                long triggerTime = System.currentTimeMillis() + 1000L;
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerTime, pi);
+                } else {
+                    am.setExact(AlarmManager.RTC_WAKEUP, triggerTime, pi);
+                }
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    private void cancelAlarmResurrection() {
+        try {
+            Intent alarmIntent = new Intent(getApplicationContext(), BootReceiver.class);
+            alarmIntent.setAction("ACTION_CERBERUS_RESURRECT");
+            int flags = (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) 
+                ? (PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT) 
+                : PendingIntent.FLAG_UPDATE_CURRENT;
+            
+            PendingIntent pi = PendingIntent.getBroadcast(getApplicationContext(), 9999, alarmIntent, flags);
+            AlarmManager am = (AlarmManager) getSystemService(Context.ALARM_SERVICE);
+            if (am != null) {
+                am.cancel(pi);
+            }
+        } catch (Exception ignored) {}
+    }
+
+    @Override
+    public void onTaskRemoved(Intent rootIntent) {
+        super.onTaskRemoved(rootIntent);
+        try {
+            SharedPreferences prefs = getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE);
+            boolean isPrefPrefixed = prefs.getBoolean("flutter.cerberus_penalty_active", false);
+            boolean isPrefRaw = prefs.getBoolean("cerberus_penalty_active", false);
+
+            if (isPrefPrefixed || isPrefRaw) {
+                scheduleAlarmResurrection();
+                bringAppToFront();
+
+                Intent restartServiceIntent = new Intent(getApplicationContext(), CoreWatcherService.class);
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    getApplicationContext().startForegroundService(restartServiceIntent);
+                } else {
+                    getApplicationContext().startService(restartServiceIntent);
+                }
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
     }
 
     private void bringAppToFront() {
@@ -114,11 +182,11 @@ public class CoreWatcherService extends Service {
             int showWhenLockedFlag = 0x00800000;
             int turnScreenOnFlag = 0x00200000;
             launchIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | 
-                                  Intent.FLAG_ACTIVITY_SINGLE_TOP | 
-                                  Intent.FLAG_ACTIVITY_REORDER_TO_FRONT |
-                                  showWhenLockedFlag | 
-                                  turnScreenOnFlag | 
-                                  Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
+                                    Intent.FLAG_ACTIVITY_SINGLE_TOP | 
+                                    Intent.FLAG_ACTIVITY_REORDER_TO_FRONT |
+                                    showWhenLockedFlag | 
+                                    turnScreenOnFlag | 
+                                    Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
             startActivity(launchIntent);
         } catch (Exception ignored) {}
     }
@@ -130,7 +198,7 @@ public class CoreWatcherService extends Service {
         patrolThread = new Thread(() -> {
             while (isRunning) {
                 try {
-                    Thread.sleep(150); // Patrouille ultra-rapide
+                    Thread.sleep(100); // Patrouille ultra-rapprochée
 
                     if (System.currentTimeMillis() < emergencyGraceUntil) {
                         continue;
@@ -138,12 +206,10 @@ public class CoreWatcherService extends Service {
 
                     String currentPkg = getForegroundPackageName();
 
-                    // Si l'utilisateur est dans ShadowBurn ou dans la liste blanche d'urgence, on ne fait rien
                     if (isPackageWhitelisted(currentPkg) || currentPkg.equals(getPackageName()) || currentPkg.isEmpty()) {
                         continue;
                     }
 
-                    // Aspiration immédiate et absolue dans n'importe quelle autre situation (Bureau, Paramètres, etc.)
                     bringAppToFront();
 
                 } catch (InterruptedException e) {
@@ -195,8 +261,22 @@ public class CoreWatcherService extends Service {
             patrolThread = null;
         }
         try {
-            if (wakeLock != null && wakeLock.isHeld()) {
-                wakeLock.release();
+            SharedPreferences prefs = getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE);
+            boolean isPenal = prefs.getBoolean("flutter.cerberus_penalty_active", false) || prefs.getBoolean("cerberus_penalty_active", false);
+            
+            // Si le service se fait tuer par le système pendant la pénalité, on relance une alarme immédiate
+            if (isPenal) {
+                scheduleAlarmResurrection();
+                Intent restartServiceIntent = new Intent(getApplicationContext(), CoreWatcherService.class);
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    getApplicationContext().startForegroundService(restartServiceIntent);
+                } else {
+                    getApplicationContext().startService(restartServiceIntent);
+                }
+            } else {
+                if (wakeLock != null && wakeLock.isHeld()) {
+                    wakeLock.release();
+                }
             }
         } catch (Exception ignored) {}
         super.onDestroy();
