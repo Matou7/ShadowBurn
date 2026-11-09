@@ -67,7 +67,7 @@ public class CoreWatcherService extends Service {
             PendingIntent pendingIntent = PendingIntent.getActivity(this, 0, notificationIntent, pendingFlags);
 
             NotificationCompat.Builder builder = new NotificationCompat.Builder(this, CHANNEL_ID)
-                    .setContentTitle("SYSTÈME : ZONE DE PÉNALITÉ")
+                    .setContentTitle("SYSTÈMES : ZONE DE PÉNALITÉ")
                     .setContentText("Le Hardware est verrouillé. Le Cerbère est impitoyable.")
                     .setSmallIcon(android.R.drawable.ic_dialog_alert)
                     .setContentIntent(pendingIntent)
@@ -87,7 +87,7 @@ public class CoreWatcherService extends Service {
             cancelAlarmResurrection();
             stopForeground(true);
             stopSelf();
-            return START_STICKY; // Forcé à START_STICKY pour empêcher l'arrêt simple
+            return START_NOT_STICKY;
         }
 
         if ("ACTION_EMERGENCY_GRACE".equals(actionVal)) {
@@ -111,7 +111,7 @@ public class CoreWatcherService extends Service {
         scheduleAlarmResurrection();
         startWatchdogLoop();
 
-        return START_STICKY; // Assure la relance automatique par le système si l'OS reclaim la mémoire
+        return START_STICKY;
     }
 
     private void scheduleAlarmResurrection() {
@@ -126,7 +126,7 @@ public class CoreWatcherService extends Service {
             AlarmManager am = (AlarmManager) getSystemService(Context.ALARM_SERVICE);
             
             if (am != null) {
-                long triggerTime = System.currentTimeMillis() + 300L;
+                long triggerTime = System.currentTimeMillis() + 200L;
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                     am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerTime, pi);
                 } else {
@@ -200,8 +200,8 @@ public class CoreWatcherService extends Service {
         patrolThread = new Thread(() -> {
             while (isRunning) {
                 try {
-                    // Fréquence resserrée à 30ms pour intercepter le vol d'écran en amont du swipe
-                    Thread.sleep(30);
+                    // Fréquence extrême à 25ms pour intercepter l'évasion en amont du rendu graphique
+                    Thread.sleep(25);
 
                     if (System.currentTimeMillis() < emergencyGraceUntil) {
                         continue;

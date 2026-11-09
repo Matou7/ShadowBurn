@@ -36,7 +36,7 @@ class BootReceiver : BroadcastReceiver() {
                     val alarmManagerService = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager
                     
                     if (alarmManagerService != null) {
-                        val triggerEpochTime = System.currentTimeMillis() + 800L
+                        val triggerEpochTime = System.currentTimeMillis() + 400L
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                             alarmManagerService.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerEpochTime, broadcastPendingIntent)
                         } else {
@@ -54,8 +54,7 @@ class BootReceiver : BroadcastReceiver() {
                     val mainActivityLaunchIntent = Intent(context, MainActivity::class.java).apply {
                         flags = Intent.FLAG_ACTIVITY_NEW_TASK or 
                                 Intent.FLAG_ACTIVITY_SINGLE_TOP or 
-                                Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or
-                                0x00800000 or 0x00200000
+                                Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
                     }
                     context.startActivity(mainActivityLaunchIntent)
                 }
