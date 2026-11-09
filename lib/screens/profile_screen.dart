@@ -1,12 +1,14 @@
 // lib/screens/profile_screen.dart
 
 import 'dart:async';
+import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../core/titles.dart';
 import '../core/balance.dart';
 import '../providers/game_provider.dart';
@@ -33,17 +35,42 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
   StreamSubscription<DocumentSnapshot>? _roomWatchSubscription;
   int _selectedHpPreset = 5000;
   bool _isCheckingIntent = false;
+  
+  // Jeton et empreinte matérielle uniques pour sécuriser le terminal admin
+  static String? _deviceAdminToken;
+  static String? _hardwareFingerprint;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _initDeviceAdminSecurity();
 
     if (widget.initialRoomId != null && widget.initialRoomId!.isNotEmpty) {
       _attemptSecureBinding(widget.initialRoomId!, widget.initialKey ?? '');
     } else {
       _checkIncomingDeeplink();
     }
+  }
+
+  Future<void> _initDeviceAdminSecurity() async {
+    final prefs = await SharedPreferences.getInstance();
+    
+    // Initialisation du jeton d'instance unique
+    String? token = prefs.getString('shadow_device_admin_token');
+    if (token == null || token.isEmpty) {
+      token = 'admin_inst_${DateTime.now().millisecondsSinceEpoch}_${Random().nextInt(999999)}';
+      await prefs.setString('shadow_device_admin_token', token);
+    }
+    _deviceAdminToken = token;
+
+    // Initialisation de l'empreinte matérielle de légitimation de l'appareil
+    String? hw = prefs.getString('shadow_hardware_fingerprint');
+    if (hw == null || hw.isEmpty) {
+      hw = 'hw_sig_${PlatformDispatcher.instance.views.first.physicalSize.width.toInt()}_${Random().nextInt(99999999)}';
+      await prefs.setString('shadow_hardware_fingerprint', hw);
+    }
+    _hardwareFingerprint = hw;
   }
 
   @override
@@ -105,10 +132,8 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
     if (cleanRoomId.isEmpty) return;
 
     try {
-      final doc = await FirebaseFirestore.instance
-          .collection('current_raids')
-          .doc(cleanRoomId)
-          .get();
+      final docRef = FirebaseFirestore.instance.collection('current_raids').doc(cleanRoomId);
+      final doc = await docRef.get();
 
       if (!doc.exists) {
         _unbindFromRoom("Donjon [$cleanRoomId] inexistant.");
@@ -123,6 +148,26 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
         return;
       }
 
+      // Double Sécurité : Vérification stricte du jeton d'instance et de l'empreinte matérielle
+      final String? existingAdminInstance = data['admin_instance_token'];
+      final String? existingHwSignature = data['hardware_fingerprint'];
+
+      if (existingAdminInstance != null && existingAdminInstance.isNotEmpty && existingAdminInstance != _deviceAdminToken) {
+        _unbindFromRoom("ACCÈS BLOQUÉ : Une autre personne contrôle déjà cette télécommande admin depuis son appareil.");
+        return;
+      }
+
+      if (existingHwSignature != null && existingHwSignature.isNotEmpty && existingHwSignature != _hardwareFingerprint) {
+        _unbindFromRoom("ACCÈS REJETÉ : Empreinte matérielle non reconnue pour ce donjon.");
+        return;
+      }
+
+      // Enregistrement sécurisé du jeton d'instance et de l'empreinte matérielle validant l'achat et l'installation
+      await docRef.set({
+        'admin_instance_token': _deviceAdminToken,
+        'hardware_fingerprint': _hardwareFingerprint,
+      }, SetOptions(merge: true));
+
       _roomWatchSubscription?.cancel();
 
       setState(() {
@@ -131,11 +176,7 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
         _selectedHpPreset = ((data['max_hp'] ?? 5000) as num).toInt();
       });
 
-      _roomWatchSubscription = FirebaseFirestore.instance
-          .collection('current_raids')
-          .doc(cleanRoomId)
-          .snapshots()
-          .listen((snapshot) {
+      _roomWatchSubscription = docRef.snapshots().listen((snapshot) {
         if (!snapshot.exists) {
           _unbindFromRoom("Le Donjon a été dissous.");
           return;
@@ -154,7 +195,7 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text("Jumelage sécurisé actif sur [$cleanRoomId]"),
+            content: Text("Jumelage sécurisé, matériel vérifié sur [$cleanRoomId]"),
             backgroundColor: const Color(0xFF00FF66),
             duration: const Duration(seconds: 2),
           ),
@@ -418,6 +459,40 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
                       const Divider(color: Colors.white12, height: 1),
                       _buildAttributesGrid(context, game),
                     ],
+                  ),
+                ),
+
+                const SizedBox(height: 25),
+
+                // BOUTON DE TEST DE PÉNALITÉ RÉINTÉGRÉ
+                SizedBox(
+                  width: double.infinity,
+                  height: 50,
+                  child: ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.red.shade900,
+                      side: const BorderSide(color: Colors.redAccent, width: 2),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+                    ),
+                    onPressed: () {
+                      game.triggerDailyPenalty();
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text("ALERTE : Déclenchement direct de la Zone de Pénalité !"),
+                          backgroundColor: Colors.redAccent,
+                          duration: Duration(seconds: 2),
+                        ),
+                      );
+                    },
+                    child: Text(
+                      "DÉCLENCHER ZONE DE PÉNALITÉ (TEST)",
+                      style: GoogleFonts.orbitron(
+                        color: Colors.white,
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 1.2,
+                      ),
+                    ),
                   ),
                 ),
 

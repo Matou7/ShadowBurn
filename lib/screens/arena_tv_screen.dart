@@ -617,14 +617,14 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
       backgroundColor: const Color(0xFF02070D),
       body: SafeArea(
         child: Padding(
-          padding: const EdgeInsets.all(16.0),
+          padding: const EdgeInsets.all(12.0),
           child: Column(
             children: [
               if (_remainingSeconds > 0 && _remainingSeconds <= 600 && !isVictory && !isDefeat)
                 Container(
                   width: double.infinity,
-                  margin: const EdgeInsets.only(bottom: 10),
-                  padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 12),
+                  margin: const EdgeInsets.only(bottom: 8),
+                  padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 10),
                   decoration: BoxDecoration(
                     color: const Color(0xFFFF2E56).withOpacity(0.2),
                     border: Border.all(color: const Color(0xFFFF2E56)),
@@ -632,11 +632,11 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
                   child: const Text(
                     "⚠ ALERTE : LE DONJON MONDIAL SE REFERME À 23H58. FIN DE LA PÉRIODE D'ASSAUT IMMINENTE.",
                     textAlign: TextAlign.center,
-                    style: TextStyle(color: Color(0xFFFF2E56), fontFamily: 'monospace', fontWeight: FontWeight.bold, fontSize: 11, letterSpacing: 1.2),
+                    style: TextStyle(color: Color(0xFFFF2E56), fontFamily: 'monospace', fontWeight: FontWeight.bold, fontSize: 10, letterSpacing: 1.1),
                   ),
                 ),
               _buildTopHeader(currentHp, maxHp, isVictory, isDefeat, presetLabel),
-              const SizedBox(height: 16),
+              const SizedBox(height: 10),
               Expanded(child: mainContent),
             ],
           ),
@@ -661,7 +661,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
     }
 
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: const Color(0xFF04101E),
         border: Border.all(color: themeColor, width: 1.5),
@@ -678,13 +678,13 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
                   children: [
                     Text(
                       titleText,
-                      style: TextStyle(color: themeColor, fontFamily: 'monospace', fontSize: 18, fontWeight: FontWeight.bold, letterSpacing: 1.5),
+                      style: TextStyle(color: themeColor, fontFamily: 'monospace', fontSize: 15, fontWeight: FontWeight.bold, letterSpacing: 1.2),
                       overflow: TextOverflow.ellipsis,
                     ),
                     const SizedBox(height: 2),
                     Text(
                       "CONFIGURATION : $presetLabel (BOSS: ${currentHp.toInt()} / ${safeMax.toInt()} PV)",
-                      style: const TextStyle(color: Color(0xFF00FF66), fontFamily: 'monospace', fontSize: 11, fontWeight: FontWeight.bold),
+                      style: const TextStyle(color: Color(0xFF00FF66), fontFamily: 'monospace', fontSize: 10, fontWeight: FontWeight.bold),
                     ),
                   ],
                 ),
@@ -693,15 +693,15 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Container(
-                    margin: const EdgeInsets.only(right: 16),
-                    height: 36,
+                    margin: const EdgeInsets.only(right: 12),
+                    height: 30,
                     child: OutlinedButton.icon(
                       style: OutlinedButton.styleFrom(
                         foregroundColor: const Color(0xFF00E5FF),
                         side: const BorderSide(color: Color(0xFF00E5FF), width: 1.2),
                         backgroundColor: const Color(0xFF00E5FF).withOpacity(0.1),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
-                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                        padding: const EdgeInsets.symmetric(horizontal: 10),
                       ),
                       onPressed: () async {
                         bool canWrite = await QuotaGuardService.checkAndIncrementWrite();
@@ -727,20 +727,20 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
                       },
                       icon: Icon(
                         AudioService.isPlaying ? Icons.pause : Icons.volume_up,
-                        size: 16,
+                        size: 14,
                       ),
                       label: Text(
-                        AudioService.isPlaying ? "PAUSE AUDIO" : "ACTIVER AUDIO",
-                        style: const TextStyle(fontSize: 11, fontFamily: 'monospace', fontWeight: FontWeight.bold),
+                        AudioService.isPlaying ? "PAUSE" : "AUDIO",
+                        style: const TextStyle(fontSize: 10, fontFamily: 'monospace', fontWeight: FontWeight.bold),
                       ),
                     ),
                   ),
                   Text(
-                    'RÉINITIALISATION : ${_formatTimer(_remainingSeconds)}',
+                    'FIN : ${_formatTimer(_remainingSeconds)}',
                     style: TextStyle(
                       color: isDefeat || (_remainingSeconds <= 60 && !isVictory) ? const Color(0xFFFF2E56) : Colors.white70,
                       fontFamily: 'monospace',
-                      fontSize: 13,
+                      fontSize: 12,
                       fontWeight: isDefeat ? FontWeight.bold : FontWeight.normal,
                     ),
                   ),
@@ -748,28 +748,28 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
               ),
             ],
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 8),
           LayoutBuilder(
             builder: (context, constraints) {
               return Stack(
                 children: [
                   Container(
                     width: constraints.maxWidth,
-                    height: 24,
+                    height: 18,
                     color: Colors.black45,
                   ),
                   AnimatedContainer(
                     duration: const Duration(milliseconds: 500),
                     curve: Curves.easeOutCubic,
                     width: constraints.maxWidth * hpRatio,
-                    height: 24,
+                    height: 18,
                     decoration: BoxDecoration(
                       color: const Color(0xFFFF2E56),
                       boxShadow: [
                         BoxShadow(
                           color: const Color(0xFFFF2E56).withOpacity(0.8),
-                          blurRadius: 12,
-                          spreadRadius: 2,
+                          blurRadius: 8,
+                          spreadRadius: 1,
                         ),
                       ],
                     ),
@@ -802,7 +802,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
 
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         color: const Color(0xFF04101E),
         border: Border.all(color: const Color(0xFFFF2E56), width: 2),
@@ -810,27 +810,27 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          const Icon(Icons.dangerous_outlined, color: Color(0xFFFF2E56), size: 72),
-          const SizedBox(height: 12),
+          const Icon(Icons.dangerous_outlined, color: Color(0xFFFF2E56), size: 60),
+          const SizedBox(height: 10),
           const Text(
             "☠ ÉCHEC DU RAID ☠",
-            style: TextStyle(color: Color(0xFFFF2E56), fontFamily: 'monospace', fontSize: 22, fontWeight: FontWeight.bold, letterSpacing: 2),
+            style: TextStyle(color: Color(0xFFFF2E56), fontFamily: 'monospace', fontSize: 20, fontWeight: FontWeight.bold, letterSpacing: 2),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 6),
           const Text(
             "Le temps imparti est écoulé. Le Monarque du Feu a survécu à votre assaut.",
             textAlign: TextAlign.center,
-            style: TextStyle(color: Colors.white70, fontFamily: 'monospace', fontSize: 13),
+            style: TextStyle(color: Colors.white70, fontFamily: 'monospace', fontSize: 12),
           ),
-          const SizedBox(height: 24),
+          const SizedBox(height: 20),
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              _buildDefeatStatBox("DÉGÂTS INFLIGÉS", "$totalInflicted PV", const Color(0xFF00E5FF)),
-              const SizedBox(width: 16),
-              _buildDefeatStatBox("PV RESTANTS DU BOSS", "${currentHp.toInt()} PV", const Color(0xFFFF2E56)),
-              const SizedBox(width: 16),
-              _buildDefeatStatBox("CHASSEURS ENGAGÉS", "${hunters.length}", const Color(0xFFFF9100)),
+              _buildDefeatStatBox("DÉGÂTS", "$totalInflicted PV", const Color(0xFF00E5FF)),
+              const SizedBox(width: 12),
+              _buildDefeatStatBox("RESTANTS", "${currentHp.toInt()} PV", const Color(0xFFFF2E56)),
+              const SizedBox(width: 12),
+              _buildDefeatStatBox("CHASSEURS", "${hunters.length}", const Color(0xFFFF9100)),
             ],
           ),
         ],
@@ -840,16 +840,16 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
 
   Widget _buildDefeatStatBox(String label, String value, Color color) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(
         color: Colors.black45,
         border: Border.all(color: color.withOpacity(0.5)),
       ),
       child: Column(
         children: [
-          Text(label, style: TextStyle(color: color, fontFamily: 'monospace', fontSize: 10, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 4),
-          Text(value, style: const TextStyle(color: Colors.white, fontFamily: 'monospace', fontSize: 16, fontWeight: FontWeight.bold)),
+          Text(label, style: TextStyle(color: color, fontFamily: 'monospace', fontSize: 9, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 3),
+          Text(value, style: const TextStyle(color: Colors.white, fontFamily: 'monospace', fontSize: 14, fontWeight: FontWeight.bold)),
         ],
       ),
     );
@@ -882,7 +882,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
     final List liveTop3 = sortedLiveHunters.take(3).toList();
 
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: const Color(0xFF04101E).withOpacity(0.8),
         border: Border.all(color: const Color(0xFF00E5FF).withOpacity(0.5)),
@@ -891,7 +891,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
             decoration: BoxDecoration(
               color: Colors.black54,
               border: Border.all(color: const Color(0xFFFFD700).withOpacity(0.6), width: 1.2),
@@ -902,19 +902,19 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
               children: [
                 const Row(
                   children: [
-                    Icon(Icons.leaderboard, color: Color(0xFFFFD700), size: 16),
-                    SizedBox(width: 8),
+                    Icon(Icons.leaderboard, color: Color(0xFFFFD700), size: 14),
+                    SizedBox(width: 6),
                     Text(
                       "CLASSEMENT PROVISOIRE (TOP 3 EN DIRECT)",
-                      style: TextStyle(color: Color(0xFFFFD700), fontFamily: 'monospace', fontWeight: FontWeight.bold, fontSize: 11, letterSpacing: 1.2),
+                      style: TextStyle(color: Color(0xFFFFD700), fontFamily: 'monospace', fontWeight: FontWeight.bold, fontSize: 10, letterSpacing: 1.1),
                     ),
                   ],
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: 6),
                 if (liveTop3.isEmpty)
                   const Text(
                     "En attente des premières frappes...",
-                    style: TextStyle(color: Colors.white30, fontSize: 10, fontFamily: 'monospace'),
+                    style: TextStyle(color: Colors.white30, fontSize: 9, fontFamily: 'monospace'),
                   )
                 else
                   Row(
@@ -925,8 +925,8 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
                           : (idx == 1 ? const Color(0xFFC0C0C0) : const Color(0xFFCD7F32));
                       return Expanded(
                         child: Container(
-                          margin: EdgeInsets.only(right: idx < liveTop3.length - 1 ? 8 : 0),
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                          margin: EdgeInsets.only(right: idx < liveTop3.length - 1 ? 6 : 0),
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
                           decoration: BoxDecoration(
                             color: medalColor.withOpacity(0.08),
                             border: Border.all(color: medalColor.withOpacity(0.4)),
@@ -935,19 +935,19 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
                             children: [
                               Text(
                                 "#${idx + 1}",
-                                style: TextStyle(color: medalColor, fontFamily: 'monospace', fontWeight: FontWeight.bold, fontSize: 12),
+                                style: TextStyle(color: medalColor, fontFamily: 'monospace', fontWeight: FontWeight.bold, fontSize: 10),
                               ),
-                              const SizedBox(width: 6),
+                              const SizedBox(width: 4),
                               Expanded(
                                 child: Text(
                                   item.key.toString(),
-                                  style: const TextStyle(color: Colors.white, fontFamily: 'monospace', fontWeight: FontWeight.bold, fontSize: 11),
+                                  style: const TextStyle(color: Colors.white, fontFamily: 'monospace', fontWeight: FontWeight.bold, fontSize: 10),
                                   overflow: TextOverflow.ellipsis,
                                 ),
                               ),
                               Text(
                                 "${item.value} PV",
-                                style: TextStyle(color: medalColor, fontFamily: 'monospace', fontWeight: FontWeight.bold, fontSize: 11),
+                                style: TextStyle(color: medalColor, fontFamily: 'monospace', fontWeight: FontWeight.bold, fontSize: 10),
                               ),
                             ],
                           ),
@@ -958,27 +958,27 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
               ],
             ),
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 10),
           const Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(
                 'REGISTRE DES ASSAUTS',
-                style: TextStyle(color: Color(0xFF00E5FF), fontFamily: 'monospace', fontSize: 15, fontWeight: FontWeight.bold),
+                style: TextStyle(color: Color(0xFF00E5FF), fontFamily: 'monospace', fontSize: 13, fontWeight: FontWeight.bold),
               ),
               Text(
                 'DERNIÈRE FRAPPE EN HAUT ↑',
-                style: TextStyle(color: Color(0xFF00FF66), fontFamily: 'monospace', fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 1.1),
+                style: TextStyle(color: Color(0xFF00FF66), fontFamily: 'monospace', fontSize: 9, fontWeight: FontWeight.bold),
               ),
             ],
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 6),
           Expanded(
             child: logList.isEmpty
                 ? const Center(
                     child: Text(
                       'COMBAT COMMENCÉ : EN ATTENTE DU PREMIER ASSAUT',
-                      style: TextStyle(color: Colors.white38, fontFamily: 'monospace'),
+                      style: TextStyle(color: Colors.white38, fontFamily: 'monospace', fontSize: 11),
                     ),
                   )
                 : ListView.builder(
@@ -990,8 +990,8 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
                       final int damage = (log['damage'] as num?)?.toInt() ?? 0;
 
                       return Container(
-                        margin: const EdgeInsets.symmetric(vertical: 3),
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        margin: const EdgeInsets.symmetric(vertical: 2),
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                         decoration: BoxDecoration(
                           color: Colors.transparent,
                           border: Border.all(color: Colors.white10, width: 0.8),
@@ -999,26 +999,26 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
                         ),
                         child: Row(
                           children: [
-                            const Icon(Icons.flash_on, color: Color(0xFF00E5FF), size: 16),
-                            const SizedBox(width: 8),
+                            const Icon(Icons.flash_on, color: Color(0xFF00E5FF), size: 14),
+                            const SizedBox(width: 6),
                             Expanded(
                               child: Row(
                                 children: [
                                   Text(
                                     name,
-                                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12, fontFamily: 'monospace'),
+                                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 11, fontFamily: 'monospace'),
                                   ),
-                                  const SizedBox(width: 6),
+                                  const SizedBox(width: 4),
                                   Text(
                                     ': $action',
-                                    style: const TextStyle(color: Colors.white70, fontSize: 11),
+                                    style: const TextStyle(color: Colors.white70, fontSize: 10),
                                   ),
                                 ],
                               ),
                             ),
                             Text(
                               '-$damage PV',
-                              style: const TextStyle(color: Color(0xFFFF9100), fontWeight: FontWeight.bold, fontFamily: 'monospace', fontSize: 13),
+                              style: const TextStyle(color: Color(0xFFFF9100), fontWeight: FontWeight.bold, fontFamily: 'monospace', fontSize: 11),
                             ),
                           ],
                         ),
@@ -1031,7 +1031,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
     );
   }
 
-  // PODIUM MULTI-VOIES EN GRILLE STATIQUE (Cases en carré / blocs fixes pour s'adapter parfaitement)
+  // PODIUM MULTI-VOIES ULTRA-COMPACT (Grille sur 4 colonnes pour tenir 100% sur l'écran TV sans scroll)
   Widget _buildCompleteMultiWayPodium(List logs, List hunters) {
     final Map huntersByMode = {};
 
@@ -1055,14 +1055,18 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
 
     final int grandTotalReps = globalSquats + globalPushups + globalAbs;
 
-    // Voies standard garanties pour avoir des cases statiques propres
-    final List<String> standardModes = [
-      "Voie de la Force Brute (Pompes)",
-      "Voie des Jambes de Fer (Squats)",
-      "Voie du Tronc (Abdos)"
+    // Les 7 voies exactes du mobile
+    final List<String> allModes = [
+      "Entraînement du Monarque (Squats, Pompes, Abdos)",
+      "Voie des Jambes (Uniquement Squats)",
+      "Voie du Haut (Uniquement Pompes)",
+      "Voie du Tronc (Uniquement Abdos)",
+      "Force Brute (Squats + Pompes)",
+      "Jambes & Tronc (Squats + Abdos)",
+      "Haut & Tronc (Pompes + Abdos)"
     ];
 
-    for (final m in standardModes) {
+    for (final m in allModes) {
       huntersByMode.putIfAbsent(m, () => []);
     }
 
@@ -1070,48 +1074,48 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
 
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: const Color(0xFF04101E),
-        border: Border.all(color: const Color(0xFFFFD700), width: 2),
+        border: Border.all(color: const Color(0xFFFFD700), width: 1.5),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Center(
             child: Text(
-              "★ PANTHÉON DU DONJON : PODIUMS MULTI-VOIES EN CASES STATIQUES ★",
-              style: TextStyle(color: Color(0xFFFFD700), fontFamily: 'monospace', fontSize: 18, fontWeight: FontWeight.bold, letterSpacing: 2),
+              "★ PANTHÉON DU DONJON : LES 7 VOIES D'ENTRAÎNEMENT ★",
+              style: TextStyle(color: Color(0xFFFFD700), fontFamily: 'monospace', fontSize: 15, fontWeight: FontWeight.bold, letterSpacing: 1.5),
+              textAlign: TextAlign.center,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFFD700).withOpacity(0.12),
+              border: Border.all(color: const Color(0xFFFFD700), width: 1),
+            ),
+            child: Text(
+              "TOTAL GLOBAL : $grandTotalReps REPS (Squats: $globalSquats | Pompes: $globalPushups | Abdos: $globalAbs)",
+              style: const TextStyle(color: Colors.white70, fontFamily: 'monospace', fontWeight: FontWeight.bold, fontSize: 10),
               textAlign: TextAlign.center,
             ),
           ),
           const SizedBox(height: 8),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-            decoration: BoxDecoration(
-              color: const Color(0xFFFFD700).withOpacity(0.12),
-              border: Border.all(color: const Color(0xFFFFD700), width: 1.2),
-            ),
-            child: Text(
-              "TOTAL GLOBAL : $grandTotalReps REPS (Squats: $globalSquats | Pompes: $globalPushups | Abdos: $globalAbs)",
-              style: const TextStyle(color: Colors.white70, fontFamily: 'monospace', fontWeight: FontWeight.bold, fontSize: 11),
-              textAlign: TextAlign.center,
-            ),
-          ),
-          const SizedBox(height: 12),
           Expanded(
             child: LayoutBuilder(
               builder: (context, constraints) {
-                // Disposition en grille statique : cartes en carré/rectangle fixe adaptées à la largeur
+                // Grille statique sur 4 colonnes pour que les 7 cases tiennent sans aucun défilement vertical
                 return GridView.builder(
                   padding: EdgeInsets.zero,
                   itemCount: entries.length,
                   gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 3, // 3 cases côte à côte sur la largeur
-                    crossAxisSpacing: 12,
-                    mainAxisSpacing: 12,
-                    childAspectRatio: 1.15, // Format carré/compact statique
+                    crossAxisCount: 4, // 4 colonnes compactes pour tenir sur une seule vue TV
+                    crossAxisSpacing: 8,
+                    mainAxisSpacing: 8,
+                    childAspectRatio: 1.1, // Format de case ultra-optimisé
                   ),
                   itemBuilder: (context, index) {
                     final entry = entries[index];
@@ -1126,35 +1130,35 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
                     });
 
                     return Container(
-                      padding: const EdgeInsets.all(10),
+                      padding: const EdgeInsets.all(6),
                       decoration: BoxDecoration(
                         color: Colors.black45,
-                        border: Border.all(color: const Color(0xFF00E5FF).withOpacity(0.5), width: 1.2),
-                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(color: const Color(0xFF00E5FF).withOpacity(0.5), width: 1),
+                        borderRadius: BorderRadius.circular(4),
                       ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Row(
                             children: [
-                              const Icon(Icons.fitness_center, color: Color(0xFF00E5FF), size: 14),
-                              const SizedBox(width: 6),
+                              const Icon(Icons.fitness_center, color: Color(0xFF00E5FF), size: 10),
+                              const SizedBox(width: 4),
                               Expanded(
                                 child: Text(
                                   modeName.toUpperCase(),
-                                  style: const TextStyle(color: Color(0xFF00E5FF), fontFamily: 'monospace', fontWeight: FontWeight.bold, fontSize: 11),
+                                  style: const TextStyle(color: Color(0xFF00E5FF), fontFamily: 'monospace', fontWeight: FontWeight.bold, fontSize: 8),
                                   overflow: TextOverflow.ellipsis,
                                 ),
                               ),
                             ],
                           ),
-                          const Divider(color: Colors.white12, height: 8),
+                          const Divider(color: Colors.white12, height: 4),
                           Expanded(
                             child: modeHunters.isEmpty
                                 ? const Center(
                                     child: Text(
-                                      "Aucun combattant",
-                                      style: TextStyle(color: Colors.white30, fontStyle: FontStyle.italic, fontSize: 10, fontFamily: 'monospace'),
+                                      "Vide",
+                                      style: TextStyle(color: Colors.white30, fontStyle: FontStyle.italic, fontSize: 8, fontFamily: 'monospace'),
                                     ),
                                   )
                                 : ListView(
@@ -1169,23 +1173,24 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
                                           : (idx == 1 ? const Color(0xFFC0C0C0) : const Color(0xFFCD7F32));
 
                                       return Padding(
-                                        padding: const EdgeInsets.symmetric(vertical: 2.0),
+                                        padding: const EdgeInsets.symmetric(vertical: 1.0),
                                         child: Row(
                                           children: [
                                             Text(
-                                              "#${idx + 1} ",
-                                              style: TextStyle(color: rankColor, fontSize: 10, fontWeight: FontWeight.bold, fontFamily: 'monospace'),
+                                              "#${idx + 1}",
+                                              style: TextStyle(color: rankColor, fontSize: 8, fontWeight: FontWeight.bold, fontFamily: 'monospace'),
                                             ),
+                                            const SizedBox(width: 3),
                                             Expanded(
                                               child: Text(
                                                 name,
-                                                style: const TextStyle(color: Colors.white, fontFamily: 'monospace', fontSize: 10),
+                                                style: const TextStyle(color: Colors.white, fontFamily: 'monospace', fontSize: 8),
                                                 overflow: TextOverflow.ellipsis,
                                               ),
                                             ),
                                             Text(
-                                              "$dmg PV",
-                                              style: TextStyle(color: rankColor, fontFamily: 'monospace', fontSize: 10, fontWeight: FontWeight.bold),
+                                              "$dmg",
+                                              style: TextStyle(color: rankColor, fontFamily: 'monospace', fontSize: 8, fontWeight: FontWeight.bold),
                                             ),
                                           ],
                                         ),
@@ -1208,7 +1213,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
 
   Widget _buildWaitingLobby(List hunterList) {
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: const Color(0xFF04101E).withOpacity(0.8),
         border: Border.all(color: const Color(0xFF00E5FF).withOpacity(0.5)),
@@ -1221,27 +1226,27 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
             children: [
               Text(
                 'PORTAIL ACTIF : SALLE [$_roomId]',
-                style: const TextStyle(color: Color(0xFF00E5FF), fontFamily: 'monospace', fontSize: 16, fontWeight: FontWeight.bold),
+                style: const TextStyle(color: Color(0xFF00E5FF), fontFamily: 'monospace', fontSize: 14, fontWeight: FontWeight.bold),
               ),
               Text(
                 '${hunterList.length} / $kMaxHuntersPerRoom CHASSEURS',
                 style: TextStyle(
                   color: hunterList.length >= kMaxHuntersPerRoom ? const Color(0xFFFF2E56) : const Color(0xFF00FF66),
                   fontFamily: 'monospace',
-                  fontSize: 12,
+                  fontSize: 11,
                   fontWeight: FontWeight.bold,
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 10),
           Expanded(
             child: hunterList.isEmpty
                 ? const Center(
                     child: Text(
-                      'AUCUN CHASSEUR DÉTECTÉ\nEN ATTENTE DU SCAN... (Mode Convention : Portail permanent)',
+                      'AUCUN CHASSEUR DÉTECTÉ\nEN ATTENTE DU SCAN...',
                       textAlign: TextAlign.center,
-                      style: TextStyle(color: Colors.white38, fontFamily: 'monospace', fontSize: 13, letterSpacing: 1.2),
+                      style: TextStyle(color: Colors.white38, fontFamily: 'monospace', fontSize: 12, letterSpacing: 1.1),
                     ),
                   )
                 : ListView.builder(
@@ -1252,28 +1257,28 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
                       final String mode = (h['mode_label'] ?? 'Arsenal').toString();
 
                       return Container(
-                        margin: const EdgeInsets.symmetric(vertical: 4),
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        margin: const EdgeInsets.symmetric(vertical: 3),
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                         decoration: BoxDecoration(
                           color: Colors.white.withOpacity(0.03),
                           border: Border.all(color: Colors.white10),
                         ),
                         child: Row(
                           children: [
-                            const Icon(Icons.shield, color: Color(0xFF00E5FF), size: 18),
-                            const SizedBox(width: 10),
+                            const Icon(Icons.shield, color: Color(0xFF00E5FF), size: 16),
+                            const SizedBox(width: 8),
                             Expanded(
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Text(name, style: const TextStyle(color: Colors.white, fontFamily: 'monospace', fontWeight: FontWeight.bold)),
-                                  Text(mode, style: const TextStyle(color: Colors.white54, fontSize: 10)),
+                                  Text(name, style: const TextStyle(color: Colors.white, fontFamily: 'monospace', fontWeight: FontWeight.bold, fontSize: 11)),
+                                  Text(mode, style: const TextStyle(color: Colors.white54, fontSize: 9)),
                                 ],
                               ),
                             ),
                             const Text(
                               'PRÊT',
-                              style: TextStyle(color: Color(0xFF00E5FF), fontWeight: FontWeight.bold),
+                              style: TextStyle(color: Color(0xFF00E5FF), fontWeight: FontWeight.bold, fontSize: 10),
                             ),
                           ],
                         ),
@@ -1294,7 +1299,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
     final adminQrData = Uri.encodeComponent(rawAdminUrl);
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
       decoration: BoxDecoration(
         color: const Color(0xFF04101E).withOpacity(0.9),
         border: Border.all(color: const Color(0xFF00E5FF).withOpacity(0.6), width: 1.5),
@@ -1302,7 +1307,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
       child: LayoutBuilder(
         builder: (context, constraints) {
           final double totalHeight = constraints.maxHeight;
-          final double sectionHeight = (totalHeight - 20) / 2;
+          final double sectionHeight = (totalHeight - 16) / 2;
 
           return Column(
             children: [
@@ -1313,24 +1318,24 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
                   children: [
                     const Text(
                       'SCAN CHASSEUR',
-                      style: TextStyle(color: Color(0xFF00E5FF), fontFamily: 'monospace', fontWeight: FontWeight.bold, fontSize: 11, letterSpacing: 1.2),
+                      style: TextStyle(color: Color(0xFF00E5FF), fontFamily: 'monospace', fontWeight: FontWeight.bold, fontSize: 10, letterSpacing: 1.1),
                       textAlign: TextAlign.center,
                     ),
-                    const SizedBox(height: 4),
+                    const SizedBox(height: 3),
                     Expanded(
                       child: Center(
                         child: AspectRatio(
                           aspectRatio: 1.0,
                           child: Container(
-                            padding: const EdgeInsets.all(6),
+                            padding: const EdgeInsets.all(4),
                             decoration: BoxDecoration(
                               color: Colors.white,
-                              borderRadius: BorderRadius.circular(6),
+                              borderRadius: BorderRadius.circular(4),
                             ),
                             child: Image.network(
                               'https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=$joinQrData',
                               fit: BoxFit.contain,
-                              errorBuilder: (context, error, stackTrace) => const Icon(Icons.qr_code_2, size: 80, color: Colors.black),
+                              errorBuilder: (context, error, stackTrace) => const Icon(Icons.qr_code_2, size: 60, color: Colors.black),
                             ),
                           ),
                         ),
@@ -1339,14 +1344,14 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
                     const SizedBox(height: 2),
                     Text(
                       raidStatus == 'waiting' ? '(En attente)' : '(Actif)',
-                      style: TextStyle(color: raidStatus == 'waiting' ? Colors.white54 : const Color(0xFF00FF66), fontSize: 10, fontFamily: 'monospace'),
+                      style: TextStyle(color: raidStatus == 'waiting' ? Colors.white54 : const Color(0xFF00FF66), fontSize: 9, fontFamily: 'monospace'),
                       textAlign: TextAlign.center,
                     ),
                   ],
                 ),
               ),
               const Padding(
-                padding: EdgeInsets.symmetric(vertical: 4.0),
+                padding: EdgeInsets.symmetric(vertical: 3.0),
                 child: Divider(color: Colors.white24, height: 1),
               ),
               SizedBox(
@@ -1356,24 +1361,24 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
                   children: [
                     const Text(
                       'TÉLÉCOMMANDE',
-                      style: TextStyle(color: Color(0xFFFF9100), fontFamily: 'monospace', fontWeight: FontWeight.bold, fontSize: 11, letterSpacing: 1.2),
+                      style: TextStyle(color: Color(0xFFFF9100), fontFamily: 'monospace', fontWeight: FontWeight.bold, fontSize: 10, letterSpacing: 1.1),
                       textAlign: TextAlign.center,
                     ),
-                    const SizedBox(height: 4),
+                    const SizedBox(height: 3),
                     Expanded(
                       child: Center(
                         child: AspectRatio(
                           aspectRatio: 1.0,
                           child: Container(
-                            padding: const EdgeInsets.all(6),
+                            padding: const EdgeInsets.all(4),
                             decoration: BoxDecoration(
                               color: Colors.white,
-                              borderRadius: BorderRadius.circular(6),
+                              borderRadius: BorderRadius.circular(4),
                             ),
                             child: Image.network(
                               'https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=$adminQrData',
                               fit: BoxFit.contain,
-                              errorBuilder: (context, error, stackTrace) => const Icon(Icons.admin_panel_settings, size: 80, color: Colors.black),
+                              errorBuilder: (context, error, stackTrace) => const Icon(Icons.admin_panel_settings, size: 60, color: Colors.black),
                             ),
                           ),
                         ),
@@ -1382,7 +1387,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
                     const SizedBox(height: 2),
                     Text(
                       'Salle : $_roomId',
-                      style: const TextStyle(color: Color(0xFFFF9100), fontSize: 10, fontFamily: 'monospace', fontWeight: FontWeight.bold),
+                      style: const TextStyle(color: Color(0xFFFF9100), fontSize: 9, fontFamily: 'monospace', fontWeight: FontWeight.bold),
                       textAlign: TextAlign.center,
                     ),
                   ],

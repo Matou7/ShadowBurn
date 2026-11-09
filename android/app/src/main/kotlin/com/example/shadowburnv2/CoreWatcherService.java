@@ -85,8 +85,8 @@ public class CoreWatcherService extends Service {
         PendingIntent pendingIntent = PendingIntent.getActivity(this, 0, notificationIntent, pendingFlags);
 
         NotificationCompat.Builder builder = new NotificationCompat.Builder(this, CHANNEL_ID)
-                .setContentTitle("SYSTÈMES : ZONE DE PÉNALITÉ")
-                .setContentText("Le Hardware est verrouillé. L'aspiration est active.")
+                .setContentTitle("SYSTÈME : ZONE DE PÉNALITÉ")
+                .setContentText("Le Hardware est verrouillé. Le Cerbère est impitoyable.")
                 .setSmallIcon(android.R.drawable.ic_dialog_alert)
                 .setContentIntent(pendingIntent)
                 .setFullScreenIntent(pendingIntent, true)
@@ -130,7 +130,7 @@ public class CoreWatcherService extends Service {
         patrolThread = new Thread(() -> {
             while (isRunning) {
                 try {
-                    Thread.sleep(200);
+                    Thread.sleep(150); // Patrouille ultra-rapide
 
                     if (System.currentTimeMillis() < emergencyGraceUntil) {
                         continue;
@@ -143,7 +143,7 @@ public class CoreWatcherService extends Service {
                         continue;
                     }
 
-                    // Aspiration immédiate et absolue dans n'importe quelle autre situation
+                    // Aspiration immédiate et absolue dans n'importe quelle autre situation (Bureau, Paramètres, etc.)
                     bringAppToFront();
 
                 } catch (InterruptedException e) {
