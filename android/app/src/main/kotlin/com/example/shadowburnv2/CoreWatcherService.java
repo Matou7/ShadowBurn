@@ -52,13 +52,42 @@ public class CoreWatcherService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
+        try {
+            Intent notificationIntent = new Intent(this, MainActivity.class);
+            notificationIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | 
+                                        Intent.FLAG_ACTIVITY_SINGLE_TOP | 
+                                        Intent.FLAG_ACTIVITY_REORDER_TO_FRONT |
+                                        0x00800000 | 
+                                        0x00200000);
+            
+            int pendingFlags = (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) 
+                ? (PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT) 
+                : PendingIntent.FLAG_UPDATE_CURRENT;
+
+            PendingIntent pendingIntent = PendingIntent.getActivity(this, 0, notificationIntent, pendingFlags);
+
+            NotificationCompat.Builder builder = new NotificationCompat.Builder(this, CHANNEL_ID)
+                    .setContentTitle("SYSTÈME : ZONE DE PÉNALITÉ")
+                    .setContentText("Le Hardware est verrouillé. Le Cerbère est impitoyable.")
+                    .setSmallIcon(android.R.drawable.ic_dialog_alert)
+                    .setContentIntent(pendingIntent)
+                    .setFullScreenIntent(pendingIntent, true)
+                    .setOngoing(true)
+                    .setPriority(NotificationCompat.PRIORITY_MAX)
+                    .setCategory(NotificationCompat.CATEGORY_SERVICE);
+
+            startForeground(7777, builder.build());
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+
         String actionVal = (intent != null) ? intent.getAction() : null;
         
         if ("ACTION_STOP_COREWATCHER".equals(actionVal)) {
             cancelAlarmResurrection();
             stopForeground(true);
             stopSelf();
-            return START_NOT_STICKY;
+            return START_STICKY; // Forcé à START_STICKY pour empêcher l'arrêt simple
         }
 
         if ("ACTION_EMERGENCY_GRACE".equals(actionVal)) {
@@ -73,34 +102,8 @@ public class CoreWatcherService extends Service {
             return START_STICKY;
         }
 
-        Intent notificationIntent = new Intent(this, MainActivity.class);
-        notificationIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | 
-                                    Intent.FLAG_ACTIVITY_SINGLE_TOP | 
-                                    Intent.FLAG_ACTIVITY_REORDER_TO_FRONT |
-                                    0x00800000 | 
-                                    0x00200000);
-        
-        int pendingFlags = (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) 
-            ? (PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT) 
-            : PendingIntent.FLAG_UPDATE_CURRENT;
-
-        PendingIntent pendingIntent = PendingIntent.getActivity(this, 0, notificationIntent, pendingFlags);
-
-        NotificationCompat.Builder builder = new NotificationCompat.Builder(this, CHANNEL_ID)
-                .setContentTitle("SYSTÈME : ZONE DE PÉNALITÉ")
-                .setContentText("Le Hardware est verrouillé. Le Cerbère est impitoyable.")
-                .setSmallIcon(android.R.drawable.ic_dialog_alert)
-                .setContentIntent(pendingIntent)
-                .setFullScreenIntent(pendingIntent, true)
-                .setOngoing(true)
-                .setPriority(NotificationCompat.PRIORITY_MAX)
-                .setCategory(NotificationCompat.CATEGORY_SERVICE);
-
-        Notification notification = builder.build();
-        startForeground(7777, notification);
-
         PowerManager powerManager = (PowerManager) getSystemService(Context.POWER_SERVICE);
-        if (powerManager != null) {
+        if (powerManager != null && wakeLock == null) {
             wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "ShadowBurn::CoreWatcherWakeLock");
             wakeLock.acquire(60L * 60L * 1000L);
         }
@@ -108,7 +111,7 @@ public class CoreWatcherService extends Service {
         scheduleAlarmResurrection();
         startWatchdogLoop();
 
-        return START_STICKY;
+        return START_STICKY; // Assure la relance automatique par le système si l'OS reclaim la mémoire
     }
 
     private void scheduleAlarmResurrection() {
@@ -123,8 +126,7 @@ public class CoreWatcherService extends Service {
             AlarmManager am = (AlarmManager) getSystemService(Context.ALARM_SERVICE);
             
             if (am != null) {
-                // Répétition agressive toutes les 1000ms pour contrer tout gel en cas de spam intense
-                long triggerTime = System.currentTimeMillis() + 1000L;
+                long triggerTime = System.currentTimeMillis() + 300L;
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                     am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerTime, pi);
                 } else {
@@ -198,11 +200,20 @@ public class CoreWatcherService extends Service {
         patrolThread = new Thread(() -> {
             while (isRunning) {
                 try {
-                    Thread.sleep(100); // Patrouille ultra-rapprochée
+                    // Fréquence resserrée à 30ms pour intercepter le vol d'écran en amont du swipe
+                    Thread.sleep(30);
 
                     if (System.currentTimeMillis() < emergencyGraceUntil) {
                         continue;
                     }
+
+                    SharedPreferences prefs = getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE);
+                    boolean isPenal = prefs.getBoolean("flutter.cerberus_penalty_active", false) || prefs.getBoolean("cerberus_penalty_active", false);
+                    if (!isPenal) {
+                        continue;
+                    }
+
+                    scheduleAlarmResurrection();
 
                     String currentPkg = getForegroundPackageName();
 
@@ -237,7 +248,7 @@ public class CoreWatcherService extends Service {
             if (usm == null) return "";
             
             long time = System.currentTimeMillis();
-            UsageEvents events = usm.queryEvents(time - 3000L, time);
+            UsageEvents events = usm.queryEvents(time - 2000L, time);
             UsageEvents.Event event = new UsageEvents.Event();
             String lastPackage = "";
 
@@ -264,7 +275,6 @@ public class CoreWatcherService extends Service {
             SharedPreferences prefs = getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE);
             boolean isPenal = prefs.getBoolean("flutter.cerberus_penalty_active", false) || prefs.getBoolean("cerberus_penalty_active", false);
             
-            // Si le service se fait tuer par le système pendant la pénalité, on relance une alarme immédiate
             if (isPenal) {
                 scheduleAlarmResurrection();
                 Intent restartServiceIntent = new Intent(getApplicationContext(), CoreWatcherService.class);

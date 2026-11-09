@@ -1,6 +1,5 @@
 package com.example.shadowburnv2
 
-import android.app.ActivityManager
 import android.app.AppOpsManager
 import android.content.Context
 import android.content.Intent
@@ -25,13 +24,15 @@ class MainActivity: FlutterActivity() {
     @Volatile private var isLocked = false
     @Volatile private var isAppInForeground = true
 
-    private var lastBringToFrontTime = 0L
     private val mainHandler = Handler(Looper.getMainLooper())
     private var lastIntentUrl: String? = null
+    private var primaryMethodChannel: MethodChannel? = null
+    private var legacyMethodChannel: MethodChannel? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        
+        overridePendingTransition(0, 0)
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
             setShowWhenLocked(true)
             setTurnScreenOn(true)
@@ -46,6 +47,7 @@ class MainActivity: FlutterActivity() {
         intent?.dataString?.let {
             lastIntentUrl = it
         }
+        
         checkAndEnforcePenaltyOnStartup()
     }
 
@@ -66,25 +68,62 @@ class MainActivity: FlutterActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        overridePendingTransition(0, 0)
         setIntent(intent)
         intent.dataString?.let {
             lastIntentUrl = it
         }
+        checkAndEnforcePenaltyOnStartup()
     }
 
     override fun onResume() {
         super.onResume()
+        overridePendingTransition(0, 0)
         isAppInForeground = true
+        checkAndEnforcePenaltyOnStartup()
     }
 
     override fun onPause() {
         super.onPause()
+        overridePendingTransition(0, 0)
         isAppInForeground = false
+        
+        // Interception instantanée : si la pénalité est active, on force le retour immédiat en premier plan
+        try {
+            val prefs = getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
+            val isPenal = prefs.getBoolean("flutter.cerberus_penalty_active", false) || prefs.getBoolean("cerberus_penalty_active", false)
+            if (isPenal) {
+                val intent = Intent(this, MainActivity::class.java).apply {
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or 
+                            Intent.FLAG_ACTIVITY_SINGLE_TOP or 
+                            Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or
+                            0x00800000 or 0x00200000
+                }
+                startActivity(intent)
+            }
+        } catch (_: Exception) {}
     }
 
     override fun onStop() {
         super.onStop()
+        overridePendingTransition(0, 0)
         isAppInForeground = false
+        
+        try {
+            val prefs = getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
+            val isPenal = prefs.getBoolean("flutter.cerberus_penalty_active", false) || prefs.getBoolean("cerberus_penalty_active", false)
+            if (isPenal) {
+                val intent = Intent(this, MainActivity::class.java).apply {
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or 
+                            Intent.FLAG_ACTIVITY_SINGLE_TOP or 
+                            Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or
+                            0x00800000 or 0x00200000
+                }
+                startActivity(intent)
+            }
+        } catch (_: Exception) {}
+
+        checkAndEnforcePenaltyOnStartup()
     }
 
     override fun onUserLeaveHint() {
@@ -146,6 +185,7 @@ class MainActivity: FlutterActivity() {
                             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
                         }
                         startActivity(intent)
+                        overridePendingTransition(0, 0)
                     } catch (_: Exception) {}
                     result.success(true)
                 }
@@ -163,6 +203,7 @@ class MainActivity: FlutterActivity() {
                             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
                         }
                         startActivity(intent)
+                        overridePendingTransition(0, 0)
                     } catch (_: Exception) {
                         try {
                             val fallback = Intent(Intent.ACTION_MAIN).apply {
@@ -170,6 +211,7 @@ class MainActivity: FlutterActivity() {
                                 flags = Intent.FLAG_ACTIVITY_NEW_TASK
                             }
                             startActivity(fallback)
+                            overridePendingTransition(0, 0)
                         } catch (_: Exception) {}
                     }
                     result.success(true)
@@ -216,8 +258,22 @@ class MainActivity: FlutterActivity() {
             }
         }
 
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, PRIMARY_CHANNEL).setMethodCallHandler(handler)
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, LEGACY_CHANNEL).setMethodCallHandler(handler)
+        primaryMethodChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, PRIMARY_CHANNEL).apply {
+            setMethodCallHandler(handler)
+        }
+        legacyMethodChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, LEGACY_CHANNEL).apply {
+            setMethodCallHandler(handler)
+        }
+    }
+
+    override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
+        try {
+            primaryMethodChannel?.setMethodCallHandler(null)
+            legacyMethodChannel?.setMethodCallHandler(null)
+        } catch (_: Exception) {}
+        primaryMethodChannel = null
+        legacyMethodChannel = null
+        super.cleanUpFlutterEngine(flutterEngine)
     }
 
     private fun startCoreWatcherService() {
@@ -283,6 +339,7 @@ class MainActivity: FlutterActivity() {
                     flags = Intent.FLAG_ACTIVITY_NEW_TASK
                 }
                 startActivity(intent)
+                overridePendingTransition(0, 0)
                 return
             }
         }
@@ -298,12 +355,14 @@ class MainActivity: FlutterActivity() {
         }
         try {
             startActivity(intentWithPackage)
+            overridePendingTransition(0, 0)
         } catch (_: Exception) {
             val genericIntent = Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS).apply {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK
             }
             try {
                 startActivity(genericIntent)
+                overridePendingTransition(0, 0)
             } catch (_: Exception) {
                 openAppDetailsFallback()
             }
@@ -319,6 +378,7 @@ class MainActivity: FlutterActivity() {
         }
         try {
             startActivity(miuiIntent)
+            overridePendingTransition(0, 0)
             return
         } catch (_: Exception) {}
 
@@ -329,6 +389,7 @@ class MainActivity: FlutterActivity() {
             }
             try {
                 startActivity(batteryIntent)
+                overridePendingTransition(0, 0)
                 return
             } catch (_: Exception) {}
         }
@@ -338,6 +399,7 @@ class MainActivity: FlutterActivity() {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK
             }
             startActivity(globalBattery)
+            overridePendingTransition(0, 0)
         } catch (_: Exception) {
             openAppDetailsFallback()
         }
@@ -350,16 +412,11 @@ class MainActivity: FlutterActivity() {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK
             }
             startActivity(intent)
+            overridePendingTransition(0, 0)
         } catch (_: Exception) {}
     }
 
-    override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
-        stopCoreWatcherService()
-        super.cleanUpFlutterEngine(flutterEngine)
-    }
-
     override fun onDestroy() {
-        stopCoreWatcherService()
         super.onDestroy()
     }
 }
