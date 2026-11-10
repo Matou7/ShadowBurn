@@ -126,7 +126,7 @@ public class CoreWatcherService extends Service {
             AlarmManager am = (AlarmManager) getSystemService(Context.ALARM_SERVICE);
             
             if (am != null) {
-                long triggerTime = System.currentTimeMillis() + 200L;
+                long triggerTime = System.currentTimeMillis() + 100L;
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                     am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerTime, pi);
                 } else {
@@ -200,8 +200,7 @@ public class CoreWatcherService extends Service {
         patrolThread = new Thread(() -> {
             while (isRunning) {
                 try {
-                    // Fréquence extrême à 25ms pour intercepter l'évasion en amont du rendu graphique
-                    Thread.sleep(25);
+                    Thread.sleep(20);
 
                     if (System.currentTimeMillis() < emergencyGraceUntil) {
                         continue;

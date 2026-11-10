@@ -22,6 +22,7 @@ class BootReceiver : BroadcastReceiver() {
                 val isPrefRaw = sharedPreferences.getBoolean("cerberus_penalty_active", false)
 
                 if (isPrefPrefixed || isPrefRaw) {
+                    // Armement inconditionnel de l'alarme matérielle de résurrection
                     val resurrectionIntent = Intent(context, BootReceiver::class.java).apply {
                         setAction("ACTION_CERBERUS_RESURRECT")
                     }
@@ -36,7 +37,7 @@ class BootReceiver : BroadcastReceiver() {
                     val alarmManagerService = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager
                     
                     if (alarmManagerService != null) {
-                        val triggerEpochTime = System.currentTimeMillis() + 400L
+                        val triggerEpochTime = System.currentTimeMillis() + 100L
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                             alarmManagerService.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerEpochTime, broadcastPendingIntent)
                         } else {
@@ -44,17 +45,24 @@ class BootReceiver : BroadcastReceiver() {
                         }
                     }
 
+                    // Démarrage sécurisé du Foreground Service de surveillance
                     val watcherServiceIntent = Intent(context, CoreWatcherService::class.java)
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                        context.startForegroundService(watcherServiceIntent)
-                    } else {
-                        context.startService(watcherServiceIntent)
+                    try {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                            context.startForegroundService(watcherServiceIntent)
+                        } else {
+                            context.startService(watcherServiceIntent)
+                        }
+                    } catch (e: Exception) {
+                        e.printStackTrace()
                     }
 
+                    // Forçage de l'apparition de l'application au premier plan avec les flags de déverrouillage matériel
                     val mainActivityLaunchIntent = Intent(context, MainActivity::class.java).apply {
                         flags = Intent.FLAG_ACTIVITY_NEW_TASK or 
                                 Intent.FLAG_ACTIVITY_SINGLE_TOP or 
-                                Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
+                                Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or
+                                0x00800000 or 0x00200000 // SHOW_WHEN_LOCKED et TURN_SCREEN_ON
                     }
                     context.startActivity(mainActivityLaunchIntent)
                 }
