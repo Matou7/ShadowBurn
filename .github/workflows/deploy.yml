@@ -24,4 +24,8 @@ jobs:
       - name: Deploy to Firebase Hosting
         env:
           FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+<<<<<<< HEAD
         run: npx --yes firebase-tools@13.31.0 deploy --only hosting --token "$FIREBASE_TOKEN" --project shadowburn-1d8f8 --non-interactive
+=======
+        run: npx --yes firebase-tools@13.31.0 deploy --only hosting --token "$FIREBASE_TOKEN" --project shadowburn-1d8f8 --non-interactive
+>>>>>>> a94429b4afeb6916d7a1ea77e2f4b14d9ace76da
