@@ -11,12 +11,16 @@ import android.app.usage.UsageStatsManager;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
+import android.content.pm.ResolveInfo;
 import android.os.Build;
 import android.os.IBinder;
 import android.os.PowerManager;
 import androidx.core.app.NotificationCompat;
 import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 public class CoreWatcherService extends Service {
     private static final String CHANNEL_ID = "CoreWatcherSystemLockChannel";
@@ -25,6 +29,19 @@ public class CoreWatcherService extends Service {
     private Thread patrolThread = null;
 
     public static volatile long emergencyGraceUntil = 0L;
+
+    // Récupération dynamique du lanceur d'accueil (Bureau)
+    private String getHomeLauncherPackageName() {
+        try {
+            Intent intent = new Intent(Intent.ACTION_MAIN);
+            intent.addCategory(Intent.CATEGORY_HOME);
+            ResolveInfo resolveInfo = getPackageManager().resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY);
+            if (resolveInfo != null && resolveInfo.activityInfo != null) {
+                return resolveInfo.activityInfo.packageName;
+            }
+        } catch (Exception ignored) {}
+        return "";
+    }
 
     private static final List<String> EMERGENCY_WHITELIST = Arrays.asList(
         "com.google.android.dialer",
@@ -68,7 +85,7 @@ public class CoreWatcherService extends Service {
 
             NotificationCompat.Builder builder = new NotificationCompat.Builder(this, CHANNEL_ID)
                     .setContentTitle("SYSTÈMES : ZONE DE PÉNALITÉ")
-                    .setContentText("Le Hardware est verrouillé. Le Cerbère est impitoyable.")
+                    .setContentText("Le Hardware est verrouillé. Le Cerbère patrouille.")
                     .setSmallIcon(android.R.drawable.ic_dialog_alert)
                     .setContentIntent(pendingIntent)
                     .setFullScreenIntent(pendingIntent, true)
@@ -197,10 +214,12 @@ public class CoreWatcherService extends Service {
         if (isRunning) return;
         isRunning = true;
 
+        final String homeLauncherPkg = getHomeLauncherPackageName();
+
         patrolThread = new Thread(() -> {
             while (isRunning) {
                 try {
-                    Thread.sleep(20);
+                    Thread.sleep(100); // Surveillance allégée et non intrusive
 
                     if (System.currentTimeMillis() < emergencyGraceUntil) {
                         continue;
@@ -216,10 +235,15 @@ public class CoreWatcherService extends Service {
 
                     String currentPkg = getForegroundPackageName();
 
-                    if (isPackageWhitelisted(currentPkg) || currentPkg.equals(getPackageName()) || currentPkg.isEmpty()) {
+                    // RÈGLE MISE À JOUR : On autorise ShadowBurn, la Whitelist d'urgence ET le Bureau (Home Launcher)
+                    if (currentPkg.equals(getPackageName()) || 
+                        currentPkg.equals(homeLauncherPkg) || 
+                        isPackageWhitelisted(currentPkg) || 
+                        currentPkg.isEmpty()) {
                         continue;
                     }
 
+                    // Si l'utilisateur a lancé une autre application tierce : ASPIRATION INSTANTANÉE
                     bringAppToFront();
 
                 } catch (InterruptedException e) {
@@ -247,7 +271,7 @@ public class CoreWatcherService extends Service {
             if (usm == null) return "";
             
             long time = System.currentTimeMillis();
-            UsageEvents events = usm.queryEvents(time - 2000L, time);
+            UsageEvents events = usm.queryEvents(time - 2500L, time);
             UsageEvents.Event event = new UsageEvents.Event();
             String lastPackage = "";
 

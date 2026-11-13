@@ -88,7 +88,6 @@ class MainActivity: FlutterActivity() {
         overridePendingTransition(0, 0)
         isAppInForeground = false
         
-        // Interception instantanée : si la pénalité est active, on force le retour immédiat en premier plan
         try {
             val prefs = getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
             val isPenal = prefs.getBoolean("flutter.cerberus_penalty_active", false) || prefs.getBoolean("cerberus_penalty_active", false)
