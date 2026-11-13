@@ -21,10 +21,6 @@ class MainActivity: FlutterActivity() {
     private val PRIMARY_CHANNEL = "com.shadowburn.app/lock"
     private val LEGACY_CHANNEL = "com.shadowburn.lock/channel"
 
-    @Volatile private var isLocked = false
-    @Volatile private var isAppInForeground = true
-
-    private val mainHandler = Handler(Looper.getMainLooper())
     private var lastIntentUrl: String? = null
     private var primaryMethodChannel: MethodChannel? = null
     private var legacyMethodChannel: MethodChannel? = null
@@ -58,7 +54,6 @@ class MainActivity: FlutterActivity() {
             val isPrefRaw = prefs.getBoolean("cerberus_penalty_active", false)
 
             if (isPrefPrefixed || isPrefRaw) {
-                isLocked = true
                 startCoreWatcherService()
             }
         } catch (e: Exception) {
@@ -79,55 +74,17 @@ class MainActivity: FlutterActivity() {
     override fun onResume() {
         super.onResume()
         overridePendingTransition(0, 0)
-        isAppInForeground = true
         checkAndEnforcePenaltyOnStartup()
     }
 
     override fun onPause() {
         super.onPause()
         overridePendingTransition(0, 0)
-        isAppInForeground = false
-        
-        try {
-            val prefs = getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
-            val isPenal = prefs.getBoolean("flutter.cerberus_penalty_active", false) || prefs.getBoolean("cerberus_penalty_active", false)
-            if (isPenal) {
-                val intent = Intent(this, MainActivity::class.java).apply {
-                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or 
-                            Intent.FLAG_ACTIVITY_SINGLE_TOP or 
-                            Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or
-                            0x00800000 or 0x00200000
-                }
-                startActivity(intent)
-            }
-        } catch (_: Exception) {}
     }
 
     override fun onStop() {
         super.onStop()
         overridePendingTransition(0, 0)
-        isAppInForeground = false
-        
-        try {
-            val prefs = getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
-            val isPenal = prefs.getBoolean("flutter.cerberus_penalty_active", false) || prefs.getBoolean("cerberus_penalty_active", false)
-            if (isPenal) {
-                val intent = Intent(this, MainActivity::class.java).apply {
-                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or 
-                            Intent.FLAG_ACTIVITY_SINGLE_TOP or 
-                            Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or
-                            0x00800000 or 0x00200000
-                }
-                startActivity(intent)
-            }
-        } catch (_: Exception) {}
-
-        checkAndEnforcePenaltyOnStartup()
-    }
-
-    override fun onUserLeaveHint() {
-        super.onUserLeaveHint()
-        isAppInForeground = false
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -142,9 +99,7 @@ class MainActivity: FlutterActivity() {
                 }
 
                 "lockScreen" -> {
-                    isLocked = true
                     startCoreWatcherService()
-
                     try {
                         val prefs = getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
                         prefs.edit()
@@ -157,9 +112,7 @@ class MainActivity: FlutterActivity() {
                 }
 
                 "unlockScreen" -> {
-                    isLocked = false
                     stopCoreWatcherService()
-
                     try {
                         val prefs = getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
                         prefs.edit()
@@ -413,9 +366,5 @@ class MainActivity: FlutterActivity() {
             startActivity(intent)
             overridePendingTransition(0, 0)
         } catch (_: Exception) {}
-    }
-
-    override fun onDestroy() {
-        super.onDestroy()
     }
 }

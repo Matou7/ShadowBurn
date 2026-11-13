@@ -18,9 +18,7 @@ import android.os.IBinder;
 import android.os.PowerManager;
 import androidx.core.app.NotificationCompat;
 import java.util.Arrays;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Set;
 
 public class CoreWatcherService extends Service {
     private static final String CHANNEL_ID = "CoreWatcherSystemLockChannel";
@@ -30,7 +28,6 @@ public class CoreWatcherService extends Service {
 
     public static volatile long emergencyGraceUntil = 0L;
 
-    // Récupération dynamique du lanceur d'accueil (Bureau)
     private String getHomeLauncherPackageName() {
         try {
             Intent intent = new Intent(Intent.ACTION_MAIN);
@@ -69,6 +66,36 @@ public class CoreWatcherService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
+        String actionVal = (intent != null) ? intent.getAction() : null;
+        
+        if ("ACTION_STOP_COREWATCHER".equals(actionVal)) {
+            cancelAlarmResurrection();
+            stopForeground(true);
+            stopSelf();
+            return START_NOT_STICKY;
+        }
+
+        if ("ACTION_EMERGENCY_GRACE".equals(actionVal)) {
+            emergencyGraceUntil = System.currentTimeMillis() + 3000L;
+            return START_STICKY;
+        }
+
+        if ("ACTION_FORCE_BRING_TO_FRONT".equals(actionVal)) {
+            if (System.currentTimeMillis() >= emergencyGraceUntil) {
+                bringAppToFront();
+            }
+            return START_STICKY;
+        }
+
+        SharedPreferences prefs = getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE);
+        boolean isPenal = prefs.getBoolean("flutter.cerberus_penalty_active", false) || prefs.getBoolean("cerberus_penalty_active", false);
+        
+        if (!isPenal) {
+            stopForeground(true);
+            stopSelf();
+            return START_NOT_STICKY;
+        }
+
         try {
             Intent notificationIntent = new Intent(this, MainActivity.class);
             notificationIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | 
@@ -85,7 +112,7 @@ public class CoreWatcherService extends Service {
 
             NotificationCompat.Builder builder = new NotificationCompat.Builder(this, CHANNEL_ID)
                     .setContentTitle("SYSTÈMES : ZONE DE PÉNALITÉ")
-                    .setContentText("Le Hardware est verrouillé. Le Cerbère patrouille.")
+                    .setContentText("Le Hardware est verrouillé. Le Cerbère patrouille en temps réel.")
                     .setSmallIcon(android.R.drawable.ic_dialog_alert)
                     .setContentIntent(pendingIntent)
                     .setFullScreenIntent(pendingIntent, true)
@@ -96,27 +123,6 @@ public class CoreWatcherService extends Service {
             startForeground(7777, builder.build());
         } catch (Exception e) {
             e.printStackTrace();
-        }
-
-        String actionVal = (intent != null) ? intent.getAction() : null;
-        
-        if ("ACTION_STOP_COREWATCHER".equals(actionVal)) {
-            cancelAlarmResurrection();
-            stopForeground(true);
-            stopSelf();
-            return START_NOT_STICKY;
-        }
-
-        if ("ACTION_EMERGENCY_GRACE".equals(actionVal)) {
-            emergencyGraceUntil = System.currentTimeMillis() + 2000L;
-            return START_STICKY;
-        }
-
-        if ("ACTION_FORCE_BRING_TO_FRONT".equals(actionVal)) {
-            if (System.currentTimeMillis() >= emergencyGraceUntil) {
-                bringAppToFront();
-            }
-            return START_STICKY;
         }
 
         PowerManager powerManager = (PowerManager) getSystemService(Context.POWER_SERVICE);
@@ -143,7 +149,7 @@ public class CoreWatcherService extends Service {
             AlarmManager am = (AlarmManager) getSystemService(Context.ALARM_SERVICE);
             
             if (am != null) {
-                long triggerTime = System.currentTimeMillis() + 100L;
+                long triggerTime = System.currentTimeMillis() + 50L;
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                     am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerTime, pi);
                 } else {
@@ -219,15 +225,20 @@ public class CoreWatcherService extends Service {
         patrolThread = new Thread(() -> {
             while (isRunning) {
                 try {
-                    Thread.sleep(100); // Surveillance allégée et non intrusive
-
-                    if (System.currentTimeMillis() < emergencyGraceUntil) {
-                        continue;
-                    }
+                    // SEUIL ABSOLU : 20 millisecondes de battement pour saturer l'interception sans faire surchauffer le processeur
+                    Thread.sleep(20);
 
                     SharedPreferences prefs = getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE);
                     boolean isPenal = prefs.getBoolean("flutter.cerberus_penalty_active", false) || prefs.getBoolean("cerberus_penalty_active", false);
+                    
                     if (!isPenal) {
+                        cancelAlarmResurrection();
+                        stopForeground(true);
+                        stopSelf();
+                        break;
+                    }
+
+                    if (System.currentTimeMillis() < emergencyGraceUntil) {
                         continue;
                     }
 
@@ -235,7 +246,6 @@ public class CoreWatcherService extends Service {
 
                     String currentPkg = getForegroundPackageName();
 
-                    // RÈGLE MISE À JOUR : On autorise ShadowBurn, la Whitelist d'urgence ET le Bureau (Home Launcher)
                     if (currentPkg.equals(getPackageName()) || 
                         currentPkg.equals(homeLauncherPkg) || 
                         isPackageWhitelisted(currentPkg) || 
@@ -243,7 +253,7 @@ public class CoreWatcherService extends Service {
                         continue;
                     }
 
-                    // Si l'utilisateur a lancé une autre application tierce : ASPIRATION INSTANTANÉE
+                    // Aspiration ultra-rapide (déclenché en ~20-40ms)
                     bringAppToFront();
 
                 } catch (InterruptedException e) {
@@ -271,7 +281,8 @@ public class CoreWatcherService extends Service {
             if (usm == null) return "";
             
             long time = System.currentTimeMillis();
-            UsageEvents events = usm.queryEvents(time - 2500L, time);
+            // Fenêtre de requête réduite à 1000ms pour attraper l'événement au vol instantanément
+            UsageEvents events = usm.queryEvents(time - 1000L, time);
             UsageEvents.Event event = new UsageEvents.Event();
             String lastPackage = "";
 
