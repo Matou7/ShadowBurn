@@ -1,6 +1,7 @@
 // lib/screens/profile_screen.dart
 
 import 'dart:async';
+import 'dart:convert';
 import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -37,7 +38,6 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
   int _selectedHpPreset = 5000;
   bool _isCheckingIntent = false;
   
-  // Jeton et empreinte matérielle uniques pour sécuriser le terminal admin
   static String? _deviceAdminToken;
   static String? _hardwareFingerprint;
 
@@ -57,7 +57,6 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
   Future<void> _initDeviceAdminSecurity() async {
     final prefs = await SharedPreferences.getInstance();
     
-    // Initialisation du jeton d'instance unique
     String? token = prefs.getString('shadow_device_admin_token');
     if (token == null || token.isEmpty) {
       token = 'admin_inst_${DateTime.now().millisecondsSinceEpoch}_${Random().nextInt(999999)}';
@@ -65,7 +64,6 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
     }
     _deviceAdminToken = token;
 
-    // Initialisation de l'empreinte matérielle de légitimation de l'appareil
     String? hw = prefs.getString('shadow_hardware_fingerprint');
     if (hw == null || hw.isEmpty) {
       hw = 'hw_sig_${PlatformDispatcher.instance.views.first.physicalSize.width.toInt()}_${Random().nextInt(99999999)}';
@@ -149,7 +147,6 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
         return;
       }
 
-      // Double Sécurité : Vérification stricte du jeton d'instance et de l'empreinte matérielle
       final String? existingAdminInstance = data['admin_instance_token'];
       final String? existingHwSignature = data['hardware_fingerprint'];
 
@@ -163,7 +160,6 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
         return;
       }
 
-      // Enregistrement sécurisé du jeton d'instance et de l'empreinte matérielle validant l'achat et l'installation
       await docRef.set({
         'admin_instance_token': _deviceAdminToken,
         'hardware_fingerprint': _hardwareFingerprint,
@@ -332,42 +328,66 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
   void _showSupportDialog(BuildContext context) {
     final emailController = TextEditingController();
     final messageController = TextEditingController();
+    final formKey = GlobalKey<FormState>();
+
+    // Regex strict pour valider le format e-mail (ex: blabla@blabla.fr ou .com)
+    final emailRegex = RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$');
 
     SystemDialog.show(
       context,
       title: "CANAL DE SUPPORT",
       color: const Color(0xFF00E5FF),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Text(
-            "Une anomalie dans le Système ou une question sur vos quêtes ? Envoyez votre rapport au Quartier Général.",
-            style: TextStyle(color: Colors.white70, fontSize: 12, height: 1.4),
-          ),
-          const SizedBox(height: 15),
-          TextField(
-            controller: emailController,
-            style: const TextStyle(color: Colors.white),
-            decoration: const InputDecoration(
-              hintText: "Votre e-mail de contact",
-              hintStyle: TextStyle(color: Colors.white24),
-              enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Color(0xFF00E5FF))),
-              focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: Color(0xFF00E5FF))),
+      content: Form(
+        key: formKey,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              "Une anomalie dans le Système ou une question sur vos quêtes ? Entrez votre e-mail enregistré (Firebase) et votre message.",
+              style: TextStyle(color: Colors.white70, fontSize: 12, height: 1.4),
             ),
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: messageController,
-            maxLines: 4,
-            style: const TextStyle(color: Colors.white),
-            decoration: const InputDecoration(
-              hintText: "Décrivez votre problème ou message...",
-              hintStyle: TextStyle(color: Colors.white24),
-              enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Color(0xFF00E5FF))),
-              focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: Color(0xFF00E5FF))),
+            const SizedBox(height: 15),
+            TextFormField(
+              controller: emailController,
+              style: const TextStyle(color: Colors.white),
+              decoration: const InputDecoration(
+                labelText: "E-mail de contact (ex: hunter@domain.com)",
+                labelStyle: TextStyle(color: Colors.white54),
+                enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Color(0xFF00E5FF))),
+                focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: Color(0xFF00E5FF))),
+                errorStyle: TextStyle(color: Colors.redAccent, fontSize: 11),
+              ),
+              validator: (value) {
+                if (value == null || value.trim().isEmpty) {
+                  return "L'e-mail est requis.";
+                }
+                if (!emailRegex.hasMatch(value.trim())) {
+                  return "Format invalide (ex: nom@domaine.fr/.com)";
+                }
+                return null;
+              },
             ),
-          ),
-        ],
+            const SizedBox(height: 12),
+            TextFormField(
+              controller: messageController,
+              maxLines: 4,
+              style: const TextStyle(color: Colors.white),
+              decoration: const InputDecoration(
+                labelText: "Votre message...",
+                labelStyle: TextStyle(color: Colors.white54),
+                enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Color(0xFF00E5FF))),
+                focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: Color(0xFF00E5FF))),
+                errorStyle: TextStyle(color: Colors.redAccent, fontSize: 11),
+              ),
+              validator: (value) {
+                if (value == null || value.trim().isEmpty) {
+                  return "Le message ne peut pas être vide.";
+                }
+                return null;
+              },
+            ),
+          ],
+        ),
       ),
       actions: [
         TextButton(
@@ -381,47 +401,42 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
           ),
           onPressed: () async {
-            final email = emailController.text.trim();
-            final message = messageController.text.trim();
-            final messenger = ScaffoldMessenger.of(context);
+            if (formKey.currentState!.validate()) {
+              final email = emailController.text.trim();
+              final message = messageController.text.trim();
 
-            if (email.isEmpty || message.isEmpty) {
-              messenger.showSnackBar(
-                const SnackBar(content: Text("Veuillez remplir tous les champs."), backgroundColor: Colors.redAccent),
-              );
-              return;
-            }
+              Navigator.pop(context);
 
-            Navigator.pop(context);
-
-            messenger.showSnackBar(
-              const SnackBar(content: Text("Transmission du rapport au Système en cours..."), duration: Duration(seconds: 2)),
-            );
-
-            try {
-              // Remplace par l'URL de ton webhook hébergé (ex: Render, Railway, Vercel...)
-              final response = await http.post(
-                Uri.parse('https://shadowburn-webhook.onrender.com/api/contact'),
-                headers: {'Content-Type': 'application/json'},
-                body: '{"email": "$email", "message": "$message"}',
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text("Transmission du rapport au Système en cours..."), duration: Duration(seconds: 2)),
               );
 
-              if (response.statusCode == 200) {
-                messenger.showSnackBar(
-                  const SnackBar(
-                    content: Text("Rapport transmis avec succès ! Le Quartier Général a reçu votre message."),
-                    backgroundColor: Color(0xFF00FF66),
-                  ),
+              try {
+                final response = await http.post(
+                  Uri.parse('https://shadowburn-webhook.onrender.com/api/contact'),
+                  headers: {'Content-Type': 'application/json'},
+                  body: jsonEncode({'email': email, 'message': message}),
                 );
-              } else {
-                messenger.showSnackBar(
-                  const SnackBar(content: Text("Échec de la transmission du rapport."), backgroundColor: Colors.redAccent),
+
+                if (response.statusCode == 200) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text("Rapport transmis avec succès ! Le Quartier Général a reçu votre message."),
+                      backgroundColor: Color(0xFF00FF66),
+                    ),
+                  );
+                } else {
+                  final errorData = jsonDecode(response.body);
+                  final errorMsg = errorData['detail'] ?? "Échec de la transmission du rapport.";
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text(errorMsg), backgroundColor: Colors.redAccent),
+                  );
+                }
+              } catch (e) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text("Erreur de connexion au serveur : $e"), backgroundColor: Colors.redAccent),
                 );
               }
-            } catch (e) {
-              messenger.showSnackBar(
-                SnackBar(content: Text("Erreur de connexion au serveur : $e"), backgroundColor: Colors.redAccent),
-              );
             }
           },
           child: const Text("ENVOYER", style: TextStyle(color: Colors.white)),
@@ -566,7 +581,6 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
 
                 const SizedBox(height: 25),
 
-                // BOUTON DE TEST DE PÉNALITÉ RÉINTÉGRÉ
                 SizedBox(
                   width: double.infinity,
                   height: 50,
@@ -644,7 +658,6 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
                   const SizedBox(height: 25),
                 ],
 
-                // BOUTON CANAL DE SUPPORT AJOUTÉ ICI
                 SizedBox(
                   width: double.infinity,
                   child: _holoButton(
