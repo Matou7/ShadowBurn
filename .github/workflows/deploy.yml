@@ -24,14 +24,6 @@ jobs:
       - name: Install Dependencies
         run: flutter pub get
 
-      - name: Build Web Application
-        run: flutter build web --release
-
-      - name: Deploy to Firebase Hosting
-        env:
-          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
-        run: npx --yes firebase-tools@13.31.0 deploy --only hosting --token "$FIREBASE_TOKEN" --project shadowburn-1d8f8 --non-interactive
-
       - name: Build Android APK Release
         run: flutter build apk --release
 
