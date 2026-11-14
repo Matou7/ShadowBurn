@@ -5,8 +5,8 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 class AuthRecoveryService {
-  // Remplace par l'URL exacte de ton service sur Render
-  static const String _backendUrl = "https://shadowburn.onrender.com/api/recover-key";
+  // URL exacte avec "-webhook"
+  static const String _backendUrl = "https://shadowburn-webhook.onrender.com/api/recover-key";
 
   /// Interroge le serveur FastAPI pour retrouver la clé et envoyer l'e-mail Resend
   static Future<bool> sendOfficialRecoveryEmail(String email) async {
