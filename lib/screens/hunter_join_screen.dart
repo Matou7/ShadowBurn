@@ -178,7 +178,6 @@ class _HunterJoinScreenState extends State<HunterJoinScreen> with WidgetsBinding
     String? foundRoom;
     String? foundToken;
 
-    // Analyse robuste incluant le support après le fragment hash (#)
     final roomRegex = RegExp(r'[?&]room=([a-zA-Z0-9_]+)', caseSensitive: false);
     final tokenRegex = RegExp(r'[?&]token=([a-zA-Z0-9_]+)', caseSensitive: false);
 
@@ -188,15 +187,13 @@ class _HunterJoinScreenState extends State<HunterJoinScreen> with WidgetsBinding
     final tokenMatch = tokenRegex.firstMatch(rawUrl);
     if (tokenMatch != null) foundToken = tokenMatch.group(1);
 
-    // Fallback sur les query parameters natifs si présents avant le hash
     foundRoom ??= Uri.base.queryParameters['room'];
     foundToken ??= Uri.base.queryParameters['token'];
 
-    // Support supplémentaire si l'URL contient un fragment pur (#/join?room=...)
     if ((foundRoom == null || foundRoom.isEmpty) && rawUrl.contains('#')) {
       try {
         final uriObj = Uri.parse(rawUrl);
-        final fragment = uriObj.fragment; // Récupère tout ce qui est après le #
+        final fragment = uriObj.fragment;
         if (fragment.contains('?')) {
           final queryPart = fragment.split('?')[1];
           final queryParams = Uri.splitQueryString(queryPart);
@@ -414,7 +411,6 @@ class _HunterJoinScreenState extends State<HunterJoinScreen> with WidgetsBinding
     final name = _nameController.text.trim();
     if (name.isEmpty || _raidRef == null) return;
 
-    // Vérification du disjoncteur avant d'écrire l'entrée du chasseur
     bool canWrite = await QuotaGuardService.checkAndIncrementWrite();
     if (!canWrite) {
       if (mounted) {
@@ -690,7 +686,6 @@ class _HunterJoinScreenState extends State<HunterJoinScreen> with WidgetsBinding
   Future _flushPendingDamage() async {
     if (_pendingDamage == 0 || _raidRef == null || _isFlushing) return;
     
-    // Vérification du disjoncteur avant d'envoyer l'écriture groupée sur Firestore
     bool canWrite = await QuotaGuardService.checkAndIncrementWrite();
     if (!canWrite) {
       debugPrint("[QUOTA GUARD] Seuil de sécurité préventif atteint (19 900). Flush suspendu.");
