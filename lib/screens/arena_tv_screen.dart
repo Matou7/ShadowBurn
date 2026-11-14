@@ -1031,7 +1031,6 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
     );
   }
 
-  // PODIUM MULTI-VOIES ULTRA-COMPACT (Grille sur 4 colonnes pour tenir 100% sur l'écran TV sans scroll)
   Widget _buildCompleteMultiWayPodium(List logs, List hunters) {
     final Map huntersByMode = {};
 
@@ -1055,7 +1054,6 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
 
     final int grandTotalReps = globalSquats + globalPushups + globalAbs;
 
-    // Les 7 voies exactes du mobile
     final List<String> allModes = [
       "Entraînement du Monarque (Squats, Pompes, Abdos)",
       "Voie des Jambes (Uniquement Squats)",
@@ -1107,15 +1105,14 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
           Expanded(
             child: LayoutBuilder(
               builder: (context, constraints) {
-                // Grille statique sur 4 colonnes pour que les 7 cases tiennent sans aucun défilement vertical
                 return GridView.builder(
                   padding: EdgeInsets.zero,
                   itemCount: entries.length,
                   gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 4, // 4 colonnes compactes pour tenir sur une seule vue TV
+                    crossAxisCount: 4,
                     crossAxisSpacing: 8,
                     mainAxisSpacing: 8,
-                    childAspectRatio: 1.1, // Format de case ultra-optimisé
+                    childAspectRatio: 1.1,
                   ),
                   itemBuilder: (context, index) {
                     final entry = entries[index];
@@ -1292,7 +1289,6 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
   }
 
   Widget _buildDynamicMaximizedQrPanel(String raidStatus, {required bool isVictory}) {
-    // Utilisation d'URLs absolues et propres sans encodage superflux
     final String rawJoinUrl = 'https://shadowburn-1d8f8.web.app/#/join?room=$_roomId&token=${_joinToken ?? ""}';
     final joinQrData = Uri.encodeComponent(rawJoinUrl);
 
@@ -1400,3 +1396,4 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
       ),
     );
   }
+}
