@@ -1290,10 +1290,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
 
   Widget _buildDynamicMaximizedQrPanel(String raidStatus, {required bool isVictory}) {
     final String rawJoinUrl = 'https://shadowburn-1d8f8.web.app/#/join?room=$_roomId&token=${_joinToken ?? ""}';
-    final joinQrData = Uri.encodeComponent(rawJoinUrl);
-
     final String rawAdminUrl = 'https://shadowburn-1d8f8.web.app/#/admin?room=$_roomId&key=${_adminKey ?? ""}';
-    final adminQrData = Uri.encodeComponent(rawAdminUrl);
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
@@ -1330,7 +1327,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
                               borderRadius: BorderRadius.circular(4),
                             ),
                             child: Image.network(
-                              'https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=$joinQrData',
+                              'https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=${Uri.encodeComponent(rawJoinUrl)}',
                               fit: BoxFit.contain,
                               errorBuilder: (context, error, stackTrace) => const Icon(Icons.qr_code_2, size: 60, color: Colors.black),
                             ),
@@ -1373,7 +1370,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
                               borderRadius: BorderRadius.circular(4),
                             ),
                             child: Image.network(
-                              'https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=$adminQrData',
+                              'https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=${Uri.encodeComponent(rawAdminUrl)}',
                               fit: BoxFit.contain,
                               errorBuilder: (context, error, stackTrace) => const Icon(Icons.admin_panel_settings, size: 60, color: Colors.black),
                             ),
@@ -1396,4 +1393,3 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
       ),
     );
   }
-}
