@@ -510,13 +510,7 @@ class _StatsQuestsScreenState extends State<StatsQuestsScreen> {
     );
   }
 
-  Widget _holoButton(String text, Color color, VoidCallbackpacing: 2))),
-      ),
-    );
-  }
-}
-   
-Widget _holoButton(String text, Color color, VoidCallback onTap) {
+  Widget _holoButton(String text, Color color, VoidCallback onTap) {
     return InkWell(
       onTap: onTap,
       child: Container(
