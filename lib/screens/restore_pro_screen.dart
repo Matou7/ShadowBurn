@@ -28,18 +28,15 @@ class _RestoreProScreenState extends State<RestoreProScreen> {
 
     setState(() {
       _isLoading = true;
-      _statusMessage = "Transmission au serveur d'éveil (Render)...";
+      _statusMessage = "Vérification Firestore en cours...";
       _isSuccess = false;
     });
 
     bool success = false;
     try {
-      // Ajout d'un timeout de sécurité de 15 secondes pour contrer la mise en veille potentielle
       success = await AuthRecoveryService.sendOfficialRecoveryEmail(email).timeout(
         const Duration(seconds: 15),
-        onTimeout: () {
-          return false;
-        },
+        onTimeout: () => false,
       );
     } catch (_) {
       success = false;
@@ -51,18 +48,26 @@ class _RestoreProScreenState extends State<RestoreProScreen> {
       _isLoading = false;
       _isSuccess = success;
       _statusMessage = success
-          ? "Clé retrouvée ! Vérifiez votre boîte mail (Resend)."
-          : "Aucune licence active trouvée pour cet e-mail ou délai dépassé.";
+          ? "Vérification validée ! E-mail de clé expédié."
+          : "E-mail introuvable dans la base Firestore ou délai dépassé.";
     });
 
     if (success) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text("[SYSTÈMES] E-mail de restauration expédié avec succès !"),
+          content: Text("[SYSTÈME] Clé envoyée par e-mail. Entrez-la pour activer le Pass Pro."),
           backgroundColor: Color(0xFF00FF66),
           behavior: SnackBarBehavior.floating,
+          duration: Duration(seconds: 4),
         ),
       );
+
+      // Ferme la pop-up / écran de restauration après 2 secondes pour revenir à l'application
+      Future.delayed(const Duration(seconds: 2), () {
+        if (mounted) {
+          Navigator.of(context).pop();
+        }
+      });
     }
   }
 
@@ -110,7 +115,7 @@ class _RestoreProScreenState extends State<RestoreProScreen> {
             ),
             const SizedBox(height: 12),
             const Text(
-              "Saisissez l'adresse e-mail renseignée lors de votre achat Stripe pour recevoir votre clé.",
+              "Saisissez l'adresse e-mail de votre achat. Le système vérifie Firestore, met à jour le statut et vous renvoie votre clé.",
               textAlign: TextAlign.center,
               style: TextStyle(color: Color(0xFFAAAAAA), fontSize: 13, height: 1.4),
             ),
