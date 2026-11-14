@@ -1393,3 +1393,4 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
       ),
     );
   }
+}
