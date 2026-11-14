@@ -28,7 +28,7 @@ class _RestoreProScreenState extends State<RestoreProScreen> {
 
     setState(() {
       _isLoading = true;
-      _statusMessage = "Vérification Firestore en cours...";
+      _statusMessage = "Réinitialisation de la clé et envoi en cours...";
       _isSuccess = false;
     });
 
@@ -48,21 +48,21 @@ class _RestoreProScreenState extends State<RestoreProScreen> {
       _isLoading = false;
       _isSuccess = success;
       _statusMessage = success
-          ? "Vérification validée ! E-mail de clé expédié."
-          : "E-mail introuvable dans la base Firestore ou délai dépassé.";
+          ? "Clé réinitialisée et envoyée par e-mail !"
+          : "Aucune licence active trouvée pour cet e-mail ou délai dépassé.";
     });
 
     if (success) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text("[SYSTÈME] Clé envoyée par e-mail. Entrez-la pour activer le Pass Pro."),
+          content: Text("[SYSTÈMES] Clé renvoyée ! Entrez-la pour activer le Pass Pro."),
           backgroundColor: Color(0xFF00FF66),
           behavior: SnackBarBehavior.floating,
           duration: Duration(seconds: 4),
         ),
       );
 
-      // Ferme la pop-up / écran de restauration après 2 secondes pour revenir à l'application
+      // Ferme automatiquement la pop-up après 2 secondes pour revenir à l'écran principal
       Future.delayed(const Duration(seconds: 2), () {
         if (mounted) {
           Navigator.of(context).pop();
@@ -115,7 +115,7 @@ class _RestoreProScreenState extends State<RestoreProScreen> {
             ),
             const SizedBox(height: 12),
             const Text(
-              "Saisissez l'adresse e-mail de votre achat. Le système vérifie Firestore, met à jour le statut et vous renvoie votre clé.",
+              "Saisissez l'e-mail de votre achat. Le système remet votre clé à disposition et vous l'envoie par e-mail.",
               textAlign: TextAlign.center,
               style: TextStyle(color: Color(0xFFAAAAAA), fontSize: 13, height: 1.4),
             ),
