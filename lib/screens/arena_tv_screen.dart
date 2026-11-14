@@ -1292,6 +1292,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
   }
 
   Widget _buildDynamicMaximizedQrPanel(String raidStatus, {required bool isVictory}) {
+    // Utilisation d'URLs absolues et propres sans encodage superflux
     final String rawJoinUrl = 'https://shadowburn-1d8f8.web.app/#/join?room=$_roomId&token=${_joinToken ?? ""}';
     final joinQrData = Uri.encodeComponent(rawJoinUrl);
 
@@ -1399,4 +1400,3 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
       ),
     );
   }
-}
