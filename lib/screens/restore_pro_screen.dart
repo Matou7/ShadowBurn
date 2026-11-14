@@ -28,10 +28,22 @@ class _RestoreProScreenState extends State<RestoreProScreen> {
 
     setState(() {
       _isLoading = true;
-      _statusMessage = null;
+      _statusMessage = "Transmission au serveur d'éveil (Render)...";
+      _isSuccess = false;
     });
 
-    final bool success = await AuthRecoveryService.sendOfficialRecoveryEmail(email);
+    bool success = false;
+    try {
+      // Ajout d'un timeout de sécurité de 15 secondes pour contrer la mise en veille potentielle
+      success = await AuthRecoveryService.sendOfficialRecoveryEmail(email).timeout(
+        const Duration(seconds: 15),
+        onTimeout: () {
+          return false;
+        },
+      );
+    } catch (_) {
+      success = false;
+    }
 
     if (!mounted) return;
 
@@ -39,15 +51,15 @@ class _RestoreProScreenState extends State<RestoreProScreen> {
       _isLoading = false;
       _isSuccess = success;
       _statusMessage = success
-          ? "Vérification Firestore effectuée avec succès !"
-          : "Aucune licence Pro trouvée pour cet e-mail ou erreur de synchronisation.";
+          ? "Clé retrouvée ! Vérifiez votre boîte mail (Resend)."
+          : "Aucune licence active trouvée pour cet e-mail ou délai dépassé.";
     });
 
-    if (_isSuccess) {
+    if (success) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(_statusMessage!),
-          backgroundColor: const Color(0xFF00FF66),
+        const SnackBar(
+          content: Text("[SYSTÈMES] E-mail de restauration expédié avec succès !"),
+          backgroundColor: Color(0xFF00FF66),
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -98,7 +110,7 @@ class _RestoreProScreenState extends State<RestoreProScreen> {
             ),
             const SizedBox(height: 12),
             const Text(
-              "Saisissez l'adresse e-mail renseignée lors de votre achat Stripe pour lancer la vérification sur Firestore.",
+              "Saisissez l'adresse e-mail renseignée lors de votre achat Stripe pour recevoir votre clé.",
               textAlign: TextAlign.center,
               style: TextStyle(color: Color(0xFFAAAAAA), fontSize: 13, height: 1.4),
             ),
@@ -143,7 +155,7 @@ class _RestoreProScreenState extends State<RestoreProScreen> {
                       child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black),
                     )
                   : const Text(
-                      "LANCER LA VÉRIFICATION",
+                      "VÉRIFIER LA RESTAURATION",
                       style: TextStyle(fontWeight: FontWeight.bold, letterSpacing: 1),
                     ),
             ),
