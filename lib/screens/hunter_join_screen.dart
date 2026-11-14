@@ -178,6 +178,7 @@ class _HunterJoinScreenState extends State<HunterJoinScreen> with WidgetsBinding
     String? foundRoom;
     String? foundToken;
 
+    // Analyse robuste incluant le support après le fragment hash (#)
     final roomRegex = RegExp(r'[?&]room=([a-zA-Z0-9_]+)', caseSensitive: false);
     final tokenRegex = RegExp(r'[?&]token=([a-zA-Z0-9_]+)', caseSensitive: false);
 
@@ -187,8 +188,23 @@ class _HunterJoinScreenState extends State<HunterJoinScreen> with WidgetsBinding
     final tokenMatch = tokenRegex.firstMatch(rawUrl);
     if (tokenMatch != null) foundToken = tokenMatch.group(1);
 
+    // Fallback sur les query parameters natifs si présents avant le hash
     foundRoom ??= Uri.base.queryParameters['room'];
     foundToken ??= Uri.base.queryParameters['token'];
+
+    // Support supplémentaire si l'URL contient un fragment pur (#/join?room=...)
+    if ((foundRoom == null || foundRoom.isEmpty) && rawUrl.contains('#')) {
+      try {
+        final uriObj = Uri.parse(rawUrl);
+        final fragment = uriObj.fragment; // Récupère tout ce qui est après le #
+        if (fragment.contains('?')) {
+          final queryPart = fragment.split('?')[1];
+          final queryParams = Uri.splitQueryString(queryPart);
+          foundRoom ??= queryParams['room'];
+          foundToken ??= queryParams['token'];
+        }
+      } catch (_) {}
+    }
 
     _roomId = (foundRoom != null && foundRoom.trim().isNotEmpty) ? foundRoom.trim() : '';
     _token = (foundToken != null && foundToken.trim().isNotEmpty) ? foundToken.trim() : '';
