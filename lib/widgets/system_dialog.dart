@@ -38,13 +38,11 @@ class SystemDialog extends StatelessWidget {
       } catch (_) {}
     }
 
-    showGeneralDialog(
+    showDialog(
       context: context,
       barrierDismissible: !isWarning,
-      barrierLabel: "Fermer",
       barrierColor: Colors.black.withValues(alpha: 0.85),
-      transitionDuration: const Duration(milliseconds: 250),
-      pageBuilder: (ctx, anim1, anim2) {
+      builder: (ctx) {
         return SystemDialog(
           title: title,
           message: message,
@@ -54,31 +52,25 @@ class SystemDialog extends StatelessWidget {
           isWarning: isWarning,
         );
       },
-      transitionBuilder: (ctx, anim1, anim2, child) {
-        return ScaleTransition(
-          scale: CurvedAnimation(
-            parent: anim1,
-            curve: Curves.easeOutBack,
-          ),
-          alignment: Alignment.center,
-          child: child,
-        );
-      },
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    // Évite que le clavier Android ne masque les boutons (ex: saisie Admin)
-    final bottomInset = MediaQuery.of(context).viewInsets.bottom;
+    final mediaQuery = MediaQuery.of(context);
+    final keyboardHeight = mediaQuery.viewInsets.bottom;
+    final screenHeight = mediaQuery.size.height;
     
-    return AnimatedPadding(
-      padding: EdgeInsets.only(bottom: bottomInset),
-      duration: const Duration(milliseconds: 200),
-      curve: Curves.easeOut,
-      child: Dialog(
-        backgroundColor: Colors.transparent,
-        insetPadding: const EdgeInsets.all(15),
+    // Hauteur max disponible pour que le dialogue reste centré et visible au-dessus du clavier
+    final maxDialogHeight = screenHeight - keyboardHeight - 50;
+
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxHeight: maxDialogHeight > 220 ? maxDialogHeight : 220,
+        ),
         child: Stack(
           alignment: Alignment.center,
           children: [
@@ -94,9 +86,11 @@ class SystemDialog extends StatelessWidget {
                 color: const Color(0xFF050505),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
+                    // En-tête du dialogue
                     Container(
-                      padding: const EdgeInsets.symmetric(vertical: 15, horizontal: 20),
+                      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
                       decoration: BoxDecoration(
                         gradient: LinearGradient(
                           colors: [color.withValues(alpha: 0.2), Colors.transparent],
@@ -114,13 +108,13 @@ class SystemDialog extends StatelessWidget {
                             ),
                             child: Icon(
                               isWarning ? Icons.priority_high : Icons.notifications,
-                              color: color, size: 20,
+                              color: color, size: 18,
                             ),
                           ),
-                          const SizedBox(width: 15),
+                          const SizedBox(width: 12),
                           Expanded(
                             child: Container(
-                              padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 15),
+                              padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 10),
                               decoration: BoxDecoration(
                                 border: Border.all(color: color.withValues(alpha: 0.7)),
                                 color: Colors.black,
@@ -132,9 +126,9 @@ class SystemDialog extends StatelessWidget {
                                   title.toUpperCase(),
                                   style: GoogleFonts.orbitron(
                                     color: color,
-                                    fontSize: 16,
+                                    fontSize: 14,
                                     fontWeight: FontWeight.w900,
-                                    letterSpacing: 3,
+                                    letterSpacing: 2,
                                     shadows: [Shadow(color: color, blurRadius: 15)]
                                   ),
                                 ),
@@ -144,9 +138,10 @@ class SystemDialog extends StatelessWidget {
                         ],
                       ),
                     ),
+                    // Contenu défilable si les champs dépassent
                     Flexible(
                       child: SingleChildScrollView(
-                        padding: const EdgeInsets.fromLTRB(25, 30, 25, 30),
+                        padding: const EdgeInsets.all(16),
                         child: Column(
                           mainAxisSize: MainAxisSize.min,
                           children: [
@@ -156,32 +151,33 @@ class SystemDialog extends StatelessWidget {
                                 textAlign: TextAlign.center,
                                 style: GoogleFonts.rajdhani(
                                   color: Colors.white,
-                                  fontSize: 18,
+                                  fontSize: 16,
                                   height: 1.4,
                                   fontWeight: FontWeight.w600,
                                 ),
                               ),
                             if (content != null) ...[
-                              if (message.isNotEmpty) const SizedBox(height: 20),
+                              if (message.isNotEmpty) const SizedBox(height: 15),
                               content!,
                             ],
                           ],
                         ),
                       ),
                     ),
+                    // Actions en bas
                     if (actions != null && actions!.isNotEmpty)
                       Container(
-                        padding: const EdgeInsets.symmetric(vertical: 15, horizontal: 20),
+                        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 16),
                         decoration: BoxDecoration(
                           color: Colors.black,
                           border: Border(top: BorderSide(color: color.withValues(alpha: 0.3))),
                         ),
                         child: Wrap(
                           alignment: WrapAlignment.end,
-                          spacing: 15,
-                          runSpacing: 10,
+                          spacing: 10,
+                          runSpacing: 8,
                           children: actions!.map((w) => ConstrainedBox(
-                            constraints: const BoxConstraints(maxWidth: 130),
+                            constraints: const BoxConstraints(maxWidth: 120),
                             child: FittedBox(
                               fit: BoxFit.scaleDown,
                               child: w,

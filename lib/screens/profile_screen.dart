@@ -9,6 +9,7 @@ import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:http/http.dart' as http;
 import '../core/titles.dart';
 import '../core/balance.dart';
 import '../providers/game_provider.dart';
@@ -328,6 +329,107 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
     );
   }
 
+  void _showSupportDialog(BuildContext context) {
+    final emailController = TextEditingController();
+    final messageController = TextEditingController();
+
+    SystemDialog.show(
+      context,
+      title: "CANAL DE SUPPORT",
+      color: const Color(0xFF00E5FF),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Text(
+            "Une anomalie dans le Système ou une question sur vos quêtes ? Envoyez votre rapport au Quartier Général.",
+            style: TextStyle(color: Colors.white70, fontSize: 12, height: 1.4),
+          ),
+          const SizedBox(height: 15),
+          TextField(
+            controller: emailController,
+            style: const TextStyle(color: Colors.white),
+            decoration: const InputDecoration(
+              hintText: "Votre e-mail de contact",
+              hintStyle: TextStyle(color: Colors.white24),
+              enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Color(0xFF00E5FF))),
+              focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: Color(0xFF00E5FF))),
+            ),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: messageController,
+            maxLines: 4,
+            style: const TextStyle(color: Colors.white),
+            decoration: const InputDecoration(
+              hintText: "Décrivez votre problème ou message...",
+              hintStyle: TextStyle(color: Colors.white24),
+              enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Color(0xFF00E5FF))),
+              focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: Color(0xFF00E5FF))),
+            ),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text("ANNULER", style: TextStyle(color: Colors.white38)),
+        ),
+        OutlinedButton(
+          style: OutlinedButton.styleFrom(
+            side: const BorderSide(color: Color(0xFF00E5FF)),
+            backgroundColor: const Color(0xFF00E5FF).withOpacity(0.2),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+          ),
+          onPressed: () async {
+            final email = emailController.text.trim();
+            final message = messageController.text.trim();
+            final messenger = ScaffoldMessenger.of(context);
+
+            if (email.isEmpty || message.isEmpty) {
+              messenger.showSnackBar(
+                const SnackBar(content: Text("Veuillez remplir tous les champs."), backgroundColor: Colors.redAccent),
+              );
+              return;
+            }
+
+            Navigator.pop(context);
+
+            messenger.showSnackBar(
+              const SnackBar(content: Text("Transmission du rapport au Système en cours..."), duration: Duration(seconds: 2)),
+            );
+
+            try {
+              // Remplace par l'URL de ton webhook hébergé (ex: Render, Railway, Vercel...)
+              final response = await http.post(
+                Uri.parse('https://shadowburn-webhook.onrender.com/api/contact'),
+                headers: {'Content-Type': 'application/json'},
+                body: '{"email": "$email", "message": "$message"}',
+              );
+
+              if (response.statusCode == 200) {
+                messenger.showSnackBar(
+                  const SnackBar(
+                    content: Text("Rapport transmis avec succès ! Le Quartier Général a reçu votre message."),
+                    backgroundColor: Color(0xFF00FF66),
+                  ),
+                );
+              } else {
+                messenger.showSnackBar(
+                  const SnackBar(content: Text("Échec de la transmission du rapport."), backgroundColor: Colors.redAccent),
+                );
+              }
+            } catch (e) {
+              messenger.showSnackBar(
+                SnackBar(content: Text("Erreur de connexion au serveur : $e"), backgroundColor: Colors.redAccent),
+              );
+            }
+          },
+          child: const Text("ENVOYER", style: TextStyle(color: Colors.white)),
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final game = context.watch<GameProvider>();
@@ -541,6 +643,18 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
                   ),
                   const SizedBox(height: 25),
                 ],
+
+                // BOUTON CANAL DE SUPPORT AJOUTÉ ICI
+                SizedBox(
+                  width: double.infinity,
+                  child: _holoButton(
+                    "CANAL DE SUPPORT (CONTACT)",
+                    systemBlue,
+                    () => _showSupportDialog(context),
+                    icon: Icons.support_agent,
+                  ),
+                ),
+                const SizedBox(height: 15),
 
                 _buildSystemButtons(context, game, systemBlue),
               ],
