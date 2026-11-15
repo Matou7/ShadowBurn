@@ -18,6 +18,7 @@ import '../core/log.dart';
 import '../core/titles.dart';
 import '../models/dungeon.dart';
 import '../services/audio_service.dart';
+import '../services/auth_recovery_service.dart';
 import '../services/lock_service.dart';
 import '../services/notification_service.dart';
 import '../services/sandbox_manager.dart';
@@ -128,7 +129,7 @@ class GameProvider extends _GameBase
           } else if (lastSeen != null) {
             final difference = now.difference(lastSeen.toDate());
             if (difference.inSeconds > 60) {
-              shouldDelete = true; // Salle orpheline purgée automatiquement
+              shouldDelete = true;
             }
           }
 
