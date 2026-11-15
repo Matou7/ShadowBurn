@@ -125,136 +125,30 @@ mixin _AdminLogic on _GameBase {
     }
   }
 
-  /// Restauration directe appelée par les anciens contrôles
-  Future<String?> restoreProLicenseByEmail(String emailInput) async {
-    final String cleanEmail = emailInput.trim().toLowerCase();
-    debugPrint("[RESTORE_TRACE] Début restauration pour l'email : '$cleanEmail'");
-
-    if (cleanEmail.isEmpty) return null;
+  /// Restauration automatique par ID Matériel (Zéro saisie)
+  Future<bool> requestHardwareAutoRecovery() async {
+    debugPrint("[AUTH_TRACE] Lancement de la récupération automatique par ID Matériel...");
 
     try {
-      final colRef = FirebaseFirestore.instance.collection('pro_licenses');
-      var snapshot = await colRef
-          .where('email', isEqualTo: cleanEmail)
-          .limit(1)
-          .get(const GetOptions(source: Source.serverAndCache));
-
-      if (snapshot.docs.isEmpty) {
-        snapshot = await colRef
-            .where('email', isEqualTo: emailInput.trim())
-            .limit(1)
-            .get(const GetOptions(source: Source.serverAndCache));
-      }
-
-      if (snapshot.docs.isEmpty) return null;
-
-      final licenseDoc = snapshot.docs.first;
-      final String foundKey = (licenseDoc.data()['key']?.toString().isNotEmpty == true)
-          ? licenseDoc.data()['key'].toString()
-          : licenseDoc.id;
       final String hardwareId = await _getUniqueHardwareId();
-
-      await licenseDoc.reference.update({
-        'used': true,
-        'used_at': FieldValue.serverTimestamp(),
-        'used_by': hardwareId,
-        'user_name': _username,
-      });
-
-      _isPro = true;
-      if (this is GameProvider) {
-        await (this as GameProvider).saveLicenseLocally(foundKey);
-      }
-
-      _notify();
-      await _forceSaveRealDisk();
-      return foundKey;
-    } catch (e, stack) {
-      debugPrint("[RESTORE_TRACE] EXCEPTION CRITIQUE : $e\n$stack");
-      return null;
-    }
-  }
-
-  /// Déclenche la récupération instantanée et active la clé reçue
-  Future<bool> requestOtpForEmail(String emailInput) async {
-    final String cleanEmail = emailInput.trim().toLowerCase();
-    debugPrint("[AUTH_TRACE] Lancement de la récupération pour : '$cleanEmail'");
-
-    if (cleanEmail.isEmpty) return false;
-
-    try {
-      final String? recoveredKey = await AuthRecoveryService.fetchKeyForEmail(cleanEmail);
+      final String? recoveredKey = await AuthRecoveryService.fetchKeyForHardware(hardwareId);
+      
       if (recoveredKey != null && recoveredKey.isNotEmpty) {
-        debugPrint("[AUTH_TRACE] Clé récupérée avec succès : $recoveredKey");
+        debugPrint("[AUTH_TRACE] Clé matérielle récupérée : $recoveredKey");
         final bool success = await activateProKey(recoveredKey);
         return success;
       } else {
-        debugPrint("[AUTH_TRACE] Échec de la récupération de la clé.");
+        debugPrint("[AUTH_TRACE] Aucune licence associée à cet appareil.");
         return false;
       }
     } catch (e, stack) {
-      debugPrint("[AUTH_TRACE] Erreur lors de la récupération : $e\n$stack");
+      debugPrint("[AUTH_TRACE] Erreur lors de la récupération matérielle : $e\n$stack");
       return false;
     }
   }
 
-  /// Validation et restauration locale après action de l'utilisateur
-  Future<String?> verifyOtpAndRestore({
-    required String emailInput,
-    required String enteredOtp,
-  }) async {
-    final String cleanEmail = emailInput.trim().toLowerCase();
-    debugPrint("[RESTORE_TRACE] Validation de la restauration pour '$cleanEmail'");
-
-    if (cleanEmail.isEmpty) return null;
-
-    try {
-      final success = await AuthRecoveryService.restoreProStatusLocally(cleanEmail);
-      if (!success) {
-        debugPrint("[RESTORE_TRACE] Échec de la restauration du statut local.");
-        return null;
-      }
-
-      final colRef = FirebaseFirestore.instance.collection('pro_licenses');
-      final snapshot = await colRef
-          .where('email', isEqualTo: cleanEmail)
-          .limit(1)
-          .get(const GetOptions(source: Source.serverAndCache));
-
-      if (snapshot.docs.isEmpty) return null;
-
-      final docSnap = snapshot.docs.first;
-      final data = docSnap.data();
-      final String hardwareId = await _getUniqueHardwareId();
-      final String resolvedKey = (data['key']?.toString().isNotEmpty == true)
-          ? data['key'].toString()
-          : docSnap.id;
-
-      await docSnap.reference.update({
-        'used': true,
-        'used_at': FieldValue.serverTimestamp(),
-        'used_by': hardwareId,
-        'user_name': _username,
-      });
-
-      _isPro = true;
-      if (this is GameProvider) {
-        await (this as GameProvider).saveLicenseLocally(resolvedKey);
-      }
-
-      _notify();
-      await _forceSaveRealDisk();
-      debugPrint("[RESTORE_TRACE] RESTAURATION RÉUSSIE ! Licence $resolvedKey liée à $hardwareId");
-      return resolvedKey;
-    } catch (e, stack) {
-      debugPrint("[RESTORE_TRACE] Erreur lors de la restauration : $e\n$stack");
-      return null;
-    }
-  }
-
-  /// Dialogue modal complet de récupération par e-mail
+  /// Dialogue modal complet de récupération par ID Matériel (Magique et instantané)
   Future<void> showOtpRecoveryDialog(BuildContext context) async {
-    final emailController = TextEditingController();
     bool isLoading = false;
     String feedback = "";
 
@@ -272,59 +166,40 @@ mixin _AdminLogic on _GameBase {
               ),
               title: const Row(
                 children: [
-                  Icon(Icons.shield_outlined, color: Color(0xFF00E5FF)),
+                  Icon(Icons.security, color: Color(0xFF00E5FF)),
                   SizedBox(width: 10),
                   Text(
-                    "RÉCUPÉRATION COMPTE",
+                    "RESTAURATION AUTOMATIQUE",
                     style: TextStyle(
                       color: Colors.white,
                       fontWeight: FontWeight.bold,
                       letterSpacing: 1.2,
-                      fontSize: 15,
+                      fontSize: 14,
                     ),
                   ),
                 ],
               ),
-              content: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    const Text(
-                      "Entrez l'e-mail utilisé lors de votre achat Stripe pour restaurer instantanément votre Pass Pro :",
-                      style: TextStyle(color: Colors.white70, fontSize: 13),
-                    ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const Text(
+                    "Vérifiez votre achat instantanément en interrogeant le Système via l'empreinte de votre appareil :",
+                    style: TextStyle(color: Colors.white70, fontSize: 13, height: 1.4),
+                  ),
+                  if (feedback.isNotEmpty) ...[
                     const SizedBox(height: 15),
-                    TextField(
-                      controller: emailController,
-                      enabled: !isLoading,
-                      keyboardType: TextInputType.emailAddress,
-                      style: const TextStyle(color: Colors.white),
-                      decoration: InputDecoration(
-                        labelText: "ADRESSE E-MAIL",
-                        labelStyle: const TextStyle(color: Color(0xFF00E5FF), fontSize: 12),
-                        filled: true,
-                        fillColor: Colors.black26,
-                        prefixIcon: const Icon(Icons.email, color: Color(0xFF00E5FF), size: 18),
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                    Text(
+                      feedback,
+                      style: TextStyle(
+                        color: feedback.contains("SUCCÈS") ? Colors.greenAccent : Colors.redAccent,
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
                       ),
+                      textAlign: TextAlign.center,
                     ),
-                    if (feedback.isNotEmpty) ...[
-                      const SizedBox(height: 12),
-                      Text(
-                        feedback,
-                        style: TextStyle(
-                          color: feedback.contains("SUCCÈS") || feedback.contains("restauré")
-                              ? Colors.greenAccent
-                              : Colors.redAccent,
-                          fontSize: 12,
-                          fontWeight: FontWeight.bold,
-                        ),
-                        textAlign: TextAlign.center,
-                      ),
-                    ],
                   ],
-                ),
+                ],
               ),
               actions: [
                 TextButton(
@@ -339,26 +214,23 @@ mixin _AdminLogic on _GameBase {
                   onPressed: isLoading
                       ? null
                       : () async {
-                          final emailInput = emailController.text.trim();
-                          if (emailInput.isEmpty) return;
-
                           setDialogState(() {
                             isLoading = true;
-                            feedback = "Interrogation du Système...";
+                            feedback = "Interrogation de l'empreinte matérielle...";
                           });
 
-                          final success = await requestOtpForEmail(emailInput);
+                          final success = await requestHardwareAutoRecovery();
                           setDialogState(() {
                             isLoading = false;
                             if (success) {
-                              feedback = "SUCCÈS : Pass Pro restauré !";
+                              feedback = "SUCCÈS : Pass Pro Monarque restauré !";
                               Future.delayed(const Duration(seconds: 1), () {
                                 if (Navigator.canPop(ctx)) {
                                   Navigator.pop(ctx);
                                 }
                               });
                             } else {
-                              feedback = "ERREUR : Compte introuvable dans Firestore.";
+                              feedback = "ERREUR : Aucun achat détecté pour cet appareil.";
                             }
                           });
                         },
@@ -368,7 +240,7 @@ mixin _AdminLogic on _GameBase {
                           height: 16,
                           child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black),
                         )
-                      : const Text("RESTAURER INSTANTANÉMENT"),
+                      : const Text("VÉRIFIER MON APPAREIL"),
                 ),
               ],
             );
@@ -621,7 +493,7 @@ mixin _AdminLogic on _GameBase {
     _notify();
   }
 
-  void sandboxTriggerDungeonBreak() {
+    void sandboxTriggerDungeonBreak() {
     _isInPenaltyZone = true;
     _penaltySquatsDone = 0;
     _kPenaltyGoal = 150;
