@@ -175,7 +175,7 @@ mixin _AdminLogic on _GameBase {
     }
   }
 
-  /// Déclenche la vérification et la récupération instantanée via AuthRecoveryService
+  /// Déclenche la récupération instantanée et active la clé reçue
   Future<bool> requestOtpForEmail(String emailInput) async {
     final String cleanEmail = emailInput.trim().toLowerCase();
     debugPrint("[AUTH_TRACE] Lancement de la récupération pour : '$cleanEmail'");
