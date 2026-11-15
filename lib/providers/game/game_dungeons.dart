@@ -72,6 +72,43 @@ mixin _DungeonLogic on _GameBase {
     }
   }
 
+  /// ⚡ Lance un Donjon de Test neutre (0 XP de gain ou de perte) pour vérifier Cerberus & le verrou
+  void startTestDungeon() {
+    if (_activeDungeon != null) return;
+    _isActiveDungeonRed = false;
+
+    List tasksRaw = [
+      {'type': 'Pompes', 'amount': 3, 'title': 'Pompes (Test)'},
+      {'type': 'Squats', 'amount': 3, 'title': 'Squats (Test)'},
+      {'type': 'Abdos', 'amount': 3, 'title': 'Abdos (Test)'},
+    ];
+
+    var tasks = tasksRaw.map((e) => Map<String, dynamic>.from(e)).toList();
+
+    _activeDungeon = Dungeon(
+      id: 'test_${DateTime.now().millisecondsSinceEpoch}',
+      rank: 'E',
+      tasks: tasks,
+      progress: List.filled(tasks.length, 0.0),
+      expiresAt: DateTime.now().add(const Duration(minutes: 10)),
+      xpReward: 0,
+      penaltyXp: 0,
+      isRandomThreat: false,
+    );
+
+    LockService.lockScreen(force: true);
+    _notify();
+    _startDungeonTimer();
+
+    if (_sandbox) {
+      if (SandboxManager.persistPenalty) {
+        SandboxManager.saveSandbox(_toJson());
+      }
+    } else {
+      _saveNow();
+    }
+  }
+
   void enterDungeon(String k, {bool isThreat = false, Dungeon? threatInstance, bool isRed = false}) {
     if (_activeDungeon != null) return;
     if (!isThreat && (_inventoryKeys[k] ?? 0) <= 0) return;
@@ -110,10 +147,7 @@ mixin _DungeonLogic on _GameBase {
     }
 
     _warningGiven = false;
-    
-    // ⚡ VERROU ABSOLU DE TYPE QUARANTAINE (Identique à la Zone de Pénalité)
     LockService.lockScreen(force: true);
-    
     _notify();
     _startDungeonTimer();
 
@@ -145,43 +179,54 @@ mixin _DungeonLogic on _GameBase {
   void _finishDungeon({required bool victory}) async {
     if (_activeDungeon == null) return;
 
-    int baseXP = Balance.of(_activeDungeon!.rank).dungeonReward;
-    if (_isActiveDungeonRed) baseXP *= 2;
+    final bool isTest = _activeDungeon!.id.startsWith('test_');
 
-    if (victory) {
-      _dungeonsCompleted++;
-      final int dungeonHeal = (_maxHp * 0.2).toInt();
-      _currentHp = (_currentHp + dungeonHeal).clamp(0, _maxHp).toInt();
+    if (isTest) {
+      // ⚡ Mode Test : Aucun XP gagné ou perdu, simple validation du verrouillage et synchronisation
+      _dungeonResult = {
+        'status': victory ? 'DONJON DE TEST RÉUSSI\n(Aucun impact XP)' : 'TEST EXPIRÉ\n(Aucun malus)',
+        'xp': 0,
+      };
+      AudioService.playVictory();
+    } else {
+      int baseXP = Balance.of(_activeDungeon!.rank).dungeonReward;
+      if (_isActiveDungeonRed) baseXP *= 2;
 
-      final int finalXp = (baseXP * _vitality).toInt();
-      final int goldReward = (100 * pow(1.5, rankIndex)).toInt();
-      _xp += finalXp;
-      _coins += goldReward;
+      if (victory) {
+        _dungeonsCompleted++;
+        final int dungeonHeal = (_maxHp * 0.2).toInt();
+        _currentHp = (_currentHp + dungeonHeal).clamp(0, _maxHp).toInt();
 
-      String lootMsg = "";
-      final int dropChance = _isActiveDungeonRed ? 30 : 15;
-      if (_rng.nextInt(100) < dropChance) {
-        final String? higher = Balance.next(_activeDungeon!.rank);
-        if (higher != null) {
-          _inventoryKeys[higher] = (_inventoryKeys[higher] ?? 0) + 1;
-          lootMsg = "\nLOOT RARE : CLÉ RANG $higher";
-          if (await Vibration.hasVibrator()) {
-            Vibration.vibrate(pattern: [0, 100, 50, 100, 50, 200]);
+        final int finalXp = (baseXP * _vitality).toInt();
+        final int goldReward = (100 * pow(1.5, rankIndex)).toInt();
+        _xp += finalXp;
+        _coins += goldReward;
+
+        String lootMsg = "";
+        final int dropChance = _isActiveDungeonRed ? 30 : 15;
+        if (_rng.nextInt(100) < dropChance) {
+          final String? higher = Balance.next(_activeDungeon!.rank);
+          if (higher != null) {
+            _inventoryKeys[higher] = (_inventoryKeys[higher] ?? 0) + 1;
+            lootMsg = "\nLOOT RARE : CLÉ RANG $higher";
+            if (await Vibration.hasVibrator()) {
+              Vibration.vibrate(pattern: [0, 100, 50, 100, 50, 200]);
+            }
           }
         }
+        _dungeonResult = {'status': 'VICTOIRE$lootMsg\n(+ $dungeonHeal HP)', 'xp': finalXp};
+        AudioService.playVictory();
+        _checkRankUp();
+        _checkTitles();
+      } else {
+        final int penaltyXp = (baseXP * 0.75).toInt();
+        _loseXp(penaltyXp);
+        _dungeonResult = {
+          'status': 'PORTAIL FERMÉ EN RETARD\nQuota atteint hors délai imparti.',
+          'xp': -penaltyXp,
+        };
+        AudioService.playDefeat();
       }
-      _dungeonResult = {'status': 'VICTOIRE$lootMsg\n(+ $dungeonHeal HP)', 'xp': finalXp};
-      AudioService.playVictory();
-      _checkRankUp();
-      _checkTitles();
-    } else {
-      final int penaltyXp = (baseXP * 0.75).toInt();
-      _loseXp(penaltyXp);
-      _dungeonResult = {
-        'status': 'PORTAIL FERMÉ EN RETARD\nQuota atteint hors délai imparti.',
-        'xp': -penaltyXp,
-      };
-      AudioService.playDefeat();
     }
 
     try {

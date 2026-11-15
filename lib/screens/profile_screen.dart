@@ -330,7 +330,6 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
     final messageController = TextEditingController();
     final formKey = GlobalKey<FormState>();
 
-    // Regex strict pour valider le format e-mail (ex: blabla@blabla.fr ou .com)
     final emailRegex = RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$');
 
     SystemDialog.show(
@@ -576,39 +575,6 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
                       const Divider(color: Colors.white12, height: 1),
                       _buildAttributesGrid(context, game),
                     ],
-                  ),
-                ),
-
-                const SizedBox(height: 25),
-
-                SizedBox(
-                  width: double.infinity,
-                  height: 50,
-                  child: ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.red.shade900,
-                      side: const BorderSide(color: Colors.redAccent, width: 2),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
-                    ),
-                    onPressed: () {
-                      game.triggerDailyPenalty();
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text("ALERTE : Déclenchement direct de la Zone de Pénalité !"),
-                          backgroundColor: Colors.redAccent,
-                          duration: Duration(seconds: 2),
-                        ),
-                      );
-                    },
-                    child: Text(
-                      "DÉCLENCHER ZONE DE PÉNALITÉ (TEST)",
-                      style: GoogleFonts.orbitron(
-                        color: Colors.white,
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold,
-                        letterSpacing: 1.2,
-                      ),
-                    ),
                   ),
                 ),
 
