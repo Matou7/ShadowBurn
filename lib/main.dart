@@ -265,24 +265,127 @@ class _ShadowBurnAppState extends State<ShadowBurnApp> {
     });
   }
 
+  /// Intercepte le retour de Stripe (`shadowburn://pro-success`) et déclenche l'autonomie matérielle
   void _routeDeepLink(String link) {
     final uri = Uri.tryParse(link);
     if (uri == null) return;
 
-    if (uri.host == 'admin' || uri.path.contains('admin')) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
+    if (uri.host == 'pro-success' || uri.path.contains('pro-success')) {
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
         if (!mounted) return;
         final game = Provider.of<GameProvider>(context, listen: false);
-        if (!game.isPro) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text("ACCÈS TÉLÉCOMMANDE REFUSÉ : STATUT MONARQUE REQUIS"),
-              backgroundColor: Colors.redAccent,
-            ),
-          );
+        
+        // Interrogation automatique de l'appareil pour récupérer la clé fraîchement créée par le webhook
+        final bool success = await game.requestHardwareAutoRecovery();
+        
+        if (mounted) {
+          _showProSuccessDialog(context, game.licenseKey.isNotEmpty ? game.licenseKey : "SHADOW-PRO-VALIDÉ");
         }
       });
     }
+  }
+
+  /// Popup géante affichant la clé en gros caractères avec copie instantanée
+  void _showProSuccessDialog(BuildContext context, String licenseKey) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) {
+        return AlertDialog(
+          backgroundColor: const Color(0xFF121217),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+            side: const BorderSide(color: Color(0xFF00FF66), width: 2),
+          ),
+          title: const Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.verified, color: Color(0xFF00FF66), size: 28),
+              SizedBox(width: 10),
+              Text(
+                "ÉVEIL MONARQUE RÉUSSI",
+                style: TextStyle(
+                  fontFamily: 'Orbitron',
+                  color: Color(0xFF00FF66),
+                  fontWeight: FontWeight.bold,
+                  fontSize: 14,
+                  letterSpacing: 1.2,
+                ),
+              ),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                "Paiement validé avec succès ! Votre appareil est désormais lié au Pass Pro Monarque.",
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.white70, fontSize: 13, height: 1.4),
+              ),
+              const SizedBox(height: 20),
+              const Text(
+                "VOTRE CLÉ DE LICENCE UNIQUE :",
+                style: TextStyle(fontFamily: 'Orbitron', color: Color(0xFF00E5FF), fontSize: 10, letterSpacing: 1.5),
+              ),
+              const SizedBox(height: 8),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: Colors.black,
+                  border: Border.all(color: Color(0xFF00E5FF), width: 1.5),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: SelectableText(
+                  licenseKey,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    fontFamily: 'monospace',
+                    color: Color(0xFF00FF66),
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 2,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 10),
+              const Text(
+                "Sauvegardez cette clé en lieu sûr. Elle a été enregistrée dans vos registres.",
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.white38, fontSize: 10),
+              ),
+            ],
+          ),
+          actions: [
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF00FF66),
+                  foregroundColor: Colors.black,
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                ),
+                onPressed: () {
+                  Clipboard.setData(ClipboardData(text: licenseKey));
+                  Navigator.pop(ctx);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text("Clé copiée dans le presse-papier !"),
+                      backgroundColor: Color(0xFF00FF66),
+                    ),
+                  );
+                },
+                child: const Text(
+                  "COPIER LA CLÉ & FERMER",
+                  style: TextStyle(fontFamily: 'Orbitron', fontWeight: FontWeight.bold, fontSize: 12),
+                ),
+              ),
+            ),
+          ],
+        );
+      },
+    );
   }
 
   @override
@@ -378,10 +481,10 @@ class _RootPermissionGatewayState extends State<RootPermissionGateway>
     }
 
     final bool allGranted = overlay.isGranted &&
-                            activity.isGranted &&
-                            notifsGranted &&
-                            usageStatsGranted &&
-                            batteryGranted;
+                          activity.isGranted &&
+                          notifsGranted &&
+                          usageStatsGranted &&
+                          batteryGranted;
 
     if (!mounted) return;
     setState(() {
@@ -583,7 +686,7 @@ class _MainScaffoldState extends State<MainScaffold> {
               Container(
                 width: double.infinity,
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                color: Colors.redAccent.withValues(alpha: 0.85),
+                color: Colors.redAccent.withOpacity(0.85),
                 child: const Text(
                   "BAC À SABLE : RIEN N'EST ENREGISTRÉ",
                   textAlign: TextAlign.center,
