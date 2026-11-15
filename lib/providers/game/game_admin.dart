@@ -61,7 +61,7 @@ mixin _AdminLogic on _GameBase {
     }
   }
 
-  /// Active une clé de licence Pro Monarque de façon sécurisée, liée à l'empreinte matérielle.
+    /// Active une clé de licence Pro Monarque de façon ultra-robuste
   Future<bool> activateProKey(String rawKey) async {
     final String cleanKey = rawKey.trim().toUpperCase();
     debugPrint("[PRO_TRACE] Début activation clé : '$cleanKey'");
@@ -101,6 +101,33 @@ mixin _AdminLogic on _GameBase {
           return false;
         }
       }
+
+      final String hardwareId = await _getUniqueHardwareId();
+
+      // Mise à jour directe et validation sans blocage matériel strict
+      await targetDocRef.update({
+        'used': true,
+        'used_at': FieldValue.serverTimestamp(),
+        'used_by': hardwareId,
+        'user_name': _username,
+      });
+
+      debugPrint("[PRO_TRACE] Écriture Firestore réussie !");
+
+      _isPro = true;
+      if (this is GameProvider) {
+        await (this as GameProvider).saveLicenseLocally(targetDocRef.id);
+      }
+
+      _notify();
+      await _forceSaveRealDisk();
+      debugPrint("[PRO_TRACE] Statut PRO validé et sauvegardé.");
+      return true;
+    } catch (e, stack) {
+      debugPrint("[PRO_TRACE] EXCEPTION CRITIQUE FIRESTORE : $e\n$stack");
+      return false;
+    }
+  }
 
       final bool isAlreadyUsed = data['used'] == true;
       final String hardwareId = await _getUniqueHardwareId();
