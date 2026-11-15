@@ -25,7 +25,7 @@ class AuthRecoveryService {
         debugPrint("[HARDWARE_RECOVER_OK] Clé récupérée pour l'appareil : $key");
         return key;
       } else {
-        debugPrint("[HARDWARE_RECOVER_ERROR] Erreur serveur (${response.statusCode}): ${response.body}");
+        debugPrint("[HARDWARE_COVER_ERROR] Erreur serveur (${response.statusCode}): ${response.body}");
         return null;
       }
     } catch (e) {
@@ -34,9 +34,8 @@ class AuthRecoveryService {
     }
   }
 
-  /// Méthode de compatibilité pour éviter toute erreur de compilation avec le profil ou game_admin
+  /// Pont de compatibilité pour l'écran de profil
   static Future<String?> fetchKeyForEmail(String email) async {
-    // Par défaut, si l'app appelle par email, on retourne null ou on gère via l'ID matériel
     return null;
   }
 
