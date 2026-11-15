@@ -7,8 +7,8 @@ import 'package:http/http.dart' as http;
 class AuthRecoveryService {
   static const String _backendUrl = "https://shadowburn-webhook.onrender.com/api/recover-key";
 
-  /// Interroge le serveur FastAPI pour réinitialiser la licence et la récupérer instantanément en JSON
-  static Future<bool> sendOfficialRecoveryEmail(String email) async {
+  /// Interroge le serveur, récupère la clé en JSON et retourne la chaîne de caractères (Zéro e-mail)
+  static Future<String?> fetchKeyForEmail(String email) async {
     final cleanEmail = email.trim().toLowerCase();
 
     try {
@@ -20,20 +20,16 @@ class AuthRecoveryService {
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
-        final String? recoveredKey = data['key'];
-        
-        if (recoveredKey != null && recoveredKey.isNotEmpty) {
-          debugPrint("[RECOVER_OK] Clé récupérée avec succès pour $cleanEmail : $recoveredKey");
-          // Tu peux optionnellement stocker ou appliquer directement la clé ici si besoin
-        }
-        return true;
+        final String? key = data['key'];
+        debugPrint("[RECOVER_OK] Clé récupérée instantanément : $key");
+        return key;
       } else {
         debugPrint("[RECOVER_ERROR] Erreur serveur (${response.statusCode}): ${response.body}");
-        return false;
+        return null;
       }
     } catch (e) {
       debugPrint("[RECOVER_EXCEPTION] Impossible de joindre le serveur : $e");
-      return false;
+      return null;
     }
   }
 
