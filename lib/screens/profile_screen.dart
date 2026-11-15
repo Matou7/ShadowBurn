@@ -295,7 +295,7 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
                 Navigator.pop(context);
 
                 messenger.showSnackBar(
-                  const SnackBar(content: Text("Interrogation de l'empreinte matérielle... acyl")),
+                  const SnackBar(content: Text("Interrogation de l'empreinte matérielle...")),
                 );
 
                 final bool success = await game.requestHardwareAutoRecovery();
