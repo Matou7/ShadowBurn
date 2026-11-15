@@ -92,7 +92,6 @@ mixin _PenaltyLogic on _GameBase {
       dlog("Squats de pénalité : +$count | Total : $_penaltySquatsDone / $_kPenaltyGoal");
 
       if (_penaltySquatsDone >= _kPenaltyGoal) {
-        // Atteinte ou dépassement de l'objectif : Levée immédiate de la pénalité
         _isInPenaltyZone = false;
         _penaltySquatsDone = 0;
         _kPenaltyGoal = 100;
@@ -107,7 +106,6 @@ mixin _PenaltyLogic on _GameBase {
           _saveNow();
         }
 
-        // Notification synchrone de l'état avant le déverrouillage natif
         _notify();
 
         LockService.unlockScreen(force: true);
@@ -136,7 +134,6 @@ mixin _PenaltyLogic on _GameBase {
     } catch (e) {
       dlog("Erreur critique processPenaltySquats : $e");
     } finally {
-      // Garantit la libération absolue du verrou anti-rebond même en cas d'erreur
       _isProcessingSquats = false;
     }
   }
