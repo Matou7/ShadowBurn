@@ -18,7 +18,7 @@ mixin _AdminLogic on _GameBase {
     StorageService.blockAllRealSaves = wasBlocked;
   }
 
-  /// Méthode publique pour récupérer l'ID matériel unique pour le checkout Stripe
+  /// Méthode publique unifiée pour récupérer l'empreinte matérielle unique
   Future<String> getUniqueHardwareIdForCheckout() async {
     return await _getUniqueHardwareId();
   }
@@ -66,19 +66,13 @@ mixin _AdminLogic on _GameBase {
     }
   }
 
-  /// Active une clé de licence Pro Monarque de façon robuste et directe
+  /// Active une clé de licence Pro Monarque
   Future<bool> activateProKey(String rawKey) async {
     final String cleanKey = rawKey.trim().toUpperCase();
-    debugPrint("[PRO_TRACE] Début activation clé : '$cleanKey'");
-
-    if (cleanKey.isEmpty) {
-      debugPrint("[PRO_TRACE] Échec : Clé vide.");
-      return false;
-    }
+    if (cleanKey.isEmpty) return false;
 
     if (cleanKey == "FREE" || cleanKey == "RESET-PRO") {
       revokePro();
-      debugPrint("[PRO_TRACE] Révocation effectuée.");
       return false;
     }
 
@@ -91,15 +85,11 @@ mixin _AdminLogic on _GameBase {
 
       if (directSnap.exists) {
         targetDocRef = directDocRef;
-        debugPrint("[PRO_TRACE] Document trouvé via ID direct : ${directDocRef.id}");
       } else {
-        debugPrint("[PRO_TRACE] ID direct introuvable, recherche de secours par champ 'key'...");
         final querySnap = await colRef.where('key', isEqualTo: cleanKey).limit(1).get();
         if (querySnap.docs.isNotEmpty) {
           targetDocRef = querySnap.docs.first.reference;
-          debugPrint("[PRO_TRACE] Document trouvé via champ 'key' : ${targetDocRef.id}");
         } else {
-          debugPrint("[PRO_TRACE] ERREUR : La clé [$cleanKey] est introuvable dans Firestore.");
           return false;
         }
       }
@@ -113,8 +103,6 @@ mixin _AdminLogic on _GameBase {
         'user_name': _username,
       });
 
-      debugPrint("[PRO_TRACE] Écriture Firestore réussie !");
-
       _isPro = true;
       if (this is GameProvider) {
         await (this as GameProvider).saveLicenseLocally(targetDocRef.id);
@@ -122,32 +110,25 @@ mixin _AdminLogic on _GameBase {
 
       _notify();
       await _forceSaveRealDisk();
-      debugPrint("[PRO_TRACE] Statut PRO validé et sauvegardé.");
       return true;
-    } catch (e, stack) {
-      debugPrint("[PRO_TRACE] EXCEPTION CRITIQUE FIRESTORE : $e\n$stack");
+    } catch (e) {
+      debugPrint("[PRO_TRACE] EXCEPTION CRITIQUE FIRESTORE : $e");
       return false;
     }
   }
 
-  /// Restauration automatique par ID Matériel (Zéro saisie)
+  /// Restauration automatique par ID Matériel
   Future<bool> requestHardwareAutoRecovery() async {
-    debugPrint("[AUTH_TRACE] Lancement de la récupération automatique par ID Matériel...");
-
     try {
       final String hardwareId = await _getUniqueHardwareId();
       final String? recoveredKey = await AuthRecoveryService.fetchKeyForHardware(hardwareId);
       
       if (recoveredKey != null && recoveredKey.isNotEmpty) {
-        debugPrint("[AUTH_TRACE] Clé matérielle récupérée : $recoveredKey");
-        final bool success = await activateProKey(recoveredKey);
-        return success;
-      } else {
-        debugPrint("[AUTH_TRACE] Aucune licence associée à cet appareil.");
-        return false;
+        return await activateProKey(recoveredKey);
       }
-    } catch (e, stack) {
-      debugPrint("[AUTH_TRACE] Erreur lors de la récupération matérielle : $e\n$stack");
+      return false;
+    } catch (e) {
+      debugPrint("[AUTH_TRACE] Erreur lors de la récupération matérielle : $e");
       return false;
     }
   }
@@ -292,9 +273,7 @@ mixin _AdminLogic on _GameBase {
 
   bool toggleAdminMode(String password) {
     final bool canAccess = kDebugMode || _rank.toUpperCase() == "MONARQUE";
-    if (!canAccess) {
-      return false;
-    }
+    if (!canAccess) return false;
 
     final cleanInput = password.trim();
     final bool matchMaster = cleanInput.toUpperCase() == kMasterAdminPassword.toUpperCase();
@@ -395,7 +374,6 @@ mixin _AdminLogic on _GameBase {
   void setDailyKm(double km) {
     _dailyKm = max(0.0, km);
     _dailySteps = ((_dailyKm * 1000.0) / 0.75).round();
-
     _updateCalendarActivity();
     _checkCycleCompletion();
     _checkTitles(silent: true);
@@ -475,26 +453,14 @@ mixin _AdminLogic on _GameBase {
     _kPenaltyGoal = 100;
 
     if (_godModePersistPenalty) {
-      StorageService.writePenaltyState(
-        active: true,
-        squatsDone: 0,
-        squatsGoal: 100,
-      );
+      StorageService.writePenaltyState(active: true, squatsDone: 0, squatsGoal: 100);
       SandboxManager.saveSandbox(_toJson());
     } else {
-      StorageService.writePenaltyState(
-        active: false,
-        squatsDone: 0,
-        squatsGoal: 100,
-      );
+      StorageService.writePenaltyState(active: false, squatsDone: 0, squatsGoal: 100);
     }
 
     LockService.lockScreen();
-    NotificationService.showNotification(
-      "PÉNALITÉ QUOTIDIENNE",
-      "Quête non validée à minuit.",
-      type: 'penalty',
-    );
+    NotificationService.showNotification("PÉNALITÉ QUOTIDIENNE", "Quête non validée à minuit.", type: 'penalty');
     _notify();
   }
 
@@ -504,26 +470,14 @@ mixin _AdminLogic on _GameBase {
     _kPenaltyGoal = 150;
 
     if (_godModePersistPenalty) {
-      StorageService.writePenaltyState(
-        active: true,
-        squatsDone: 0,
-        squatsGoal: 150,
-      );
+      StorageService.writePenaltyState(active: true, squatsDone: 0, squatsGoal: 150);
       SandboxManager.saveSandbox(_toJson());
     } else {
-      StorageService.writePenaltyState(
-        active: false,
-        squatsDone: 0,
-        squatsGoal: 100,
-      );
+      StorageService.writePenaltyState(active: false, squatsDone: 0, squatsGoal: 100);
     }
 
     LockService.lockScreen();
-    NotificationService.showNotification(
-      "DONJON ROMPU",
-      "Le portail a expiré.",
-      type: 'penalty',
-    );
+    NotificationService.showNotification("DONJON ROMPU", "Le portail a expiré.", type: 'penalty');
     _notify();
   }
 
