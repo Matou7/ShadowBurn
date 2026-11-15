@@ -252,7 +252,6 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
 
   void _showProKeyDialog(BuildContext context, GameProvider game) {
     final keyController = TextEditingController();
-    final emailController = TextEditingController();
 
     SystemDialog.show(
       context,
@@ -261,7 +260,7 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
         mainAxisSize: MainAxisSize.min,
         children: [
           const Text(
-            "Entrez votre clé de licence Pro ou restaurez votre achat instantanément via votre e-mail d'achat :",
+            "Entrez votre clé de licence Pro ou vérifiez votre achat instantanément via l'empreinte de votre appareil :",
             style: TextStyle(color: Colors.white70, fontSize: 13),
           ),
           const SizedBox(height: 15),
@@ -278,17 +277,6 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
           const SizedBox(height: 20),
           const Divider(color: Colors.white24),
           const SizedBox(height: 10),
-          TextField(
-            controller: emailController,
-            style: const TextStyle(color: Colors.white),
-            decoration: const InputDecoration(
-              hintText: "E-mail d'achat Stripe",
-              hintStyle: TextStyle(color: Colors.white24),
-              enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Color(0xFF00E5FF))),
-              focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: Color(0xFF00E5FF))),
-            ),
-          ),
-          const SizedBox(height: 15),
           SizedBox(
             width: double.infinity,
             child: OutlinedButton.icon(
@@ -297,39 +285,26 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
                 side: const BorderSide(color: Color(0xFF00E5FF)),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
               ),
-              icon: const Icon(Icons.bolt, size: 16),
+              icon: const Icon(Icons.security, size: 16),
               label: const Text(
-                "RÉCUPÉRATION INSTANTANÉE PAR E-MAIL",
+                "VÉRIFIER MON APPAREIL (AUTOMATIQUE)",
                 style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold),
               ),
               onPressed: () async {
-                final emailInput = emailController.text.trim();
-                if (emailInput.isEmpty) return;
-
                 final messenger = ScaffoldMessenger.of(context);
                 Navigator.pop(context);
 
                 messenger.showSnackBar(
-                  const SnackBar(content: Text("Recherche de la licence dans le Système...")),
+                  const SnackBar(content: Text("Interrogation de l'empreinte matérielle... acyl")),
                 );
 
-                final String? recoveredKey = await AuthRecoveryService.fetchKeyForEmail(emailInput);
-                if (recoveredKey != null && recoveredKey.isNotEmpty) {
-                  final bool success = await game.activateProKey(recoveredKey);
-                  messenger.showSnackBar(
-                    SnackBar(
-                      content: Text(success ? "Pass Pro restauré et activé avec succès !" : "Erreur lors de l'activation."),
-                      backgroundColor: success ? Colors.green : Colors.redAccent,
-                    ),
-                  );
-                } else {
-                  messenger.showSnackBar(
-                    const SnackBar(
-                      content: Text("Aucune licence trouvée pour cet e-mail."),
-                      backgroundColor: Colors.redAccent,
-                    ),
-                  );
-                }
+                final bool success = await game.requestHardwareAutoRecovery();
+                messenger.showSnackBar(
+                  SnackBar(
+                    content: Text(success ? "Pass Pro restauré et activé avec succès !" : "Aucun achat détecté pour cet appareil."),
+                    backgroundColor: success ? Colors.green : Colors.redAccent,
+                  ),
+                );
               },
             ),
           ),
