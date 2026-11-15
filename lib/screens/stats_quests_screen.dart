@@ -125,11 +125,12 @@ class _StatsQuestsScreenState extends State<StatsQuestsScreen> {
   }
 
   /// Récupère ou génère une empreinte matérielle locale unique pour l'appareil
-  Future<String> _getLocalHardwareId() async {
+  Future<String> _getLocalHardwareId(BuildContext context) async {
     final prefs = await SharedPreferences.getInstance();
     String? hw = prefs.getString('shadow_hardware_fingerprint');
     if (hw == null || hw.isEmpty) {
-      hw = 'hw_sig_${PlatformDispatcher.instance.views.first.physicalSize.width.toInt()}_${DateTime.now().millisecondsSinceEpoch}';
+      final width = MediaQuery.sizeOf(context).width.toInt();
+      hw = 'hw_sig_${width}_${DateTime.now().millisecondsSinceEpoch}';
       await prefs.setString('shadow_hardware_fingerprint', hw);
     }
     return hw;
@@ -143,7 +144,7 @@ class _StatsQuestsScreenState extends State<StatsQuestsScreen> {
     );
 
     try {
-      final String hardwareId = await _getLocalHardwareId();
+      final String hardwareId = await _getLocalHardwareId(context);
       
       final response = await http.post(
         Uri.parse('https://shadowburn-webhook.onrender.com/api/create-checkout-session'),
