@@ -124,34 +124,19 @@ class _StatsQuestsScreenState extends State<StatsQuestsScreen> {
     );
   }
 
-  Future<String> _getLocalHardwareId(BuildContext context) async {
-    final prefs = await SharedPreferences.getInstance();
-    String? hw = prefs.getString('shadow_hardware_fingerprint');
-    if (hw == null || hw.isEmpty) {
-      final width = MediaQuery.sizeOf(context).width.toInt();
-      hw = 'hw_sig_${width}_${DateTime.now().millisecondsSinceEpoch}';
-      await prefs.setString('shadow_hardware_fingerprint', hw);
-    }
-    return hw;
-  }
-
-  Future<void> _launchDynamicStripeCheckout(BuildContext context) async {
+  Future<void> _launchDynamicStripeCheckout(BuildContext context, GameProvider game) async {
     final messenger = ScaffoldMessenger.of(context);
     messenger.showSnackBar(
       const SnackBar(content: Text("Génération du portail de paiement sécurisé..."), duration: Duration(seconds: 2)),
     );
 
     try {
-      final String hardwareId = await _getLocalHardwareId(context);
-      
+      final String hardwareId = await game.getUniqueHardwareIdForCheckout();
+
       final response = await http.post(
         Uri.parse('https://shadowburn-webhook.onrender.com/api/create-checkout-session'),
         headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'hardware_id': hardwareId,
-          'success_url': 'shadowburn://pro-success',
-          'cancel_url': 'shadowburn://pro-cancel',
-        }),
+        body: jsonEncode({'hardware_id': hardwareId}),
       );
 
       if (response.statusCode == 200) {
@@ -212,7 +197,7 @@ class _StatsQuestsScreenState extends State<StatsQuestsScreen> {
               label: const Text("COMMANDER LE PASS PRO (14,99 €)", style: TextStyle(fontFamily: 'monospace', fontSize: 11)),
               onPressed: () {
                 Navigator.pop(context);
-                _launchDynamicStripeCheckout(context);
+                _launchDynamicStripeCheckout(context, game);
               },
             ),
           ),
@@ -223,7 +208,7 @@ class _StatsQuestsScreenState extends State<StatsQuestsScreen> {
               game.showOtpRecoveryDialog(context);
             },
             child: const Text(
-              "Déjà acheté ? Restaurer avec votre email",
+              "Déjà acheté ? Restaurer via l'empreinte de l'appareil",
               style: TextStyle(color: Color(0xFF00E5FF), fontSize: 11, decoration: TextDecoration.underline),
             ),
           ),
@@ -424,12 +409,13 @@ class _StatsQuestsScreenState extends State<StatsQuestsScreen> {
           else
             InkWell(
               onTap: () {
-                if (_cachedShortKey.isNotEmpty) {
-                  Clipboard.setData(ClipboardData(text: _cachedShortKey));
+                final fullKey = game.licenseKey.isNotEmpty ? game.licenseKey : _cachedShortKey;
+                if (fullKey.isNotEmpty) {
+                  Clipboard.setData(ClipboardData(text: fullKey));
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
-                      content: Text("Clé copiée : $_cachedShortKey"),
-                      duration: const Duration(seconds: 1),
+                      content: Text("Clé copiée : $fullKey"),
+                      duration: const Duration(seconds: 2),
                       backgroundColor: Colors.amber[800],
                     ),
                   );
