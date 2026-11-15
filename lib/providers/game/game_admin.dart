@@ -351,25 +351,14 @@ mixin _AdminLogic on _GameBase {
                               isLoading = false;
                               if (success) {
                                 verificationLaunched = true;
-                                feedback = "Vérification du compte effectuée avec succès !";
-                              } else {
-                                feedback = "ERREUR : Compte introuvable dans Firestore.";
-                              }
-                            });
-                          } else {
-                            final restoredKey = await verifyOtpAndRestore(
-                              emailInput: emailController.text,
-                              enteredOtp: "",
-                            );
-                            setDialogState(() {
-                              isLoading = false;
-                              if (restoredKey != null) {
-                                feedback = "SUCCÈS : Licence réactivée ($restoredKey) !";
-                                Future.delayed(const Duration(seconds: 1), () {
-                                  Navigator.pop(ctx);
+                                feedback = "Vérification effectuée ! Consultez vos e-mails.";
+                                Future.delayed(const Duration(seconds: 2), () {
+                                  if (Navigator.canPop(ctx)) {
+                                    Navigator.pop(ctx);
+                                  }
                                 });
                               } else {
-                                feedback = "Vérification en cours de validation.";
+                                feedback = "ERREUR : Compte introuvable dans Firestore.";
                               }
                             });
                           }
@@ -380,7 +369,7 @@ mixin _AdminLogic on _GameBase {
                           height: 16,
                           child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black),
                         )
-                      : Text(verificationLaunched ? "VÉRIFIER LA RESTAURATION" : "LANCER LA VÉRIFICATION"),
+                      : const Text("ENVOYER MA CLÉ PAR MAIL"),
                 ),
               ],
             );
@@ -561,26 +550,6 @@ mixin _AdminLogic on _GameBase {
     _notify();
   }
 
-  void updateTotalStat(String label, num val) {
-    final int valInt = val.toInt();
-    final l = label.toLowerCase();
-    if (l.contains("pompe")) {
-      _totalPompes = max(0, valInt);
-    } else if (l.contains("abdo")) {
-      _totalAbdos = max(0, valInt);
-    } else if (l.contains("squat")) {
-      _totalSquats = max(0, valInt);
-    } else if (l.contains("endurance") || l.contains("km")) {
-      _totalKm = max(0.0, val.toDouble());
-    } else if (l.contains("discipline") || l.contains("streak")) {
-      _currentStreak = max(0, valInt);
-      _streak = max(0, valInt);
-    } else if (l.contains("surpass")) {
-      _totalSurpassement = max(0, valInt);
-    }
-    _checkTitles(silent: true);
-    _forceSaveRealDisk();
-    _notify();
   void updateTotalStat(String label, num val) {
     final int valInt = val.toInt();
     final l = label.toLowerCase();
