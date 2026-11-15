@@ -36,6 +36,8 @@ const bool kForceDungeonRed    = false;
 const bool kForcePenaltyOnBoot = false;
 const bool kForceIntroOnBoot   = false;
 
+final GlobalKey<NavigatorState> rootNavigatorKey = GlobalKey<NavigatorState>();
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
@@ -240,6 +242,7 @@ class ShadowBurnApp extends StatefulWidget {
 
 class _ShadowBurnAppState extends State<ShadowBurnApp> {
   static const MethodChannel _intentChannel = MethodChannel('com.shadowburn.app/intents');
+  static const MethodChannel _lockChannel = MethodChannel('com.shadowburn.app/lock');
 
   @override
   void initState() {
@@ -255,6 +258,13 @@ class _ShadowBurnAppState extends State<ShadowBurnApp> {
       }
     } catch (_) {}
 
+    try {
+      final String? altLink = await _lockChannel.invokeMethod<String>('getInitialIntentUrl');
+      if (altLink != null && altLink.isNotEmpty) {
+        _routeDeepLink(altLink);
+      }
+    } catch (_) {}
+
     _intentChannel.setMethodCallHandler((call) async {
       if (call.method == 'onNewIntent') {
         final String? link = call.arguments as String?;
@@ -265,30 +275,38 @@ class _ShadowBurnAppState extends State<ShadowBurnApp> {
     });
   }
 
-  /// Intercepte le retour de Stripe (`shadowburn://pro-success`) et déclenche l'autonomie matérielle
   void _routeDeepLink(String link) {
     final uri = Uri.tryParse(link);
     if (uri == null) return;
 
     if (uri.host == 'pro-success' || uri.path.contains('pro-success')) {
+      final String urlKey = (uri.queryParameters['key'] ?? '').trim().toUpperCase();
+
       WidgetsBinding.instance.addPostFrameCallback((_) async {
         if (!mounted) return;
         final game = Provider.of<GameProvider>(context, listen: false);
-        
-        // Interrogation automatique de l'appareil pour récupérer la clé fraîchement créée par le webhook
-        final bool success = await game.requestHardwareAutoRecovery();
-        
-        if (mounted) {
-          _showProSuccessDialog(context, game.licenseKey.isNotEmpty ? game.licenseKey : "SHADOW-PRO-VALIDÉ");
+        String activeKey = urlKey;
+
+        if (activeKey.isNotEmpty) {
+          await game.activateProKey(activeKey);
+        } else {
+          final bool recovered = await game.requestHardwareAutoRecovery();
+          if (recovered && game.licenseKey.isNotEmpty) {
+            activeKey = game.licenseKey;
+          }
+        }
+
+        final ctx = rootNavigatorKey.currentContext;
+        if (ctx != null && ctx.mounted) {
+          _showProSuccessDialog(ctx, activeKey.isNotEmpty ? activeKey : "PASS-PRO-ACTIVÉ");
         }
       });
     }
   }
 
-  /// Popup géante affichant la clé en gros caractères avec copie instantanée
-  void _showProSuccessDialog(BuildContext context, String licenseKey) {
+  void _showProSuccessDialog(BuildContext dialogContext, String licenseKey) {
     showDialog(
-      context: context,
+      context: dialogContext,
       barrierDismissible: false,
       builder: (ctx) {
         return AlertDialog(
@@ -302,14 +320,16 @@ class _ShadowBurnAppState extends State<ShadowBurnApp> {
             children: [
               Icon(Icons.verified, color: Color(0xFF00FF66), size: 28),
               SizedBox(width: 10),
-              Text(
-                "ÉVEIL MONARQUE RÉUSSI",
-                style: TextStyle(
-                  fontFamily: 'Orbitron',
-                  color: Color(0xFF00FF66),
-                  fontWeight: FontWeight.bold,
-                  fontSize: 14,
-                  letterSpacing: 1.2,
+              Flexible(
+                child: Text(
+                  "ÉVEIL MONARQUE RÉUSSI",
+                  style: TextStyle(
+                    fontFamily: 'Orbitron',
+                    color: Color(0xFF00FF66),
+                    fontWeight: FontWeight.bold,
+                    fontSize: 13,
+                    letterSpacing: 1.2,
+                  ),
                 ),
               ),
             ],
@@ -318,13 +338,13 @@ class _ShadowBurnAppState extends State<ShadowBurnApp> {
             mainAxisSize: MainAxisSize.min,
             children: [
               const Text(
-                "Paiement validé avec succès ! Votre appareil est désormais lié au Pass Pro Monarque.",
+                "Paiement vérifié et validé ! Votre statut Monarque Pro est désormais actif sur cet appareil.",
                 textAlign: TextAlign.center,
                 style: TextStyle(color: Colors.white70, fontSize: 13, height: 1.4),
               ),
               const SizedBox(height: 20),
               const Text(
-                "VOTRE CLÉ DE LICENCE UNIQUE :",
+                "VOTRE CLÉ DE LICENCE :",
                 style: TextStyle(fontFamily: 'Orbitron', color: Color(0xFF00E5FF), fontSize: 10, letterSpacing: 1.5),
               ),
               const SizedBox(height: 8),
@@ -333,7 +353,7 @@ class _ShadowBurnAppState extends State<ShadowBurnApp> {
                 padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
                   color: Colors.black,
-                  border: Border.all(color: Color(0xFF00E5FF), width: 1.5),
+                  border: Border.all(color: const Color(0xFF00E5FF), width: 1.5),
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: SelectableText(
@@ -350,7 +370,7 @@ class _ShadowBurnAppState extends State<ShadowBurnApp> {
               ),
               const SizedBox(height: 10),
               const Text(
-                "Sauvegardez cette clé en lieu sûr. Elle a été enregistrée dans vos registres.",
+                "Votre clé a déjà été validée et sauvegardée dans le Système.",
                 textAlign: TextAlign.center,
                 style: TextStyle(color: Colors.white38, fontSize: 10),
               ),
@@ -369,7 +389,7 @@ class _ShadowBurnAppState extends State<ShadowBurnApp> {
                 onPressed: () {
                   Clipboard.setData(ClipboardData(text: licenseKey));
                   Navigator.pop(ctx);
-                  ScaffoldMessenger.of(context).showSnackBar(
+                  ScaffoldMessenger.of(dialogContext).showSnackBar(
                     const SnackBar(
                       content: Text("Clé copiée dans le presse-papier !"),
                       backgroundColor: Color(0xFF00FF66),
@@ -377,7 +397,7 @@ class _ShadowBurnAppState extends State<ShadowBurnApp> {
                   );
                 },
                 child: const Text(
-                  "COPIER LA CLÉ & FERMER",
+                  "COPIER LA CLÉ & CONTINUER",
                   style: TextStyle(fontFamily: 'Orbitron', fontWeight: FontWeight.bold, fontSize: 12),
                 ),
               ),
@@ -391,6 +411,7 @@ class _ShadowBurnAppState extends State<ShadowBurnApp> {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      navigatorKey: rootNavigatorKey,
       title: 'ShadowBurn',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
