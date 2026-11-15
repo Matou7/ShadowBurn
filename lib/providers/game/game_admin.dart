@@ -61,7 +61,7 @@ mixin _AdminLogic on _GameBase {
     }
   }
 
-    /// Active une clé de licence Pro Monarque de façon ultra-robuste
+  /// Active une clé de licence Pro Monarque de façon robuste et directe
   Future<bool> activateProKey(String rawKey) async {
     final String cleanKey = rawKey.trim().toUpperCase();
     debugPrint("[PRO_TRACE] Début activation clé : '$cleanKey'");
@@ -80,21 +80,18 @@ mixin _AdminLogic on _GameBase {
     try {
       final colRef = FirebaseFirestore.instance.collection('pro_licenses');
       DocumentReference? targetDocRef;
-      Map<String, dynamic>? data;
 
       final directDocRef = colRef.doc(cleanKey);
       final directSnap = await directDocRef.get(const GetOptions(source: Source.serverAndCache));
 
       if (directSnap.exists) {
         targetDocRef = directDocRef;
-        data = directSnap.data() as Map<String, dynamic>? ?? {};
         debugPrint("[PRO_TRACE] Document trouvé via ID direct : ${directDocRef.id}");
       } else {
         debugPrint("[PRO_TRACE] ID direct introuvable, recherche de secours par champ 'key'...");
         final querySnap = await colRef.where('key', isEqualTo: cleanKey).limit(1).get();
         if (querySnap.docs.isNotEmpty) {
           targetDocRef = querySnap.docs.first.reference;
-          data = querySnap.docs.first.data() as Map<String, dynamic>? ?? {};
           debugPrint("[PRO_TRACE] Document trouvé via champ 'key' : ${targetDocRef.id}");
         } else {
           debugPrint("[PRO_TRACE] ERREUR : La clé [$cleanKey] est introuvable dans Firestore.");
@@ -103,53 +100,6 @@ mixin _AdminLogic on _GameBase {
       }
 
       final String hardwareId = await _getUniqueHardwareId();
-
-      // Mise à jour directe et validation sans blocage matériel strict
-      await targetDocRef.update({
-        'used': true,
-        'used_at': FieldValue.serverTimestamp(),
-        'used_by': hardwareId,
-        'user_name': _username,
-      });
-
-      debugPrint("[PRO_TRACE] Écriture Firestore réussie !");
-
-      _isPro = true;
-      if (this is GameProvider) {
-        await (this as GameProvider).saveLicenseLocally(targetDocRef.id);
-      }
-
-      _notify();
-      await _forceSaveRealDisk();
-      debugPrint("[PRO_TRACE] Statut PRO validé et sauvegardé.");
-      return true;
-    } catch (e, stack) {
-      debugPrint("[PRO_TRACE] EXCEPTION CRITIQUE FIRESTORE : $e\n$stack");
-      return false;
-    }
-  }
-
-      final bool isAlreadyUsed = data['used'] == true;
-      final String hardwareId = await _getUniqueHardwareId();
-      final String? boundDevice = data['used_by']?.toString();
-
-      debugPrint("[PRO_TRACE] Données Firestore : used=$isAlreadyUsed, used_by=$boundDevice, Mon_HW=$hardwareId");
-
-      if (isAlreadyUsed) {
-        if (boundDevice != null && boundDevice.trim() == hardwareId.trim()) {
-          debugPrint("[PRO_TRACE] Restauration valide sur le même appareil.");
-          _isPro = true;
-          if (this is GameProvider) {
-            await (this as GameProvider).saveLicenseLocally(targetDocRef.id);
-          }
-          _notify();
-          await _forceSaveRealDisk();
-          return true;
-        } else {
-          debugPrint("[PRO_TRACE] Clé déjà liée à un autre appareil ($boundDevice).");
-          return false;
-        }
-      }
 
       await targetDocRef.update({
         'used': true,
@@ -225,7 +175,7 @@ mixin _AdminLogic on _GameBase {
     }
   }
 
-  /// Déclenche la vérification et la synchronisation avec Firestore (sans bloquer sur l'e-mail)
+  /// Déclenche la vérification et la synchronisation avec Firestore
   Future<bool> requestOtpForEmail(String emailInput) async {
     final String cleanEmail = emailInput.trim().toLowerCase();
     debugPrint("[AUTH_TRACE] Lancement de la vérification pour : '$cleanEmail'");
@@ -300,7 +250,7 @@ mixin _AdminLogic on _GameBase {
     }
   }
 
-  /// Dialogue modal complet avec le texte neutre "Lancer la vérification"
+  /// Dialogue modal complet de récupération par e-mail
   Future<void> showOtpRecoveryDialog(BuildContext context) async {
     final emailController = TextEditingController();
     bool verificationLaunched = false;
@@ -611,6 +561,26 @@ mixin _AdminLogic on _GameBase {
     _notify();
   }
 
+  void updateTotalStat(String label, num val) {
+    final int valInt = val.toInt();
+    final l = label.toLowerCase();
+    if (l.contains("pompe")) {
+      _totalPompes = max(0, valInt);
+    } else if (l.contains("abdo")) {
+      _totalAbdos = max(0, valInt);
+    } else if (l.contains("squat")) {
+      _totalSquats = max(0, valInt);
+    } else if (l.contains("endurance") || l.contains("km")) {
+      _totalKm = max(0.0, val.toDouble());
+    } else if (l.contains("discipline") || l.contains("streak")) {
+      _currentStreak = max(0, valInt);
+      _streak = max(0, valInt);
+    } else if (l.contains("surpass")) {
+      _totalSurpassement = max(0, valInt);
+    }
+    _checkTitles(silent: true);
+    _forceSaveRealDisk();
+    _notify();
   void updateTotalStat(String label, num val) {
     final int valInt = val.toInt();
     final l = label.toLowerCase();
