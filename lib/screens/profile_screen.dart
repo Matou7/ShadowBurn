@@ -18,6 +18,7 @@ import '../providers/urgent_quest_provider.dart';
 import '../widgets/system_dialog.dart';
 import '../utils/admin_utils.dart';
 import '../services/raid_admin_service.dart';
+import '../services/auth_recovery_service.dart';
 
 class ProfileScreen extends StatefulWidget {
   final String? initialRoomId;
@@ -251,6 +252,7 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
 
   void _showProKeyDialog(BuildContext context, GameProvider game) {
     final keyController = TextEditingController();
+    final emailController = TextEditingController();
 
     SystemDialog.show(
       context,
@@ -259,7 +261,7 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
         mainAxisSize: MainAxisSize.min,
         children: [
           const Text(
-            "Entrez votre clé de licence Pro ou restaurez un achat existant avec l'authentification par e-mail.",
+            "Entrez votre clé de licence Pro ou restaurez votre achat instantanément via votre e-mail d'achat :",
             style: TextStyle(color: Colors.white70, fontSize: 13),
           ),
           const SizedBox(height: 15),
@@ -274,6 +276,19 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
             ),
           ),
           const SizedBox(height: 20),
+          const Divider(color: Colors.white24),
+          const SizedBox(height: 10),
+          TextField(
+            controller: emailController,
+            style: const TextStyle(color: Colors.white),
+            decoration: const InputDecoration(
+              hintText: "E-mail d'achat Stripe",
+              hintStyle: TextStyle(color: Colors.white24),
+              enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Color(0xFF00E5FF))),
+              focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: Color(0xFF00E5FF))),
+            ),
+          ),
+          const SizedBox(height: 15),
           SizedBox(
             width: double.infinity,
             child: OutlinedButton.icon(
@@ -282,14 +297,39 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
                 side: const BorderSide(color: Color(0xFF00E5FF)),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
               ),
-              icon: const Icon(Icons.mark_email_read_outlined, size: 16),
+              icon: const Icon(Icons.bolt, size: 16),
               label: const Text(
-                "RÉCUPÉRATION PAR CODE EMAIL (OTP)",
-                style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+                "RÉCUPÉRATION INSTANTANÉE PAR E-MAIL",
+                style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold),
               ),
-              onPressed: () {
+              onPressed: () async {
+                final emailInput = emailController.text.trim();
+                if (emailInput.isEmpty) return;
+
+                final messenger = ScaffoldMessenger.of(context);
                 Navigator.pop(context);
-                game.showOtpRecoveryDialog(context);
+
+                messenger.showSnackBar(
+                  const SnackBar(content: Text("Recherche de la licence dans le Système...")),
+                );
+
+                final String? recoveredKey = await AuthRecoveryService.fetchKeyForEmail(emailInput);
+                if (recoveredKey != null && recoveredKey.isNotEmpty) {
+                  final bool success = await game.activateProKey(recoveredKey);
+                  messenger.showSnackBar(
+                    SnackBar(
+                      content: Text(success ? "Pass Pro restauré et activé avec succès !" : "Erreur lors de l'activation."),
+                      backgroundColor: success ? Colors.green : Colors.redAccent,
+                    ),
+                  );
+                } else {
+                  messenger.showSnackBar(
+                    const SnackBar(
+                      content: Text("Aucune licence trouvée pour cet e-mail."),
+                      backgroundColor: Colors.redAccent,
+                    ),
+                  );
+                }
               },
             ),
           ),
@@ -319,7 +359,7 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
               );
             }
           },
-          child: const Text("VALIDER", style: TextStyle(color: Colors.white)),
+          child: const Text("VALIDER LA CLÉ", style: TextStyle(color: Colors.white)),
         ),
       ],
     );
@@ -342,7 +382,7 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
           mainAxisSize: MainAxisSize.min,
           children: [
             const Text(
-              "Une anomalie dans le Système ou une question sur vos quêtes ? Entrez votre e-mail enregistré (Firebase) et votre message.",
+              "Une anomalie dans le Système ou une question sur vos quêtes ? Entrez votre e-mail et votre message.",
               style: TextStyle(color: Colors.white70, fontSize: 12, height: 1.4),
             ),
             const SizedBox(height: 15),
@@ -502,6 +542,8 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
                               children: [
                                 GestureDetector(
                                   onLongPress: () {
+                                    if (!kDebugMode && game.rank.toUpperCase() != "MONARQUE") return;
+                                    
                                     if (game.isGodMode) {
                                       showExitGodModeDialog(context, game);
                                     } else {
