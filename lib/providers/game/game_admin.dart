@@ -417,7 +417,6 @@ mixin _AdminLogic on _GameBase {
   bool toggleAdminMode(String password) {
     final bool canAccess = kDebugMode || _rank.toUpperCase() == "MONARQUE";
     if (!canAccess) {
-      debugPrint("[SÉCURITÉ] Accès Bac à Sable verrouillé. Statut MONARQUE requis.");
       return false;
     }
 
@@ -432,12 +431,6 @@ mixin _AdminLogic on _GameBase {
         _sandbox = true;
         _godModePersistPenalty = false;
         SandboxManager.enterSandbox();
-
-        NotificationService.showNotification(
-          "BAC À SABLE ACTIVÉ",
-          "Mode God Mode actif.",
-          type: 'penalty',
-        );
       }
       _forceSaveRealDisk();
       _notify();
