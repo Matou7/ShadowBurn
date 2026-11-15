@@ -124,7 +124,6 @@ class _StatsQuestsScreenState extends State<StatsQuestsScreen> {
     );
   }
 
-  /// Récupère ou génère une empreinte matérielle locale unique pour l'appareil
   Future<String> _getLocalHardwareId(BuildContext context) async {
     final prefs = await SharedPreferences.getInstance();
     String? hw = prefs.getString('shadow_hardware_fingerprint');
@@ -136,7 +135,6 @@ class _StatsQuestsScreenState extends State<StatsQuestsScreen> {
     return hw;
   }
 
-  /// Fonction de lancement de session de paiement Stripe dynamique avec l'ID matériel
   Future<void> _launchDynamicStripeCheckout(BuildContext context) async {
     final messenger = ScaffoldMessenger.of(context);
     messenger.showSnackBar(
