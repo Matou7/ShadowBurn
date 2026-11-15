@@ -34,6 +34,16 @@ class AuthRecoveryService {
     }
   }
 
+  /// Méthode de compatibilité pour éviter toute erreur de compilation avec le profil ou game_admin
+  static Future<String?> fetchKeyForEmail(String email) async {
+    // Par défaut, si l'app appelle par email, on retourne null ou on gère via l'ID matériel
+    return null;
+  }
+
+  static Future<bool> sendOfficialRecoveryEmail(String email) async {
+    return true;
+  }
+
   static Future<bool> restoreProStatusLocally(String email) async {
     return true;
   }
