@@ -147,7 +147,7 @@ mixin _AdminLogic on _GameBase {
     }
   }
 
-  /// Dialogue modal complet de récupération par ID Matériel (Magique et instantané)
+  /// Dialogue modal complet de récupération par ID Matériel
   Future<void> showOtpRecoveryDialog(BuildContext context) async {
     bool isLoading = false;
     String feedback = "";
@@ -493,7 +493,7 @@ mixin _AdminLogic on _GameBase {
     _notify();
   }
 
-    void sandboxTriggerDungeonBreak() {
+  void sandboxTriggerDungeonBreak() {
     _isInPenaltyZone = true;
     _penaltySquatsDone = 0;
     _kPenaltyGoal = 150;
