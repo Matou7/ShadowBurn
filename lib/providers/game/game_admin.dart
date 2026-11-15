@@ -19,7 +19,7 @@ mixin _AdminLogic on _GameBase {
   }
 
   /// Protocole d'Amnistie
-  Future<String> useEmergencyAmnesty() async {
+  Future<String> useEmergencyAmnistie() async {
     if (!_isInPenaltyZone && _activeDungeon == null) {
       return "AUCUNE ANOMALIE DÉTECTÉE : Vous n'êtes actuellement soumis à aucune pénalité ou blocage.";
     }
@@ -86,15 +86,11 @@ mixin _AdminLogic on _GameBase {
 
       if (directSnap.exists) {
         targetDocRef = directDocRef;
-        debugPrint("[PRO_TRACE] Document trouvé via ID direct : ${directDocRef.id}");
       } else {
-        debugPrint("[PRO_TRACE] ID direct introuvable, recherche de secours par champ 'key'...");
         final querySnap = await colRef.where('key', isEqualTo: cleanKey).limit(1).get();
         if (querySnap.docs.isNotEmpty) {
           targetDocRef = querySnap.docs.first.reference;
-          debugPrint("[PRO_TRACE] Document trouvé via champ 'key' : ${targetDocRef.id}");
         } else {
-          debugPrint("[PRO_TRACE] ERREUR : La clé [$cleanKey] est introuvable dans Firestore.");
           return false;
         }
       }
@@ -108,8 +104,6 @@ mixin _AdminLogic on _GameBase {
         'user_name': _username,
       });
 
-      debugPrint("[PRO_TRACE] Écriture Firestore réussie !");
-
       _isPro = true;
       if (this is GameProvider) {
         await (this as GameProvider).saveLicenseLocally(targetDocRef.id);
@@ -117,7 +111,6 @@ mixin _AdminLogic on _GameBase {
 
       _notify();
       await _forceSaveRealDisk();
-      debugPrint("[PRO_TRACE] Statut PRO validé et sauvegardé.");
       return true;
     } catch (e, stack) {
       debugPrint("[PRO_TRACE] EXCEPTION CRITIQUE FIRESTORE : $e\n$stack");
@@ -125,129 +118,22 @@ mixin _AdminLogic on _GameBase {
     }
   }
 
-  /// Restauration automatique par ID Matériel (Zéro saisie)
+  /// Restauration automatique par ID Matériel
   Future<bool> requestHardwareAutoRecovery() async {
-    debugPrint("[AUTH_TRACE] Lancement de la récupération automatique par ID Matériel...");
-
     try {
       final String hardwareId = await _getUniqueHardwareId();
       final String? recoveredKey = await AuthRecoveryService.fetchKeyForHardware(hardwareId);
       
       if (recoveredKey != null && recoveredKey.isNotEmpty) {
-        debugPrint("[AUTH_TRACE] Clé matérielle récupérée : $recoveredKey");
         final bool success = await activateProKey(recoveredKey);
         return success;
       } else {
-        debugPrint("[AUTH_TRACE] Aucune licence associée à cet appareil.");
         return false;
       }
     } catch (e, stack) {
       debugPrint("[AUTH_TRACE] Erreur lors de la récupération matérielle : $e\n$stack");
       return false;
     }
-  }
-
-  /// Dialogue modal complet de récupération par ID Matériel
-  Future<void> showOtpRecoveryDialog(BuildContext context) async {
-    bool isLoading = false;
-    String feedback = "";
-
-    await showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) {
-        return StatefulBuilder(
-          builder: (dialogCtx, setDialogState) {
-            return AlertDialog(
-              backgroundColor: const Color(0xFF121217),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(16),
-                side: const BorderSide(color: Color(0xFF00E5FF), width: 1.5),
-              ),
-              title: const Row(
-                children: [
-                  Icon(Icons.security, color: Color(0xFF00E5FF)),
-                  SizedBox(width: 10),
-                  Text(
-                    "RESTAURATION AUTOMATIQUE",
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                      letterSpacing: 1.2,
-                      fontSize: 14,
-                    ),
-                  ),
-                ],
-              ),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  const Text(
-                    "Vérifiez votre achat instantanément en interrogeant le Système via l'empreinte de votre appareil :",
-                    style: TextStyle(color: Colors.white70, fontSize: 13, height: 1.4),
-                  ),
-                  if (feedback.isNotEmpty) ...[
-                    const SizedBox(height: 15),
-                    Text(
-                      feedback,
-                      style: TextStyle(
-                        color: feedback.contains("SUCCÈS") ? Colors.greenAccent : Colors.redAccent,
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold,
-                      ),
-                      textAlign: TextAlign.center,
-                    ),
-                  ],
-                ],
-              ),
-              actions: [
-                TextButton(
-                  onPressed: isLoading ? null : () => Navigator.pop(ctx),
-                  child: const Text("ANNULER", style: TextStyle(color: Colors.white54)),
-                ),
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF00E5FF),
-                    foregroundColor: Colors.black,
-                  ),
-                  onPressed: isLoading
-                      ? null
-                      : () async {
-                          setDialogState(() {
-                            isLoading = true;
-                            feedback = "Interrogation de l'empreinte matérielle...";
-                          });
-
-                          final success = await requestHardwareAutoRecovery();
-                          setDialogState(() {
-                            isLoading = false;
-                            if (success) {
-                              feedback = "SUCCÈS : Pass Pro Monarque restauré !";
-                              Future.delayed(const Duration(seconds: 1), () {
-                                if (Navigator.canPop(ctx)) {
-                                  Navigator.pop(ctx);
-                                }
-                              });
-                            } else {
-                              feedback = "ERREUR : Aucun achat détecté pour cet appareil.";
-                            }
-                          });
-                        },
-                  child: isLoading
-                      ? const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black),
-                        )
-                      : const Text("VÉRIFIER MON APPAREIL"),
-                ),
-              ],
-            );
-          },
-        );
-      },
-    );
   }
 
   Future<void> toggleGodModePersistPenalty() async {
@@ -287,9 +173,7 @@ mixin _AdminLogic on _GameBase {
 
   bool toggleAdminMode(String password) {
     final bool canAccess = kDebugMode || _rank.toUpperCase() == "MONARQUE";
-    if (!canAccess) {
-      return false;
-    }
+    if (!canAccess) return false;
 
     final cleanInput = password.trim();
     final bool matchMaster = cleanInput.toUpperCase() == kMasterAdminPassword.toUpperCase();
@@ -390,7 +274,6 @@ mixin _AdminLogic on _GameBase {
   void setDailyKm(double km) {
     _dailyKm = max(0.0, km);
     _dailySteps = ((_dailyKm * 1000.0) / 0.75).round();
-
     _updateCalendarActivity();
     _checkCycleCompletion();
     _checkTitles(silent: true);
@@ -470,26 +353,14 @@ mixin _AdminLogic on _GameBase {
     _kPenaltyGoal = 100;
 
     if (_godModePersistPenalty) {
-      StorageService.writePenaltyState(
-        active: true,
-        squatsDone: 0,
-        squatsGoal: 100,
-      );
+      StorageService.writePenaltyState(active: true, squatsDone: 0, squatsGoal: 100);
       SandboxManager.saveSandbox(_toJson());
     } else {
-      StorageService.writePenaltyState(
-        active: false,
-        squatsDone: 0,
-        squatsGoal: 100,
-      );
+      StorageService.writePenaltyState(active: false, squatsDone: 0, squatsGoal: 100);
     }
 
     LockService.lockScreen();
-    NotificationService.showNotification(
-      "PÉNALITÉ QUOTIDIENNE",
-      "Quête non validée à minuit.",
-      type: 'penalty',
-    );
+    NotificationService.showNotification("PÉNALITÉ QUOTIDIENNE", "Quête non validée à minuit.", type: 'penalty');
     _notify();
   }
 
@@ -499,26 +370,14 @@ mixin _AdminLogic on _GameBase {
     _kPenaltyGoal = 150;
 
     if (_godModePersistPenalty) {
-      StorageService.writePenaltyState(
-        active: true,
-        squatsDone: 0,
-        squatsGoal: 150,
-      );
+      StorageService.writePenaltyState(active: true, squatsDone: 0, squatsGoal: 150);
       SandboxManager.saveSandbox(_toJson());
     } else {
-      StorageService.writePenaltyState(
-        active: false,
-        squatsDone: 0,
-        squatsGoal: 100,
-      );
+      StorageService.writePenaltyState(active: false, squatsDone: 0, squatsGoal: 100);
     }
 
     LockService.lockScreen();
-    NotificationService.showNotification(
-      "DONJON ROMPU",
-      "Le portail a expiré.",
-      type: 'penalty',
-    );
+    NotificationService.showNotification("DONJON ROMPU", "Le portail a expiré.", type: 'penalty');
     _notify();
   }
 
