@@ -110,7 +110,6 @@ class GameProvider extends _GameBase
     } catch (_) {}
   }
 
-  // Autonettoyage robuste basé sur le TTL (Time-To-Live / arena_last_seen > 60s)
   Future<void> purgeExpiredRaids() async {
     try {
       final firestore = FirebaseFirestore.instance;
@@ -139,7 +138,7 @@ class GameProvider extends _GameBase
         }
       }
     } catch (e) {
-      dlog("[NETTOYAGE RAID] Erreur lors de la purge des salles orphelines : $e");
+      dlog("[NETTOYAGE RAID] Erreur : $e");
     }
   }
 
