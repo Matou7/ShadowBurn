@@ -34,18 +34,9 @@ class AuthRecoveryService {
     }
   }
 
-  /// Méthode de secours / pont pour satisfaire l'écran de profil sans erreur
+  /// Pont de compatibilité pour éviter toute erreur résiduelle
   static Future<String?> fetchKeyForEmail(String email) async {
-    final cleanEmail = email.trim().toLowerCase();
-    debugPrint("[EMAIL_FALLBACK] Appel de compatibilité pour : $cleanEmail");
-    
-    // Redirection intelligente vers l'API matérielle ou solution par défaut
-    try {
-      // On peut tenter d'appeler l'API de vérification générale si besoin
-      return null;
-    } catch (_) {
-      return null;
-    }
+    return null;
   }
 
   static Future<bool> sendOfficialRecoveryEmail(String email) async {
