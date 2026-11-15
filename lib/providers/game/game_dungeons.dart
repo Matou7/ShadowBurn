@@ -110,7 +110,10 @@ mixin _DungeonLogic on _GameBase {
     }
 
     _warningGiven = false;
-    LockService.lockScreen();
+    
+    // ⚡ VERROU ABSOLU DE TYPE QUARANTAINE (Identique à la Zone de Pénalité)
+    LockService.lockScreen(force: true);
+    
     _notify();
     _startDungeonTimer();
 
@@ -182,7 +185,7 @@ mixin _DungeonLogic on _GameBase {
     }
 
     try {
-      await LockService.unlockScreen();
+      await LockService.unlockScreen(force: true);
     } catch (_) {}
 
     _activeDungeon = null;
@@ -201,8 +204,8 @@ mixin _DungeonLogic on _GameBase {
 
   void leaveDungeon() {
     NotificationService.showNotification(
-      "ACCÈS REFUSÉ",
-      "Le Système interdit la fuite. Achevez le quota imposé ou utilisez l'Amnistie Système.",
+      "RUPTEUR DE PROTOCOLE",
+      "Le Système interdit la fuite. Les portes du Donjon sont scellées.",
       type: 'penalty',
     );
   }
