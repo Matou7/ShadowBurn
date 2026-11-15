@@ -127,10 +127,10 @@ class GameProvider extends _GameBase
       if (docSnapshot.exists) {
         targetDocRef = docSnapshot.reference;
       } else {
-        // 2. Fallback par recherche sur le champ 'key' si l'ID diffère
+        // 2. Fallback par recherche propre sur le champ 'key'
         final querySnapshot = await firestore
             .collection('pro_licenses')
-            .where('key', ==: cleanKey)
+            .where('key', isEqualTo: cleanKey)
             .limit(1)
             .get();
 
@@ -160,9 +160,10 @@ class GameProvider extends _GameBase
     }
   }
 
-  /// Ouvre l'écran de restauration par e-mail
-  void showOtpRecoveryDialog(BuildContext context) {
-    Navigator.push(
+  /// Ouvre l'écran de restauration par e-mail (Signature corrigée en Future<void>)
+  @override
+  Future<void> showOtpRecoveryDialog(BuildContext context) async {
+    await Navigator.push(
       context,
       MaterialPageRoute(builder: (context) => const RestoreProScreen()),
     );
@@ -222,7 +223,7 @@ class GameProvider extends _GameBase
     _clockTimer?.cancel();
     _dungeonTimer?.cancel();
     _saveTimer?.cancel();
-    WidgetsBinding.instance.removeObserver(this);
+    WidgetsBinding.instance.addObserver(this);
     super.dispose();
   }
 }
