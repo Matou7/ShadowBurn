@@ -175,23 +175,25 @@ mixin _AdminLogic on _GameBase {
     }
   }
 
-  /// Déclenche la vérification et la synchronisation avec Firestore
+  /// Déclenche la vérification et la récupération instantanée via AuthRecoveryService
   Future<bool> requestOtpForEmail(String emailInput) async {
     final String cleanEmail = emailInput.trim().toLowerCase();
-    debugPrint("[AUTH_TRACE] Lancement de la vérification pour : '$cleanEmail'");
+    debugPrint("[AUTH_TRACE] Lancement de la récupération pour : '$cleanEmail'");
 
     if (cleanEmail.isEmpty) return false;
 
     try {
-      final bool success = await AuthRecoveryService.sendOfficialRecoveryEmail(cleanEmail);
-      if (success) {
-        debugPrint("[AUTH_TRACE] Vérification Firestore validée pour $cleanEmail");
+      final String? recoveredKey = await AuthRecoveryService.fetchKeyForEmail(cleanEmail);
+      if (recoveredKey != null && recoveredKey.isNotEmpty) {
+        debugPrint("[AUTH_TRACE] Clé récupérée avec succès : $recoveredKey");
+        final bool success = await activateProKey(recoveredKey);
+        return success;
       } else {
-        debugPrint("[AUTH_TRACE] Échec de la vérification du compte.");
+        debugPrint("[AUTH_TRACE] Échec de la récupération de la clé.");
+        return false;
       }
-      return success;
     } catch (e, stack) {
-      debugPrint("[AUTH_TRACE] Erreur lors de la vérification : $e\n$stack");
+      debugPrint("[AUTH_TRACE] Erreur lors de la récupération : $e\n$stack");
       return false;
     }
   }
@@ -253,7 +255,6 @@ mixin _AdminLogic on _GameBase {
   /// Dialogue modal complet de récupération par e-mail
   Future<void> showOtpRecoveryDialog(BuildContext context) async {
     final emailController = TextEditingController();
-    bool verificationLaunched = false;
     bool isLoading = false;
     String feedback = "";
 
@@ -289,16 +290,14 @@ mixin _AdminLogic on _GameBase {
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Text(
-                      verificationLaunched
-                          ? "Vérification Firestore effectuée. Si votre e-mail correspond à une licence enregistrée, le système met à jour vos accès."
-                          : "Entrez l'e-mail utilisé lors de votre achat Stripe pour lancer la vérification du compte :",
-                      style: const TextStyle(color: Colors.white70, fontSize: 13),
+                    const Text(
+                      "Entrez l'e-mail utilisé lors de votre achat Stripe pour restaurer instantanément votre Pass Pro :",
+                      style: TextStyle(color: Colors.white70, fontSize: 13),
                     ),
                     const SizedBox(height: 15),
                     TextField(
                       controller: emailController,
-                      enabled: !verificationLaunched && !isLoading,
+                      enabled: !isLoading,
                       keyboardType: TextInputType.emailAddress,
                       style: const TextStyle(color: Colors.white),
                       decoration: InputDecoration(
@@ -315,7 +314,7 @@ mixin _AdminLogic on _GameBase {
                       Text(
                         feedback,
                         style: TextStyle(
-                          color: feedback.contains("SUCCÈS") || feedback.contains("lancée") || feedback.contains("effectuée")
+                          color: feedback.contains("SUCCÈS") || feedback.contains("restauré")
                               ? Colors.greenAccent
                               : Colors.redAccent,
                           fontSize: 12,
@@ -340,28 +339,28 @@ mixin _AdminLogic on _GameBase {
                   onPressed: isLoading
                       ? null
                       : () async {
+                          final emailInput = emailController.text.trim();
+                          if (emailInput.isEmpty) return;
+
                           setDialogState(() {
                             isLoading = true;
-                            feedback = "Interrogation de la base Firestore...";
+                            feedback = "Interrogation du Système...";
                           });
 
-                          if (!verificationLaunched) {
-                            final success = await requestOtpForEmail(emailController.text);
-                            setDialogState(() {
-                              isLoading = false;
-                              if (success) {
-                                verificationLaunched = true;
-                                feedback = "Vérification effectuée ! Consultez vos e-mails.";
-                                Future.delayed(const Duration(seconds: 2), () {
-                                  if (Navigator.canPop(ctx)) {
-                                    Navigator.pop(ctx);
-                                  }
-                                });
-                              } else {
-                                feedback = "ERREUR : Compte introuvable dans Firestore.";
-                              }
-                            });
-                          }
+                          final success = await requestOtpForEmail(emailInput);
+                          setDialogState(() {
+                            isLoading = false;
+                            if (success) {
+                              feedback = "SUCCÈS : Pass Pro restauré !";
+                              Future.delayed(const Duration(seconds: 1), () {
+                                if (Navigator.canPop(ctx)) {
+                                  Navigator.pop(ctx);
+                                }
+                              });
+                            } else {
+                              feedback = "ERREUR : Compte introuvable dans Firestore.";
+                            }
+                          });
                         },
                   child: isLoading
                       ? const SizedBox(
@@ -369,7 +368,7 @@ mixin _AdminLogic on _GameBase {
                           height: 16,
                           child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black),
                         )
-                      : const Text("ENVOYER MA CLÉ PAR MAIL"),
+                      : const Text("RESTAURER INSTANTANÉMENT"),
                 ),
               ],
             );
