@@ -124,15 +124,26 @@ class _StatsQuestsScreenState extends State<StatsQuestsScreen> {
     );
   }
 
+  /// Récupère ou génère une empreinte matérielle locale unique pour l'appareil
+  Future<String> _getLocalHardwareId() async {
+    final prefs = await SharedPreferences.getInstance();
+    String? hw = prefs.getString('shadow_hardware_fingerprint');
+    if (hw == null || hw.isEmpty) {
+      hw = 'hw_sig_${PlatformDispatcher.instance.views.first.physicalSize.width.toInt()}_${DateTime.now().millisecondsSinceEpoch}';
+      await prefs.setString('shadow_hardware_fingerprint', hw);
+    }
+    return hw;
+  }
+
   /// Fonction de lancement de session de paiement Stripe dynamique avec l'ID matériel
-  Future<void> _launchDynamicStripeCheckout(BuildContext context, GameProvider game) async {
+  Future<void> _launchDynamicStripeCheckout(BuildContext context) async {
     final messenger = ScaffoldMessenger.of(context);
     messenger.showSnackBar(
-      const SnackBar(content: Text("Ouverture du portail de paiement sécurisé..."), duration: Duration(seconds: 2)),
+      const SnackBar(content: Text("Génération du portail de paiement sécurisé..."), duration: Duration(seconds: 2)),
     );
 
     try {
-      final String hardwareId = await game.getUniqueHardwareIdForCheckout();
+      final String hardwareId = await _getLocalHardwareId();
       
       final response = await http.post(
         Uri.parse('https://shadowburn-webhook.onrender.com/api/create-checkout-session'),
@@ -202,7 +213,7 @@ class _StatsQuestsScreenState extends State<StatsQuestsScreen> {
               label: const Text("COMMANDER LE PASS PRO (14,99 €)", style: TextStyle(fontFamily: 'monospace', fontSize: 11)),
               onPressed: () {
                 Navigator.pop(context);
-                _launchDynamicStripeCheckout(context, game);
+                _launchDynamicStripeCheckout(context);
               },
             ),
           ),
