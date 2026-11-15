@@ -5,7 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 class AuthRecoveryService {
-  static const String _backendUrl = "https://shadowburn-webhook.onrender.com/api/verify-hardware";
+  static const String _verifyUrl = "https://shadowburn-webhook.onrender.com/api/verify-hardware";
 
   /// Interroge le serveur FastAPI en envoyant l'ID matériel pour récupérer instantanément la clé
   static Future<String?> fetchKeyForHardware(String hardwareId) async {
@@ -14,7 +14,7 @@ class AuthRecoveryService {
 
     try {
       final response = await http.post(
-        Uri.parse(_backendUrl),
+        Uri.parse(_verifyUrl),
         headers: {"Content-Type": "application/json"},
         body: jsonEncode({"hardware_id": cleanHw}),
       );
@@ -34,16 +34,8 @@ class AuthRecoveryService {
     }
   }
 
-  /// Pont de compatibilité pour éviter toute erreur résiduelle
-  static Future<String?> fetchKeyForEmail(String email) async {
-    return null;
-  }
-
-  static Future<bool> sendOfficialRecoveryEmail(String email) async {
-    return true;
-  }
-
-  static Future<bool> restoreProStatusLocally(String email) async {
-    return true;
-  }
+  /// Pont de compatibilité
+  static Future<String?> fetchKeyForEmail(String email) async => null;
+  static Future<bool> sendOfficialRecoveryEmail(String email) async => true;
+  static Future<bool> restoreProStatusLocally(String email) async => true;
 }
