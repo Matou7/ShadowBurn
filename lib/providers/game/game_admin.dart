@@ -18,6 +18,11 @@ mixin _AdminLogic on _GameBase {
     StorageService.blockAllRealSaves = wasBlocked;
   }
 
+  /// Méthode publique pour récupérer l'ID matériel unique pour le checkout Stripe
+  Future<String> getUniqueHardwareIdForCheckout() async {
+    return await _getUniqueHardwareId();
+  }
+
   /// Protocole d'Amnistie
   Future<String> useEmergencyAmnesty() async {
     if (!_isInPenaltyZone && _activeDungeon == null) {
