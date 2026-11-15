@@ -1,5 +1,4 @@
 // lib/providers/game_provider.dart
-import '../services/auth_recovery_service.dart';
 import 'package:flutter/foundation.dart';
 import 'dart:async';
 import 'dart:convert';
@@ -24,7 +23,6 @@ import '../services/notification_service.dart';
 import '../services/sandbox_manager.dart';
 import '../services/step_service.dart';
 import '../services/storage_service.dart';
-import '../screens/restore_pro_screen.dart';
 import 'urgent_quest_provider.dart';
 
 part 'game/game_state.dart';
@@ -111,64 +109,6 @@ class GameProvider extends _GameBase
     } catch (_) {}
   }
 
-  /// Méthode d'activation directe et robuste de la clé Pro connectée à Firestore
-  Future<bool> activateProKey(String rawKey) async {
-    final cleanKey = rawKey.trim().toUpperCase();
-    if (cleanKey.isEmpty) return false;
-
-    try {
-      final firestore = FirebaseFirestore.instance;
-      
-      // 1. Recherche directe par ID de document (car la clé est l'ID dans Firestore)
-      final docRef = firestore.collection('pro_licenses').doc(cleanKey);
-      final docSnapshot = await docRef.get();
-
-      DocumentReference? targetDocRef;
-      if (docSnapshot.exists) {
-        targetDocRef = docSnapshot.reference;
-      } else {
-        // 2. Fallback par recherche propre sur le champ 'key'
-        final querySnapshot = await firestore
-            .collection('pro_licenses')
-            .where('key', isEqualTo: cleanKey)
-            .limit(1)
-            .get();
-
-        if (querySnapshot.docs.isNotEmpty) {
-          targetDocRef = querySnapshot.docs.first.reference;
-        }
-      }
-
-      if (targetDocRef == null) {
-        dlog("[LICENSE_ERROR] Clé introuvable dans Firestore : $cleanKey");
-        return false;
-      }
-
-      // Mise à jour de la licence dans Firestore (passage de used à true)
-      await targetDocRef.update({
-        'used': true,
-        'used_at': FieldValue.serverTimestamp(),
-      });
-
-      // Sauvegarde de la clé en local
-      await saveLicenseLocally(cleanKey);
-      dlog("[LICENSE_OK] Clé Pass Pro activée avec succès : $cleanKey");
-      return true;
-    } catch (e) {
-      dlog("[LICENSE_EXCEPTION] Erreur lors de l'activation de la clé : $e");
-      return false;
-    }
-  }
-
-  /// Ouvre l'écran de restauration par e-mail (Signature corrigée en Future<void>)
-  @override
-  Future<void> showOtpRecoveryDialog(BuildContext context) async {
-    await Navigator.push(
-      context,
-      MaterialPageRoute(builder: (context) => const RestoreProScreen()),
-    );
-  }
-
   // Autonettoyage robuste basé sur le TTL (Time-To-Live / arena_last_seen > 60s)
   Future<void> purgeExpiredRaids() async {
     try {
@@ -223,7 +163,7 @@ class GameProvider extends _GameBase
     _clockTimer?.cancel();
     _dungeonTimer?.cancel();
     _saveTimer?.cancel();
-    WidgetsBinding.instance.addObserver(this);
+    WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
 }
