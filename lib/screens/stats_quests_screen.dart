@@ -3,10 +3,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'dart:async';
+import 'dart:convert';
 import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:http/http.dart' as http;
 import '../providers/game_provider.dart';
 import '../widgets/system_dialog.dart';
 import 'class_change_quest_screen.dart';
@@ -122,6 +124,47 @@ class _StatsQuestsScreenState extends State<StatsQuestsScreen> {
     );
   }
 
+  /// Fonction de lancement de session de paiement Stripe dynamique avec l'ID matériel
+  Future<void> _launchDynamicStripeCheckout(BuildContext context, GameProvider game) async {
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.showSnackBar(
+      const SnackBar(content: Text("Ouverture du portail de paiement sécurisé..."), duration: Duration(seconds: 2)),
+    );
+
+    try {
+      final String hardwareId = await game.getUniqueHardwareIdForCheckout();
+      
+      final response = await http.post(
+        Uri.parse('https://shadowburn-webhook.onrender.com/api/create-checkout-session'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'hardware_id': hardwareId,
+          'success_url': 'shadowburn://pro-success',
+          'cancel_url': 'shadowburn://pro-cancel',
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final String? checkoutUrl = data['url'];
+        if (checkoutUrl != null && checkoutUrl.isNotEmpty) {
+          final Uri uri = Uri.parse(checkoutUrl);
+          if (await canLaunchUrl(uri)) {
+            await launchUrl(uri, mode: LaunchMode.externalApplication);
+          }
+        }
+      } else {
+        messenger.showSnackBar(
+          const SnackBar(content: Text("Erreur de connexion au serveur de paiement."), backgroundColor: Colors.redAccent),
+        );
+      }
+    } catch (e) {
+      messenger.showSnackBar(
+        SnackBar(content: Text("Exception Stripe : $e"), backgroundColor: Colors.redAccent),
+      );
+    }
+  }
+
   void _showProActivationDialog(BuildContext context, GameProvider game) {
     final controller = TextEditingController();
     SystemDialog.show(
@@ -157,11 +200,9 @@ class _StatsQuestsScreenState extends State<StatsQuestsScreen> {
               ),
               icon: const Icon(Icons.payment, size: 16),
               label: const Text("COMMANDER LE PASS PRO (14,99 €)", style: TextStyle(fontFamily: 'monospace', fontSize: 11)),
-              onPressed: () async {
-                final Uri stripeUrl = Uri.parse('https://buy.stripe.com/test_9B600b2Xm9r10cegfw5Vu00');
-                if (await canLaunchUrl(stripeUrl)) {
-                  await launchUrl(stripeUrl, mode: LaunchMode.externalApplication);
-                }
+              onPressed: () {
+                Navigator.pop(context);
+                _launchDynamicStripeCheckout(context, game);
               },
             ),
           ),
@@ -243,9 +284,9 @@ class _StatsQuestsScreenState extends State<StatsQuestsScreen> {
         child: Container(
           width: double.infinity,
           decoration: BoxDecoration(
-            border: Border.all(color: systemBlue.withValues(alpha: 0.5), width: 2),
-            color: Colors.black.withValues(alpha: 0.8),
-            boxShadow: [BoxShadow(color: systemBlue.withValues(alpha: 0.15), blurRadius: 30)],
+            border: Border.all(color: systemBlue.withOpacity(0.5), width: 2),
+            color: Colors.black.withOpacity(0.8),
+            boxShadow: [BoxShadow(color: systemBlue.withOpacity(0.15), blurRadius: 30)],
           ),
           child: Column(
             children: [
@@ -259,9 +300,9 @@ class _StatsQuestsScreenState extends State<StatsQuestsScreen> {
                       Container(
                         padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
                         decoration: BoxDecoration(
-                          color: systemBlue.withValues(alpha: 0.05),
+                          color: systemBlue.withOpacity(0.05),
                           borderRadius: BorderRadius.circular(4),
-                          border: Border.all(color: systemBlue.withValues(alpha: 0.2)),
+                          border: Border.all(color: systemBlue.withOpacity(0.2)),
                         ),
                         child: Text(
                           _formatDuration(_secondsRemaining),
@@ -271,7 +312,7 @@ class _StatsQuestsScreenState extends State<StatsQuestsScreen> {
                             fontWeight: FontWeight.w500,
                             shadows: [
                               const Shadow(color: systemBlue, blurRadius: 15),
-                              Shadow(color: systemBlue.withValues(alpha: 0.5), blurRadius: 30),
+                              Shadow(color: systemBlue.withOpacity(0.5), blurRadius: 30),
                             ],
                           ),
                         ),
@@ -323,7 +364,7 @@ class _StatsQuestsScreenState extends State<StatsQuestsScreen> {
                       Text(
                         "ATTENTION : L'échec de la quête entraînera une pénalité.",
                         textAlign: TextAlign.center,
-                        style: GoogleFonts.rajdhani(color: Colors.redAccent.withValues(alpha: 0.8), fontSize: 12, fontWeight: FontWeight.bold),
+                        style: GoogleFonts.rajdhani(color: Colors.redAccent.withOpacity(0.8), fontSize: 12, fontWeight: FontWeight.bold),
                       ),
                       const SizedBox(height: 5),
                     ],
@@ -345,7 +386,7 @@ class _StatsQuestsScreenState extends State<StatsQuestsScreen> {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
-      decoration: BoxDecoration(border: Border(bottom: BorderSide(color: color.withValues(alpha: 0.5)))),
+      decoration: BoxDecoration(border: Border(bottom: BorderSide(color: color.withOpacity(0.5)))),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
@@ -501,9 +542,9 @@ class _StatsQuestsScreenState extends State<StatsQuestsScreen> {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         decoration: BoxDecoration(
-          border: Border.all(color: color.withValues(alpha: 0.5)),
+          border: Border.all(color: color.withOpacity(0.5)),
           borderRadius: BorderRadius.circular(4),
-          color: color.withValues(alpha: 0.1),
+          color: color.withOpacity(0.1),
         ),
         child: Text(label, style: GoogleFonts.orbitron(color: color, fontSize: 11, fontWeight: FontWeight.bold)),
       ),
@@ -518,7 +559,7 @@ class _StatsQuestsScreenState extends State<StatsQuestsScreen> {
         padding: const EdgeInsets.symmetric(vertical: 10),
         decoration: BoxDecoration(
           border: Border.all(color: color),
-          color: color.withValues(alpha: 0.2),
+          color: color.withOpacity(0.2),
           borderRadius: BorderRadius.circular(4),
         ),
         child: Center(child: Text(text, style: GoogleFonts.orbitron(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold, letterSpacing: 2))),
