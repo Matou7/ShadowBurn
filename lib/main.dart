@@ -266,7 +266,6 @@ class _ShadowBurnAppState extends State<ShadowBurnApp> with WidgetsBindingObserv
     }
   }
 
-  /// Vérifie discrètement au retour du navigateur si un paiement vient d'être lié à cet appareil
   Future<void> _silentCheckHardwarePurchase() async {
     if (!mounted || _isShowingProPopup) return;
     final game = Provider.of<GameProvider>(context, listen: false);
@@ -336,106 +335,111 @@ class _ShadowBurnAppState extends State<ShadowBurnApp> with WidgetsBindingObserv
   }
 
   void _showProSuccessDialog(BuildContext dialogContext, String licenseKey) {
+    if (_isShowingProPopup) return;
     _isShowingProPopup = true;
+
     showDialog(
       context: dialogContext,
       barrierDismissible: false,
       builder: (ctx) {
-        return AlertDialog(
-          backgroundColor: const Color(0xFF121217),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-            side: const BorderSide(color: Color(0xFF00FF66), width: 2),
-          ),
-          title: const Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(Icons.verified, color: Color(0xFF00FF66), size: 28),
-              SizedBox(width: 10),
-              Flexible(
-                child: Text(
-                  "ÉVEIL MONARQUE RÉUSSI",
-                  style: TextStyle(
-                    fontFamily: 'Orbitron',
-                    color: Color(0xFF00FF66),
-                    fontWeight: FontWeight.bold,
-                    fontSize: 13,
-                    letterSpacing: 1.2,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text(
-                "Paiement vérifié et validé ! Votre statut Monarque Pro est désormais actif sur cet appareil.",
-                textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.white70, fontSize: 13, height: 1.4),
-              ),
-              const SizedBox(height: 20),
-              const Text(
-                "VOTRE CLÉ DE LICENCE :",
-                style: TextStyle(fontFamily: 'Orbitron', color: Color(0xFF00E5FF), fontSize: 10, letterSpacing: 1.5),
-              ),
-              const SizedBox(height: 8),
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  color: Colors.black,
-                  border: Border.all(color: const Color(0xFF00E5FF), width: 1.5),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: SelectableText(
-                  licenseKey,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(
-                    fontFamily: 'monospace',
-                    color: Color(0xFF00FF66),
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 2,
-                  ),
-                ),
-              ),
-              const SizedBox(height: 10),
-              const Text(
-                "Votre clé a déjà été validée et sauvegardée dans le Système.",
-                textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.white38, fontSize: 10),
-              ),
-            ],
-          ),
-          actions: [
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF00FF66),
-                  foregroundColor: Colors.black,
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                ),
-                onPressed: () {
-                  Clipboard.setData(ClipboardData(text: licenseKey));
-                  _isShowingProPopup = false;
-                  Navigator.pop(ctx);
-                  ScaffoldMessenger.of(dialogContext).showSnackBar(
-                    const SnackBar(
-                      content: Text("Clé copiée dans le presse-papier !"),
-                      backgroundColor: Color(0xFF00FF66),
-                    ),
-                  );
-                },
-                child: const Text(
-                  "COPIER LA CLÉ & CONTINUER",
-                  style: TextStyle(fontFamily: 'Orbitron', fontWeight: FontWeight.bold, fontSize: 12),
-                ),
-              ),
+        return PopScope(
+          canPop: false,
+          child: AlertDialog(
+            backgroundColor: const Color(0xFF121217),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+              side: const BorderSide(color: Color(0xFF00FF66), width: 2),
             ),
-          ],
+            title: const Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.verified, color: Color(0xFF00FF66), size: 28),
+                SizedBox(width: 10),
+                Flexible(
+                  child: Text(
+                    "ÉVEIL MONARQUE RÉUSSI",
+                    style: TextStyle(
+                      fontFamily: 'Orbitron',
+                      color: Color(0xFF00FF66),
+                      fontWeight: FontWeight.bold,
+                      fontSize: 13,
+                      letterSpacing: 1.2,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text(
+                  "Paiement vérifié et validé ! Votre statut Monarque Pro est désormais actif sur cet appareil.",
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Colors.white70, fontSize: 13, height: 1.4),
+                ),
+                const SizedBox(height: 20),
+                const Text(
+                  "VOTRE CLÉ DE LICENCE :",
+                  style: TextStyle(fontFamily: 'Orbitron', color: Color(0xFF00E5FF), fontSize: 10, letterSpacing: 1.5),
+                ),
+                const SizedBox(height: 8),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: Colors.black,
+                    border: Border.all(color: const Color(0xFF00E5FF), width: 1.5),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: SelectableText(
+                    licenseKey,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      fontFamily: 'monospace',
+                      color: Color(0xFF00FF66),
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 2,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                const Text(
+                  "Votre clé a été enregistrée. Appuyez sur le bouton pour copier et fermer.",
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Colors.white38, fontSize: 10),
+                ),
+              ],
+            ),
+            actions: [
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF00FF66),
+                    foregroundColor: Colors.black,
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  ),
+                  onPressed: () {
+                    Clipboard.setData(ClipboardData(text: licenseKey));
+                    _isShowingProPopup = false;
+                    Navigator.pop(ctx);
+                    ScaffoldMessenger.of(dialogContext).showSnackBar(
+                      const SnackBar(
+                        content: Text("Clé copiée dans le presse-papier !"),
+                        backgroundColor: Color(0xFF00FF66),
+                      ),
+                    );
+                  },
+                  child: const Text(
+                    "COPIER LA CLÉ & CONTINUER",
+                    style: TextStyle(fontFamily: 'Orbitron', fontWeight: FontWeight.bold, fontSize: 12),
+                  ),
+                ),
+              ),
+            ],
+          ),
         );
       },
     );
