@@ -1,5 +1,6 @@
 // lib/utils/admin_utils.dart
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../providers/game_provider.dart';
@@ -7,6 +8,9 @@ import '../widgets/system_dialog.dart';
 
 // 1. Fenêtre pour entrer le mot de passe (Login)
 void showAdminAuthDialog(BuildContext context, GameProvider game) {
+  // Strictement interdit d'ouvrir l'auth admin en release
+  if (!kDebugMode) return;
+
   final TextEditingController controller = TextEditingController();
 
   SystemDialog.show(
@@ -60,6 +64,7 @@ void showAdminAuthDialog(BuildContext context, GameProvider game) {
 }
 
 void _executeLogin(BuildContext context, GameProvider game, String enteredPassword) {
+  if (!kDebugMode) return;
   final messenger = ScaffoldMessenger.of(context);
   final bool success = game.toggleAdminMode(enteredPassword);
   Navigator.pop(context);
@@ -79,6 +84,7 @@ void _executeLogin(BuildContext context, GameProvider game, String enteredPasswo
 
 // 2. Fenêtre de sortie du God Mode : garder ou annuler les modifications
 void showExitGodModeDialog(BuildContext context, GameProvider game) {
+  if (!kDebugMode) return;
   SystemDialog.show(
     context,
     title: "FIN DU MODE ADMIN",
@@ -144,6 +150,7 @@ void showExitGodModeDialog(BuildContext context, GameProvider game) {
 
 // 3. Fenêtre pour changer le mot de passe
 void showChangePasswordDialog(BuildContext context, GameProvider game) {
+  if (!kDebugMode) return;
   final TextEditingController controller = TextEditingController();
 
   SystemDialog.show(
@@ -198,7 +205,7 @@ void showChangePasswordDialog(BuildContext context, GameProvider game) {
 
 // 4. Fenêtre pour modifier une stat en God Mode
 void showGodModeStatDialog(BuildContext context, GameProvider game, String statName, int currentVal) {
-  if (!game.isGodMode) return;
+  if (!kDebugMode || !game.isGodMode) return;
   final TextEditingController controller = TextEditingController(text: currentVal.toString());
 
   SystemDialog.show(
@@ -247,7 +254,7 @@ void showGodModeStatDialog(BuildContext context, GameProvider game, String statN
 
 // 5. Fenêtre pour modifier la course en God Mode
 void showGodModeKmDialog(BuildContext context, GameProvider game, double currentKm) {
-  if (!game.isGodMode) return;
+  if (!kDebugMode || !game.isGodMode) return;
   final TextEditingController controller = TextEditingController(text: currentKm.toStringAsFixed(1));
 
   SystemDialog.show(
