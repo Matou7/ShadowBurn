@@ -340,10 +340,10 @@ class _ShadowBurnAppState extends State<ShadowBurnApp> with WidgetsBindingObserv
     if (_isShowingProPopup) return;
     _isShowingProPopup = true;
 
-    // Copie automatique de la clé dans le presse-papier dès l'affichage
+    // Copie de sécurité silencieuse de la clé
     Clipboard.setData(ClipboardData(text: licenseKey));
 
-    // Timer de fermeture automatique après exactement 2 secondes
+    // Fermeture automatique programmée à 2 secondes exactes
     _autoCloseTimer?.cancel();
     _autoCloseTimer = Timer(const Duration(seconds: 2), () {
       if (_isShowingProPopup) {
@@ -390,7 +390,7 @@ class _ShadowBurnAppState extends State<ShadowBurnApp> with WidgetsBindingObserv
               mainAxisSize: MainAxisSize.min,
               children: [
                 const Text(
-                  "Paiement vérifié ! Statut Monarque Pro actif et clé copiée automatiquement.",
+                  "Statut Pro activé avec succès.",
                   textAlign: TextAlign.center,
                   style: TextStyle(color: Colors.white70, fontSize: 13, height: 1.4),
                 ),
@@ -420,36 +420,16 @@ class _ShadowBurnAppState extends State<ShadowBurnApp> with WidgetsBindingObserv
                     ),
                   ),
                 ),
-                const SizedBox(height: 10),
+                const SizedBox(height: 12),
                 const Text(
-                  "Fermeture automatique dans 2 secondes...",
+                  "Fermeture automatique...",
                   textAlign: TextAlign.center,
                   style: TextStyle(color: Colors.white38, fontSize: 10),
                 ),
               ],
             ),
-            actions: [
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF00FF66),
-                    foregroundColor: Colors.black,
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                  ),
-                  onPressed: () {
-                    _autoCloseTimer?.cancel();
-                    _isShowingProPopup = false;
-                    Navigator.pop(ctx);
-                  },
-                  child: const Text(
-                    "FERMER IMMÉDIATEMENT",
-                    style: TextStyle(fontFamily: 'Orbitron', fontWeight: FontWeight.bold, fontSize: 12),
-                  ),
-                ),
-              ),
-            ],
+            // Aucun bouton d'action affiché
+            actions: const [],
           ),
         );
       },
