@@ -20,7 +20,7 @@ class SandboxManager {
   }
 
   /// Quitte le God Mode et nettoie tout le sas
-  static Future<void> exitSandbox({bool keepChanges = false, Map<String, dynamic>? currentData}) async {
+  static Future exitSandbox({bool keepChanges = false, Map<String, dynamic>? currentData}) async {
     isSandboxActive = false;
     persistPenalty = false;
     StorageService.blockAllRealSaves = false;
@@ -34,7 +34,7 @@ class SandboxManager {
   }
 
   /// Sauvegarde du bac à sable (UNIQUEMENT en mode debug et si la persistance est cochée)
-  static Future<void> saveSandbox(Map<String, dynamic> data) async {
+  static Future saveSandbox(Map<String, dynamic> data) async {
     if (!kDebugMode || !isSandboxActive || !persistPenalty) return;
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -44,7 +44,7 @@ class SandboxManager {
   }
 
   /// Chargement du bac à sable au boot (ignoré en release)
-  static Future?> loadSandbox() async {
+  static Future loadSandbox() async {
     if (!kDebugMode) {
       await deleteSandboxFile();
       return null;
@@ -61,7 +61,7 @@ class SandboxManager {
   }
 
   /// Supprime le fichier de sauvegarde du God Mode
-  static Future<void> deleteSandboxFile() async {
+  static Future deleteSandboxFile() async {
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove(keyGodSave);
@@ -70,7 +70,7 @@ class SandboxManager {
   }
 
   /// Force la purge des clés natives Android
-  static Future<void> clearNativePenalty() async {
+  static Future clearNativePenalty() async {
     await StorageService.writePenaltyState(
       active: false,
       squatsDone: 0,
