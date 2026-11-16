@@ -305,6 +305,7 @@ class InventoryDungeonScreen extends StatelessWidget {
 
     return GestureDetector(
       onLongPress: () {
+        // STRICTEMENT RÉSERVÉ AUX VRAIS MONARQUES EN DEBUG/ADMIN - Plus de message "Accès refusé" intrusif pour les civils
         if (game.isGodMode) {
           final controller = TextEditingController();
           SystemDialog.show(
@@ -336,11 +337,6 @@ class InventoryDungeonScreen extends StatelessWidget {
               ),
             ],
           );
-        } else {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text("Accès refusé. Activez le mode Admin."),
-            duration: Duration(seconds: 1),
-          ));
         }
       },
       onTap: () {
