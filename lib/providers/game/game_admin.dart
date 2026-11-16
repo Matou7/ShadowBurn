@@ -18,7 +18,6 @@ mixin _AdminLogic on _GameBase {
     StorageService.blockAllRealSaves = wasBlocked;
   }
 
-  /// Méthode publique unifiée pour récupérer l'empreinte matérielle unique
   Future<String> getUniqueHardwareIdForCheckout() async {
     return await _getUniqueHardwareId();
   }
@@ -66,7 +65,7 @@ mixin _AdminLogic on _GameBase {
     }
   }
 
-  /// Active une clé de licence Pro Monarque de façon robuste (tolère le pré-verrouillage serveur)
+  /// Active une clé de licence Pro Monarque
   Future<bool> activateProKey(String rawKey) async {
     final String cleanKey = rawKey.trim().toUpperCase();
     if (cleanKey.isEmpty) return false;
@@ -91,7 +90,6 @@ mixin _AdminLogic on _GameBase {
       }
 
       if (targetSnap == null || !targetSnap.exists) {
-        debugPrint("[PRO_TRACE] Clé introuvable dans Firestore : $cleanKey");
         return false;
       }
 
@@ -100,13 +98,11 @@ mixin _AdminLogic on _GameBase {
       final bool alreadyUsed = data['used'] == true;
       final String boundHardware = (data['used_by'] ?? '').toString();
 
-      // Bloque uniquement si la clé est déjà utilisée par UN AUTRE appareil
+      // Bloque si la clé est déjà liée à un autre appareil (sauf transfert validé par serveur)
       if (alreadyUsed && boundHardware.isNotEmpty && boundHardware != hardwareId) {
-        debugPrint("[PRO_TRACE] Clé déjà liée à un autre appareil : $boundHardware !=$hardwareId");
         return false;
       }
 
-      // Mise à jour Firestore non bloquante (le serveur Render a souvent déjà écrit used: true)
       try {
         await targetSnap.reference.update({
           'used': true,
@@ -132,26 +128,40 @@ mixin _AdminLogic on _GameBase {
     }
   }
 
-  /// Restauration automatique par ID Matériel
-  Future<bool> requestHardwareAutoRecovery() async {
+  /// Restauration automatique (empreinte) ou sécurisée (E-mail + Preuve Stripe)
+  Future<bool> requestHardwareAutoRecovery({String? email, String? proof}) async {
     try {
       final String hardwareId = await _getUniqueHardwareId();
-      final String? recoveredKey = await AuthRecoveryService.fetchKeyForHardware(hardwareId);
-      
+      String? recoveredKey = await AuthRecoveryService.fetchKeyForHardware(hardwareId);
+
+      if ((recoveredKey == null || recoveredKey.isEmpty) &&
+          email != null &&
+          email.trim().isNotEmpty &&
+          proof != null &&
+          proof.trim().isNotEmpty) {
+        recoveredKey = await AuthRecoveryService.recoverKeySecurely(
+          email: email,
+          proof: proof,
+          newHardwareId: hardwareId,
+        );
+      }
+
       if (recoveredKey != null && recoveredKey.isNotEmpty) {
         return await activateProKey(recoveredKey);
       }
       return false;
     } catch (e) {
-      debugPrint("[AUTH_TRACE] Erreur lors de la récupération matérielle : $e");
+      debugPrint("[AUTH_TRACE] Erreur lors de la récupération : $e");
       return false;
     }
   }
 
-  /// Dialogue modal complet de récupération par ID Matériel
+  /// Dialogue modal sécurisé de restauration
   Future<void> showOtpRecoveryDialog(BuildContext context) async {
     bool isLoading = false;
     String feedback = "";
+    final emailController = TextEditingController();
+    final proofController = TextEditingController();
 
     await showDialog(
       context: context,
@@ -167,40 +177,68 @@ mixin _AdminLogic on _GameBase {
               ),
               title: const Row(
                 children: [
-                  Icon(Icons.security, color: Color(0xFF00E5FF)),
+                  Icon(Icons.verified_user, color: Color(0xFF00E5FF)),
                   SizedBox(width: 10),
-                  Text(
-                    "RESTAURATION AUTOMATIQUE",
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                      letterSpacing: 1.2,
-                      fontSize: 14,
+                  Flexible(
+                    child: Text(
+                      "RESTAURATION SÉCURISÉE",
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 1.2,
+                        fontSize: 13,
+                      ),
                     ),
                   ),
                 ],
               ),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  const Text(
-                    "Vérifiez votre achat instantanément en interrogeant le Système via l'empreinte de votre appareil :",
-                    style: TextStyle(color: Colors.white70, fontSize: 13, height: 1.4),
-                  ),
-                  if (feedback.isNotEmpty) ...[
-                    const SizedBox(height: 15),
-                    Text(
-                      feedback,
-                      style: TextStyle(
-                        color: feedback.contains("SUCCÈS") ? Colors.greenAccent : Colors.redAccent,
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold,
-                      ),
-                      textAlign: TextAlign.center,
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    const Text(
+                      "• Même appareil : cliquez directement sur Restaurer.\n• Nouvel appareil / Réinstallation : entrez votre e-mail Stripe ET votre clé (ou les 4 derniers chiffres de la carte utilisée).",
+                      style: TextStyle(color: Colors.white70, fontSize: 12, height: 1.4),
                     ),
+                    const SizedBox(height: 14),
+                    TextField(
+                      controller: emailController,
+                      keyboardType: TextInputType.emailAddress,
+                      style: const TextStyle(color: Colors.white, fontSize: 13),
+                      decoration: const InputDecoration(
+                        labelText: "E-mail Stripe (si nouvel appareil)",
+                        labelStyle: TextStyle(color: Colors.white38, fontSize: 11),
+                        enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Color(0xFF00E5FF))),
+                        focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: Color(0xFF00FF66))),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: proofController,
+                      textCapitalization: TextCapitalization.characters,
+                      style: const TextStyle(color: Colors.white, fontSize: 13),
+                      decoration: const InputDecoration(
+                        labelText: "Clé Pro OU 4 derniers chiffres carte",
+                        labelStyle: TextStyle(color: Colors.white38, fontSize: 11),
+                        enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Color(0xFF00E5FF))),
+                        focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: Color(0xFF00FF66))),
+                      ),
+                    ),
+                    if (feedback.isNotEmpty) ...[
+                      const SizedBox(height: 15),
+                      Text(
+                        feedback,
+                        style: TextStyle(
+                          color: feedback.contains("SUCCÈS") ? Colors.greenAccent : Colors.redAccent,
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                    ],
                   ],
-                ],
+                ),
               ),
               actions: [
                 TextButton(
@@ -217,21 +255,25 @@ mixin _AdminLogic on _GameBase {
                       : () async {
                           setDialogState(() {
                             isLoading = true;
-                            feedback = "Interrogation de l'empreinte matérielle...";
+                            feedback = "Vérification cryptographique...";
                           });
 
-                          final success = await requestHardwareAutoRecovery();
+                          final success = await requestHardwareAutoRecovery(
+                            email: emailController.text,
+                            proof: proofController.text,
+                          );
+
                           setDialogState(() {
                             isLoading = false;
                             if (success) {
-                              feedback = "SUCCÈS : Pass Pro Monarque restauré !";
+                              feedback = "SUCCÈS : Licence vérifiée et transférée !";
                               Future.delayed(const Duration(seconds: 1), () {
                                 if (Navigator.canPop(ctx)) {
                                   Navigator.pop(ctx);
                                 }
                               });
                             } else {
-                              feedback = "ERREUR : Aucun achat détecté pour cet appareil.";
+                              feedback = "REFUSÉ : Vérifiez l'e-mail et la clé (ou 4 chiffres carte).";
                             }
                           });
                         },
@@ -241,7 +283,7 @@ mixin _AdminLogic on _GameBase {
                           height: 16,
                           child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black),
                         )
-                      : const Text("VÉRIFIER MON APPAREIL"),
+                      : const Text("RESTAURER"),
                 ),
               ],
             );
