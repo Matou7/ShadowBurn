@@ -374,9 +374,9 @@ class _StatsQuestsScreenState extends State<StatsQuestsScreen> {
   }
 
   Widget _buildQuestHeader(Color color, GameProvider game) {
-    final String displayKey = _cachedShortKey.isNotEmpty
-        ? _cachedShortKey
-        : (game.shortLicenseKey.isNotEmpty ? game.shortLicenseKey : "MONARQUE");
+    final String displayKey = game.shortLicenseKey.isNotEmpty
+        ? game.shortLicenseKey
+        : (_cachedShortKey.isNotEmpty ? _cachedShortKey : "MONARQUE");
 
     return Container(
       width: double.infinity,
