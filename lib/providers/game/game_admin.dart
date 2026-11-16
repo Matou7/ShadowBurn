@@ -311,6 +311,28 @@ mixin _AdminLogic on _GameBase {
     return false;
   }
 
+  Future<void> toggleGodModePersistPenalty() async {
+    if (!kDebugMode) return;
+    _godModePersistPenalty = !_godModePersistPenalty;
+    SandboxManager.persistPenalty = _godModePersistPenalty;
+
+    if (!_godModePersistPenalty) {
+      await SandboxManager.deleteSandboxFile();
+      await SandboxManager.clearNativePenalty();
+    } else {
+      if (_isInPenaltyZone) {
+        await StorageService.writePenaltyState(
+          active: true,
+          squatsDone: _penaltySquatsDone,
+          squatsGoal: _kPenaltyGoal,
+        );
+      }
+      await SandboxManager.saveSandbox(_toJson());
+    }
+
+    _notify();
+  }
+
   void exitGodMode({required bool keepChanges}) {
     if (_sandbox) {
       _sandbox = false;
