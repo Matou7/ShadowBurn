@@ -57,7 +57,7 @@ void main() async {
 
       // Activation de Firebase App Check pour le Web (reCAPTCHA Enterprise)
       await FirebaseAppCheck.instance.activate(
-        webProvider: ReCaptchaEnterpriseProvider('VOTRE_CLE_RECAPTCHA'),
+        webProvider: ReCaptchaEnterpriseProvider('6Ldq3SMuAAAAAN9WHJeDA8RKk7A33VUF9nBj4znf'),
       );
     } catch (e) {
       debugPrint("Erreur initialisation Firebase Web / App Check: $e");
