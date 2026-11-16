@@ -4,7 +4,8 @@ part of '../game_provider.dart';
 const String kMasterAdminPassword = "tricheur";
 
 mixin _AdminLogic on _GameBase {
-  bool get isGodMode => _sandbox;
+  // STRICTEMENT INTERDIT EN RELEASE : isGodMode retourne false si kDebugMode est faux
+  bool get isGodMode => kDebugMode && _sandbox;
 
   Future<void> _forceSaveRealDisk() async {
     final bool wasBlocked = StorageService.blockAllRealSaves;
@@ -22,7 +23,6 @@ mixin _AdminLogic on _GameBase {
     return await _getUniqueHardwareId();
   }
 
-  /// Protocole d'Amnistie
   Future<String> useEmergencyAmnesty() async {
     if (!_isInPenaltyZone && _activeDungeon == null) {
       return "AUCUNE ANOMALIE DÉTECTÉE : Vous n'êtes actuellement soumis à aucune pénalité ou blocage.";
@@ -65,7 +65,6 @@ mixin _AdminLogic on _GameBase {
     }
   }
 
-  /// Active une clé de licence Pro Monarque
   Future<bool> activateProKey(String rawKey) async {
     final String cleanKey = rawKey.trim().toUpperCase();
     if (cleanKey.isEmpty) return false;
@@ -98,7 +97,6 @@ mixin _AdminLogic on _GameBase {
       final bool alreadyUsed = data['used'] == true;
       final String boundHardware = (data['used_by'] ?? '').toString();
 
-      // Bloque si la clé est déjà liée à un autre appareil (sauf transfert validé par serveur)
       if (alreadyUsed && boundHardware.isNotEmpty && boundHardware != hardwareId) {
         return false;
       }
@@ -128,7 +126,6 @@ mixin _AdminLogic on _GameBase {
     }
   }
 
-  /// Restauration automatique (empreinte) ou sécurisée (E-mail + Preuve Stripe)
   Future<bool> requestHardwareAutoRecovery({String? email, String? proof}) async {
     try {
       final String hardwareId = await _getUniqueHardwareId();
@@ -156,7 +153,6 @@ mixin _AdminLogic on _GameBase {
     }
   }
 
-  /// Dialogue modal sécurisé de restauration
   Future<void> showOtpRecoveryDialog(BuildContext context) async {
     bool isLoading = false;
     String feedback = "";
@@ -198,7 +194,7 @@ mixin _AdminLogic on _GameBase {
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     const Text(
-                      "• Même appareil : cliquez directement sur Restaurer.\n• Nouvel appareil / Réinstallation : entrez votre e-mail Stripe ET votre clé (ou les 4 derniers chiffres de la carte utilisée).",
+                      "• Même appareil : cliquez directement sur Restaurer.\n• Nouvel appareil / Réinstallation : entrez votre e-mail Stripe ET votre clé (ou les 4 derniers chiffres de la carte).",
                       style: TextStyle(color: Colors.white70, fontSize: 12, height: 1.4),
                     ),
                     const SizedBox(height: 14),
@@ -293,44 +289,8 @@ mixin _AdminLogic on _GameBase {
     );
   }
 
-  Future<void> toggleGodModePersistPenalty() async {
-    _godModePersistPenalty = !_godModePersistPenalty;
-    SandboxManager.persistPenalty = _godModePersistPenalty;
-
-    if (!_godModePersistPenalty) {
-      await SandboxManager.deleteSandboxFile();
-      await SandboxManager.clearNativePenalty();
-    } else {
-      if (_isInPenaltyZone) {
-        await StorageService.writePenaltyState(
-          active: true,
-          squatsDone: _penaltySquatsDone,
-          squatsGoal: _kPenaltyGoal,
-        );
-      }
-      await SandboxManager.saveSandbox(_toJson());
-    }
-
-    _notify();
-  }
-
-  void clearPenaltyIfNoPersistence() {
-    if (_sandbox && !_godModePersistPenalty) {
-      if (_sandboxSnapshot != null) {
-        _applyJson(_sandboxSnapshot!);
-      }
-      _sandbox = false;
-      _sandboxSnapshot = null;
-      _activeDungeon = null;
-      _isInPenaltyZone = false;
-      _penaltySquatsDone = 0;
-      SandboxManager.exitSandbox(keepChanges: false);
-    }
-  }
-
   bool toggleAdminMode(String password) {
-    final bool canAccess = kDebugMode || _rank.toUpperCase() == "MONARQUE";
-    if (!canAccess) return false;
+    if (!kDebugMode) return false;
 
     final cleanInput = password.trim();
     final bool matchMaster = cleanInput.toUpperCase() == kMasterAdminPassword.toUpperCase();
@@ -353,19 +313,13 @@ mixin _AdminLogic on _GameBase {
 
   void exitGodMode({required bool keepChanges}) {
     if (_sandbox) {
-      if (keepChanges) {
-        _sandbox = false;
-        _sandboxSnapshot = null;
-        SandboxManager.exitSandbox(keepChanges: true, currentData: _toJson());
-        _saveNow();
-      } else {
-        if (_sandboxSnapshot != null) {
-          _applyJson(_sandboxSnapshot!);
-        }
-        _sandbox = false;
-        _sandboxSnapshot = null;
-        SandboxManager.exitSandbox(keepChanges: false);
+      _sandbox = false;
+      _sandboxSnapshot = null;
+      SandboxManager.exitSandbox(keepChanges: keepChanges, currentData: keepChanges ? _toJson() : null);
+      if (!keepChanges && _sandboxSnapshot != null) {
+        _applyJson(_sandboxSnapshot!);
       }
+      _forceSaveRealDisk();
       _notify();
     }
   }
@@ -525,13 +479,6 @@ mixin _AdminLogic on _GameBase {
     _isInPenaltyZone = true;
     _penaltySquatsDone = 0;
     _kPenaltyGoal = 150;
-
-    if (_godModePersistPenalty) {
-      StorageService.writePenaltyState(active: true, squatsDone: 0, squatsGoal: 150);
-      SandboxManager.saveSandbox(_toJson());
-    } else {
-      StorageService.writePenaltyState(active: false, squatsDone: 0, squatsGoal: 100);
-    }
 
     LockService.lockScreen();
     NotificationService.showNotification("DONJON ROMPU", "Le portail a expiré.", type: 'penalty');
