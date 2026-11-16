@@ -1,17 +1,19 @@
 // lib/services/sandbox_manager.dart
 
 import 'dart:convert';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter/foundation.dart';
 import 'storage_service.dart';
 import 'lock_service.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class SandboxManager {
   static const String keyGodSave = 'save_godmode';
   static bool isSandboxActive = false;
   static bool persistPenalty = false;
 
-  /// Active le God Mode : verrouille l'accès à save_v3
+  /// Active le God Mode (strictement interdit en release)
   static void enterSandbox() {
+    if (!kDebugMode) return;
     isSandboxActive = true;
     persistPenalty = false;
     StorageService.blockAllRealSaves = true;
@@ -26,14 +28,14 @@ class SandboxManager {
     await deleteSandboxFile();
     await clearNativePenalty();
 
-    if (keepChanges && currentData != null) {
+    if (keepChanges && currentData != null && kDebugMode) {
       await StorageService.forceSaveDirect(currentData);
     }
   }
 
-  /// Sauvegarde du bac à sable (UNIQUEMENT si la persistance est cochée)
+  /// Sauvegarde du bac à sable (UNIQUEMENT en mode debug et si la persistance est cochée)
   static Future<void> saveSandbox(Map<String, dynamic> data) async {
-    if (!isSandboxActive || !persistPenalty) return;
+    if (!kDebugMode || !isSandboxActive || !persistPenalty) return;
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(keyGodSave, jsonEncode(data));
@@ -41,8 +43,12 @@ class SandboxManager {
     } catch (_) {}
   }
 
-  /// Chargement du bac à sable au boot
-  static Future<Map<String, dynamic>?> loadSandbox() async {
+  /// Chargement du bac à sable au boot (ignoré en release)
+  static Future?> loadSandbox() async {
+    if (!kDebugMode) {
+      await deleteSandboxFile();
+      return null;
+    }
     try {
       final prefs = await SharedPreferences.getInstance();
       final String? raw = prefs.getString(keyGodSave);
