@@ -240,14 +240,45 @@ class ShadowBurnApp extends StatefulWidget {
   State<ShadowBurnApp> createState() => _ShadowBurnAppState();
 }
 
-class _ShadowBurnAppState extends State<ShadowBurnApp> {
+class _ShadowBurnAppState extends State<ShadowBurnApp> with WidgetsBindingObserver {
   static const MethodChannel _intentChannel = MethodChannel('com.shadowburn.app/intents');
   static const MethodChannel _lockChannel = MethodChannel('com.shadowburn.app/lock');
+  bool _isShowingProPopup = false;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _handleIncomingIntent();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _handleIncomingIntent();
+      _silentCheckHardwarePurchase();
+    }
+  }
+
+  /// Vérifie discrètement au retour du navigateur si un paiement vient d'être lié à cet appareil
+  Future<void> _silentCheckHardwarePurchase() async {
+    if (!mounted || _isShowingProPopup) return;
+    final game = Provider.of<GameProvider>(context, listen: false);
+    if (game.isPro) return;
+
+    final bool recovered = await game.requestHardwareAutoRecovery();
+    if (recovered && mounted && !_isShowingProPopup) {
+      final ctx = rootNavigatorKey.currentContext;
+      if (ctx != null && ctx.mounted) {
+        _showProSuccessDialog(ctx, game.licenseKey.isNotEmpty ? game.licenseKey : "PASS-PRO-ACTIVÉ");
+      }
+    }
   }
 
   Future<void> _handleIncomingIntent() async {
@@ -283,7 +314,7 @@ class _ShadowBurnAppState extends State<ShadowBurnApp> {
       final String urlKey = (uri.queryParameters['key'] ?? '').trim().toUpperCase();
 
       WidgetsBinding.instance.addPostFrameCallback((_) async {
-        if (!mounted) return;
+        if (!mounted || _isShowingProPopup) return;
         final game = Provider.of<GameProvider>(context, listen: false);
         String activeKey = urlKey;
 
@@ -297,7 +328,7 @@ class _ShadowBurnAppState extends State<ShadowBurnApp> {
         }
 
         final ctx = rootNavigatorKey.currentContext;
-        if (ctx != null && ctx.mounted) {
+        if (ctx != null && ctx.mounted && !_isShowingProPopup) {
           _showProSuccessDialog(ctx, activeKey.isNotEmpty ? activeKey : "PASS-PRO-ACTIVÉ");
         }
       });
@@ -305,6 +336,7 @@ class _ShadowBurnAppState extends State<ShadowBurnApp> {
   }
 
   void _showProSuccessDialog(BuildContext dialogContext, String licenseKey) {
+    _isShowingProPopup = true;
     showDialog(
       context: dialogContext,
       barrierDismissible: false,
@@ -388,6 +420,7 @@ class _ShadowBurnAppState extends State<ShadowBurnApp> {
                 ),
                 onPressed: () {
                   Clipboard.setData(ClipboardData(text: licenseKey));
+                  _isShowingProPopup = false;
                   Navigator.pop(ctx);
                   ScaffoldMessenger.of(dialogContext).showSnackBar(
                     const SnackBar(
