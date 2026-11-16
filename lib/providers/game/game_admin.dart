@@ -66,7 +66,7 @@ mixin _AdminLogic on _GameBase {
     }
   }
 
-  /// Active une clé de licence Pro Monarque
+  /// Active une clé de licence Pro Monarque de façon robuste (tolère le pré-verrouillage serveur)
   Future<bool> activateProKey(String rawKey) async {
     final String cleanKey = rawKey.trim().toUpperCase();
     if (cleanKey.isEmpty) return false;
@@ -78,34 +78,49 @@ mixin _AdminLogic on _GameBase {
 
     try {
       final colRef = FirebaseFirestore.instance.collection('pro_licenses');
-      DocumentReference? targetDocRef;
+      DocumentSnapshot? targetSnap;
 
-      final directDocRef = colRef.doc(cleanKey);
-      final directSnap = await directDocRef.get(const GetOptions(source: Source.serverAndCache));
-
+      final directSnap = await colRef.doc(cleanKey).get(const GetOptions(source: Source.serverAndCache));
       if (directSnap.exists) {
-        targetDocRef = directDocRef;
+        targetSnap = directSnap;
       } else {
         final querySnap = await colRef.where('key', isEqualTo: cleanKey).limit(1).get();
         if (querySnap.docs.isNotEmpty) {
-          targetDocRef = querySnap.docs.first.reference;
-        } else {
-          return false;
+          targetSnap = querySnap.docs.first;
         }
       }
 
-      final String hardwareId = await _getUniqueHardwareId();
+      if (targetSnap == null || !targetSnap.exists) {
+        debugPrint("[PRO_TRACE] Clé introuvable dans Firestore : $cleanKey");
+        return false;
+      }
 
-      await targetDocRef.update({
-        'used': true,
-        'used_at': FieldValue.serverTimestamp(),
-        'used_by': hardwareId,
-        'user_name': _username,
-      });
+      final data = targetSnap.data() as Map<String, dynamic>? ?? {};
+      final String hardwareId = await _getUniqueHardwareId();
+      final bool alreadyUsed = data['used'] == true;
+      final String boundHardware = (data['used_by'] ?? '').toString();
+
+      // Bloque uniquement si la clé est déjà utilisée par UN AUTRE appareil
+      if (alreadyUsed && boundHardware.isNotEmpty && boundHardware != hardwareId) {
+        debugPrint("[PRO_TRACE] Clé déjà liée à un autre appareil : $boundHardware !=$hardwareId");
+        return false;
+      }
+
+      // Mise à jour Firestore non bloquante (le serveur Render a souvent déjà écrit used: true)
+      try {
+        await targetSnap.reference.update({
+          'used': true,
+          'used_at': FieldValue.serverTimestamp(),
+          'used_by': hardwareId,
+          'user_name': _username,
+        });
+      } catch (writeErr) {
+        debugPrint("[PRO_TRACE] Écriture Firestore ignorée : $writeErr");
+      }
 
       _isPro = true;
       if (this is GameProvider) {
-        await (this as GameProvider).saveLicenseLocally(targetDocRef.id);
+        await (this as GameProvider).saveLicenseLocally(targetSnap.id);
       }
 
       _notify();
