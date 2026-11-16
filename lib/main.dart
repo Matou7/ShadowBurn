@@ -8,6 +8,7 @@ import 'package:provider/provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_app_check/firebase_app_check.dart';
 
 import 'providers/game_provider.dart';
 import 'providers/urgent_quest_provider.dart';
@@ -53,8 +54,13 @@ void main() async {
           appId: "1:1045603092576:web:7a4707409f3976d4b9db05",
         ),
       );
+
+      // Activation de Firebase App Check pour le Web (reCAPTCHA Enterprise)
+      await FirebaseAppCheck.instance.activate(
+        webProvider: ReCaptchaEnterpriseProvider('VOTRE_CLE_RECAPTCHA'),
+      );
     } catch (e) {
-      debugPrint("Erreur initialisation Firebase Web: $e");
+      debugPrint("Erreur initialisation Firebase Web / App Check: $e");
     }
 
     runApp(const ShadowBurnTvApp());
@@ -72,8 +78,13 @@ void main() async {
         appId: "1:1045603092576:web:7a4707409f3976d4b9db05",
       ),
     );
+
+    // Activation de Firebase App Check pour Android (Play Integrity en Release / Debug en Dev)
+    await FirebaseAppCheck.instance.activate(
+      androidProvider: kReleaseMode ? AndroidProvider.playIntegrity : AndroidProvider.debug,
+    );
   } catch (e) {
-    debugPrint("Erreur init Firebase Android: $e");
+    debugPrint("Erreur init Firebase Android / App Check: $e");
   }
 
   final prefs = await SharedPreferences.getInstance();
@@ -428,7 +439,6 @@ class _ShadowBurnAppState extends State<ShadowBurnApp> with WidgetsBindingObserv
                 ),
               ],
             ),
-            // Aucun bouton d'action affiché
             actions: const [],
           ),
         );
