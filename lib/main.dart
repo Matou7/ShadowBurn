@@ -244,6 +244,7 @@ class _ShadowBurnAppState extends State<ShadowBurnApp> with WidgetsBindingObserv
   static const MethodChannel _intentChannel = MethodChannel('com.shadowburn.app/intents');
   static const MethodChannel _lockChannel = MethodChannel('com.shadowburn.app/lock');
   bool _isShowingProPopup = false;
+  Timer? _autoCloseTimer;
 
   @override
   void initState() {
@@ -254,6 +255,7 @@ class _ShadowBurnAppState extends State<ShadowBurnApp> with WidgetsBindingObserv
 
   @override
   void dispose() {
+    _autoCloseTimer?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -338,6 +340,21 @@ class _ShadowBurnAppState extends State<ShadowBurnApp> with WidgetsBindingObserv
     if (_isShowingProPopup) return;
     _isShowingProPopup = true;
 
+    // Copie automatique de la clé dans le presse-papier dès l'affichage
+    Clipboard.setData(ClipboardData(text: licenseKey));
+
+    // Timer de fermeture automatique après exactement 2 secondes
+    _autoCloseTimer?.cancel();
+    _autoCloseTimer = Timer(const Duration(seconds: 2), () {
+      if (_isShowingProPopup) {
+        _isShowingProPopup = false;
+        final ctx = rootNavigatorKey.currentContext;
+        if (ctx != null && Navigator.canPop(ctx)) {
+          Navigator.pop(ctx);
+        }
+      }
+    });
+
     showDialog(
       context: dialogContext,
       barrierDismissible: false,
@@ -373,7 +390,7 @@ class _ShadowBurnAppState extends State<ShadowBurnApp> with WidgetsBindingObserv
               mainAxisSize: MainAxisSize.min,
               children: [
                 const Text(
-                  "Paiement vérifié et validé ! Votre statut Monarque Pro est désormais actif sur cet appareil.",
+                  "Paiement vérifié ! Statut Monarque Pro actif et clé copiée automatiquement.",
                   textAlign: TextAlign.center,
                   style: TextStyle(color: Colors.white70, fontSize: 13, height: 1.4),
                 ),
@@ -405,7 +422,7 @@ class _ShadowBurnAppState extends State<ShadowBurnApp> with WidgetsBindingObserv
                 ),
                 const SizedBox(height: 10),
                 const Text(
-                  "Votre clé a été enregistrée. Appuyez sur le bouton pour copier et fermer.",
+                  "Fermeture automatique dans 2 secondes...",
                   textAlign: TextAlign.center,
                   style: TextStyle(color: Colors.white38, fontSize: 10),
                 ),
@@ -422,18 +439,12 @@ class _ShadowBurnAppState extends State<ShadowBurnApp> with WidgetsBindingObserv
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                   ),
                   onPressed: () {
-                    Clipboard.setData(ClipboardData(text: licenseKey));
+                    _autoCloseTimer?.cancel();
                     _isShowingProPopup = false;
                     Navigator.pop(ctx);
-                    ScaffoldMessenger.of(dialogContext).showSnackBar(
-                      const SnackBar(
-                        content: Text("Clé copiée dans le presse-papier !"),
-                        backgroundColor: Color(0xFF00FF66),
-                      ),
-                    );
                   },
                   child: const Text(
-                    "COPIER LA CLÉ & CONTINUER",
+                    "FERMER IMMÉDIATEMENT",
                     style: TextStyle(fontFamily: 'Orbitron', fontWeight: FontWeight.bold, fontSize: 12),
                   ),
                 ),
