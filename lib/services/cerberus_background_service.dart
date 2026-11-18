@@ -1,13 +1,19 @@
+// lib/services/cerberus_background_service.dart
+
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:workmanager/workmanager.dart';
-import 'cerberus_service.dart';
+import 'lock_service.dart';
+import 'storage_service.dart';
 
 @pragma('vm:entry-point')
 void cerberusCallbackDispatcher() {
   Workmanager().executeTask((task, inputData) async {
     try {
-      await CerberusService.checkCharacterUpdates();
+      final penaltyState = await StorageService.readPenaltyState();
+      if (penaltyState['active'] == true) {
+        await LockService.lockScreen(force: true);
+      }
     } catch (_) {}
     return Future.value(true);
   });
@@ -40,13 +46,14 @@ class CerberusBackgroundService {
 
   static Future<void> stopPeriodicCheck() async {
     await Workmanager().cancelByUniqueName(taskName);
-    CerberusService.resetCharacterTracking();
+    previousLevel = 1;
+    currentLevel = 1;
+    previousMaxHealth = 100;
   }
 
   static Future<void> syncHunterState(String hunterId) async {
     try {
-      final DocumentSnapshot> doc = await FirebaseFirestore
-          .instance
+      final doc = await FirebaseFirestore.instance
           .collection('hunters')
           .doc(hunterId)
           .get();

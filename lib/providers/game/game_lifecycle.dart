@@ -2,6 +2,47 @@
 part of '../game_provider.dart';
 
 mixin _LifecycleLogic on _GameBase {
+  /// Valide de manière stricte et distante la licence et l'empreinte matérielle sur Firestore
+  Future<void> verifyLicenseRemotely() async {
+    final gp = this as GameProvider;
+    final String key = gp.licenseKey;
+    if (key.isEmpty) return;
+
+    try {
+      final String currentHwId = await gp.getUniqueHardwareIdForCheckout();
+      
+      final doc = await FirebaseFirestore.instance
+          .collection('pro_licenses')
+          .doc(key)
+          .get()
+          .timeout(const Duration(seconds: 4));
+      
+      if (!doc.exists) {
+        await gp.revokeProStatusLocally();
+        return;
+      }
+
+      final data = doc.data();
+      if (data == null) {
+        await gp.revokeProStatusLocally();
+        return;
+      }
+
+      final bool isUsed = data['used'] == true;
+      final String serverUsedBy = (data['used_by'] ?? '').toString().trim();
+
+      // Invalidation immédiate si used == false ou si used_by a été modifié (ex: remplacé par un faux)
+      if (!isUsed || (serverUsedBy.isNotEmpty && serverUsedBy != currentHwId)) {
+        await gp.revokeProStatusLocally();
+      } else {
+        _isPro = true;
+        _notify();
+      }
+    } catch (e) {
+      debugPrint("[LICENSE REMOTE VERIFY] Mode hors-ligne ou timeout : $e");
+    }
+  }
+
   Future<void> initializeGame() async {
     String source = 'none';
     int? baseline;
@@ -36,6 +77,9 @@ mixin _LifecycleLogic on _GameBase {
     } catch (e) {
       dlog("Chargement impossible : $e");
     }
+
+    // Vérification distante au démarrage pour valider l'intégrité de used_by
+    await verifyLicenseRemotely();
 
     _syncTitleWithRank();
 
@@ -83,7 +127,6 @@ mixin _LifecycleLogic on _GameBase {
     final bool granted = await _requestPermissions();
     if (granted) _steps.start();
 
-    // FILTRE ZONE BLANCHE : Ne déclenche le service permanent que si le joueur a dépassé l'intro et n'est pas en zone blanche
     final String today = _todayKey();
     final bool isWhiteZone = _calendarHistory[today]?['status'] == 'white_zone';
     if (!isWhiteZone && _lastResetDateStr != null) {
@@ -138,6 +181,9 @@ mixin _LifecycleLogic on _GameBase {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (!_loaded) return;
     if (state == AppLifecycleState.resumed) {
+      // SYNCHRONISATION AU RETOUR DE PREMIER PLAN (LIFECYCLE RESUME / SWIPE) : Revalide instantanément le used_by distant
+      verifyLicenseRemotely();
+
       checkMidnightReset();
       _steps.restart();
       _updateCalendarActivity();

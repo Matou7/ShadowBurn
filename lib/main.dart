@@ -8,7 +8,7 @@ import 'package:provider/provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:firebase_core/firebase_core.dart';
-import 'package:firebase_app_check/firebase_app_check.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 import 'providers/game_provider.dart';
 import 'providers/urgent_quest_provider.dart';
@@ -39,52 +39,53 @@ const bool kForceIntroOnBoot   = false;
 
 final GlobalKey<NavigatorState> rootNavigatorKey = GlobalKey<NavigatorState>();
 
+const FirebaseOptions _shadowBurnFirebaseOptions = FirebaseOptions(
+  apiKey: "AIzaSyCEDUjIjkclLQzyqxLnZPmrgGcHhzPEzUI",
+  authDomain: "shadowburn-1d8f8.firebaseapp.com",
+  projectId: "shadowburn-1d8f8",
+  storageBucket: "shadowburn-1d8f8.firebasestorage.app",
+  messagingSenderId: "1045603092576",
+  appId: "1:1045603092576:web:7a4707409f3976d4b9db05",
+);
+
+Future<void> _ensureSilentFirebaseAuth() async {
+  try {
+    if (FirebaseAuth.instance.currentUser == null) {
+      await FirebaseAuth.instance
+          .signInAnonymously()
+          .timeout(const Duration(seconds: 5));
+    }
+  } catch (e) {
+    debugPrint("Avertissement Auth Anonyme Silencieuse: $e");
+  }
+}
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   if (kIsWeb) {
     try {
       await Firebase.initializeApp(
-        options: const FirebaseOptions(
-          apiKey: "AIzaSyCEDUjIjkclLQzyqxLnZPmrgGcHhzPEzUI",
-          authDomain: "shadowburn-1d8f8.firebaseapp.com",
-          projectId: "shadowburn-1d8f8",
-          storageBucket: "shadowburn-1d8f8.firebasestorage.app",
-          messagingSenderId: "1045603092576",
-          appId: "1:1045603092576:web:7a4707409f3976d4b9db05",
-        ),
+        options: _shadowBurnFirebaseOptions,
       );
-
-      // Activation de Firebase App Check pour le Web (reCAPTCHA Enterprise)
-      await FirebaseAppCheck.instance.activate(
-        webProvider: ReCaptchaEnterpriseProvider('6Ldq3SMuAAAAAN9WHJeDA8RKk7A33VUF9nBj4znf'),
-      );
+      await _ensureSilentFirebaseAuth();
     } catch (e) {
-      debugPrint("Erreur initialisation Firebase Web / App Check: $e");
+      debugPrint("Erreur initialisation Firebase Web: $e");
     }
 
+    // Exécution stricte et exclusive de l'application Web TV / Arène
     runApp(const ShadowBurnTvApp());
     return;
   }
 
+  // --- LOGIQUE NATIVE ANDROID / MOBILE ---
   try {
     await Firebase.initializeApp(
-      options: const FirebaseOptions(
-        apiKey: "AIzaSyCEDUjIjkclLQzyqxLnZPmrgGcHhzPEzUI",
-        authDomain: "shadowburn-1d8f8.firebaseapp.com",
-        projectId: "shadowburn-1d8f8",
-        storageBucket: "shadowburn-1d8f8.firebasestorage.app",
-        messagingSenderId: "1045603092576",
-        appId: "1:1045603092576:web:7a4707409f3976d4b9db05",
-      ),
+      options: _shadowBurnFirebaseOptions,
     );
-
-    // Activation de Firebase App Check pour Android (Play Integrity en Release / Debug en Dev)
-    await FirebaseAppCheck.instance.activate(
-      androidProvider: kReleaseMode ? AndroidProvider.playIntegrity : AndroidProvider.debug,
-    );
+    await _ensureSilentFirebaseAuth();
   } catch (e) {
-    debugPrint("Erreur init Firebase Android / App Check: $e");
+    debugPrint("Erreur initialisation Firebase Android: $e");
   }
 
   final prefs = await SharedPreferences.getInstance();
@@ -262,6 +263,7 @@ class _ShadowBurnAppState extends State<ShadowBurnApp> with WidgetsBindingObserv
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _handleIncomingIntent();
+    _checkWebProSuccessUrl();
   }
 
   @override
@@ -276,6 +278,42 @@ class _ShadowBurnAppState extends State<ShadowBurnApp> with WidgetsBindingObserv
     if (state == AppLifecycleState.resumed) {
       _handleIncomingIntent();
       _silentCheckHardwarePurchase();
+    }
+  }
+
+  void _checkWebProSuccessUrl() {
+    if (!kIsWeb) return;
+    final Uri currentUri = Uri.base;
+    final String fullStr = currentUri.toString().toLowerCase();
+    final String fragment = currentUri.fragment.toLowerCase();
+
+    if (fullStr.contains('pro-success') || fragment.contains('pro-success')) {
+      final Map<String, String> params = currentUri.queryParameters;
+      String sessionKey = params['key'] ?? params['session_id'] ?? '';
+      
+      if (sessionKey.isEmpty && fragment.contains('?')) {
+        try {
+          final fragQuery = fragment.split('?').last;
+          final uriParams = Uri.splitQueryString(fragQuery);
+          sessionKey = uriParams['key'] ?? uriParams['session_id'] ?? '';
+        } catch (_) {}
+      }
+
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
+        if (!mounted || _isShowingProPopup) return;
+        final game = Provider.of<GameProvider>(context, listen: false);
+
+        if (sessionKey.isNotEmpty) {
+          await game.activateProKey(sessionKey);
+        } else {
+          await game.requestHardwareAutoRecovery();
+        }
+
+        final ctx = rootNavigatorKey.currentContext;
+        if (ctx != null && ctx.mounted && !_isShowingProPopup) {
+          _showProSuccessDialog(ctx, game.licenseKey.isNotEmpty ? game.licenseKey : "PASS-PRO-ACTIVÉ");
+        }
+      });
     }
   }
 
@@ -323,7 +361,7 @@ class _ShadowBurnAppState extends State<ShadowBurnApp> with WidgetsBindingObserv
     if (uri == null) return;
 
     if (uri.host == 'pro-success' || uri.path.contains('pro-success')) {
-      final String urlKey = (uri.queryParameters['key'] ?? '').trim().toUpperCase();
+      final String urlKey = (uri.queryParameters['key'] ?? uri.queryParameters['session_id'] ?? '').trim().toUpperCase();
 
       WidgetsBinding.instance.addPostFrameCallback((_) async {
         if (!mounted || _isShowingProPopup) return;
@@ -351,10 +389,8 @@ class _ShadowBurnAppState extends State<ShadowBurnApp> with WidgetsBindingObserv
     if (_isShowingProPopup) return;
     _isShowingProPopup = true;
 
-    // Copie de sécurité silencieuse de la clé
     Clipboard.setData(ClipboardData(text: licenseKey));
 
-    // Fermeture automatique programmée à 2 secondes exactes
     _autoCloseTimer?.cancel();
     _autoCloseTimer = Timer(const Duration(seconds: 2), () {
       if (_isShowingProPopup) {

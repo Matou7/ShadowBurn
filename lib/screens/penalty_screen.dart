@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import 'package:vibration/vibration.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../providers/game_provider.dart';
+import '../services/lock_service.dart';
 import '../widgets/system_dialog.dart';
 
 class PenaltyScreen extends StatelessWidget {

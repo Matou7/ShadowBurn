@@ -5,6 +5,7 @@ import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import '../services/audio_service.dart';
 import '../services/quota_guard_service.dart';
 import 'arena_web_helper_stub.dart' if (dart.library.html) 'arena_web_helper_web.dart';
@@ -121,7 +122,11 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
     if (_raidRef != null) {
       bool canWrite = await QuotaGuardService.checkAndIncrementWrite();
       if (canWrite) {
-        await _raidRef!.update({'status': 'failed'}).catchError((_) {});
+        await _raidRef!.update({
+          'status': 'failed',
+          'join_token': _joinToken ?? '',
+          'admin_key': _adminKey ?? '',
+        }).catchError((_) {});
       }
     }
   }
@@ -169,6 +174,12 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
       return;
     }
 
+    try {
+      if (FirebaseAuth.instance.currentUser == null) {
+        await FirebaseAuth.instance.signInAnonymously().timeout(const Duration(seconds: 5));
+      }
+    } catch (_) {}
+
     _recordActivity();
 
     final fullUrl = Uri.decodeFull(Uri.base.toString());
@@ -181,12 +192,14 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
     }
 
     final String myInstanceToken = 'inst_${_generateRandomToken(12)}';
+    String keyToUse = _generateRandomToken(6);
+    String tokenToUse = _generateRandomToken(8);
     String? chosenRoom;
 
     if (explicitRoom != null && explicitRoom.trim().isNotEmpty) {
       chosenRoom = explicitRoom.trim();
     } else {
-      chosenRoom = await _claimNextAvailableRoomSlot(myInstanceToken);
+      chosenRoom = await _claimNextAvailableRoomSlot(myInstanceToken, tokenToUse, keyToUse);
     }
 
     if (!mounted) return;
@@ -228,8 +241,6 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
 
     try {
       final existingDoc = await ref.get();
-      String keyToUse = _generateRandomToken(6);
-      String tokenToUse = _generateRandomToken(8);
 
       if (!existingDoc.exists) {
         final Map<String, dynamic> roomData = {
@@ -316,11 +327,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
         final bool remoteAudioPlaying = (mapData['audio_playing'] == true);
         if (remoteAudioPlaying != _isRadioPlaying) {
           _isRadioPlaying = remoteAudioPlaying;
-          if (_isRadioPlaying) {
-            AudioService.toggleNrjStream();
-          } else {
-            AudioService.stopNrjStream();
-          }
+          AudioService.setNrjStreamState(_isRadioPlaying);
         }
 
         if (hunterCount != _lastKnownHunterCount || hp != _lastKnownHp || st != _lastKnownStatus) {
@@ -333,20 +340,26 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
         if (hp <= 0 && st == 'active') {
           bool canWrite = await QuotaGuardService.checkAndIncrementWrite();
           if (canWrite) {
-            _raidRef!.update({'status': 'victory', 'current_hp': 0}).catchError((_) {});
+            _raidRef!.update({
+              'status': 'victory',
+              'current_hp': 0,
+              'join_token': _joinToken ?? '',
+              'admin_key': _adminKey ?? '',
+            }).catchError((_) {});
           }
           mapData['status'] = 'victory';
           mapData['current_hp'] = 0;
 
           if (_isRadioPlaying) {
             _isRadioPlaying = false;
-            AudioService.stopNrjStream();
+            AudioService.setNrjStreamState(false);
           }
         }
 
         setState(() {
           _raidData = mapData;
           _isRaidDataLoaded = true;
+          _isWorldSaturated = false;
         });
       } else {
         setState(() {
@@ -355,17 +368,43 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
         });
       }
     }, onError: (e) {
-      if (e.toString().contains('resource-exhausted') && mounted) {
-        setState(() {
-          _isNightLockActive = true;
+      debugPrint("[ARENA STREAM ERROR] $e");
+      final String errStr = e.toString().toLowerCase();
+
+      if (errStr.contains('resource-exhausted') || errStr.contains('quota')) {
+        if (mounted) {
+          setState(() {
+            _isWorldSaturated = true;
+          });
+        }
+        Future.delayed(const Duration(seconds: 5), () {
+          if (mounted) {
+            _startListeningToRaid();
+          }
         });
+      } else if (errStr.contains('permission-denied')) {
+        FirebaseAuth.instance.signInAnonymously().then((_) {
+          if (mounted) _startListeningToRaid();
+        }).catchError((_) {});
       }
     });
   }
 
-  Future<String?> _claimNextAvailableRoomSlot(String instanceToken) async {
+  Future<String?> _claimNextAvailableRoomSlot(
+    String instanceToken,
+    String joinToken,
+    String adminKey,
+  ) async {
     final firestore = FirebaseFirestore.instance;
     final now = DateTime.now().millisecondsSinceEpoch;
+    final midnight = DateTime(
+      DateTime.now().year,
+      DateTime.now().month,
+      DateTime.now().day,
+      23,
+      58,
+      0,
+    );
 
     try {
       bool canWrite = await QuotaGuardService.checkAndIncrementWrite();
@@ -404,8 +443,18 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
       await firestore.collection('current_raids').doc(allocatedRoom).set({
         'roomId': allocatedRoom,
         'instance_token': instanceToken,
+        'join_token': joinToken,
+        'admin_key': adminKey,
+        'status': 'waiting',
+        'preset_label': 'RAID STANDARD (5 000 PV)',
+        'current_hp': 5000,
+        'max_hp': 5000,
+        'audio_playing': false,
+        'hunters': [],
+        'logs': [],
+        'target_end_time': midnight.millisecondsSinceEpoch,
         'arena_last_seen': now,
-      }, SetOptions(merge: true));
+      });
 
       return allocatedRoom;
     } catch (e) {
@@ -714,7 +763,12 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
                           return;
                         }
 
-                        bool playing = await AudioService.toggleNrjStream();
+                        final bool nextState = !_isRadioPlaying;
+                        _isRadioPlaying = nextState;
+                        bool playing = await AudioService.setNrjStreamState(nextState);
+                        if (_raidRef != null) {
+                          await _raidRef!.update({'audio_playing': nextState}).catchError((_) {});
+                        }
                         setState(() {});
                         if (mounted) {
                           ScaffoldMessenger.of(context).showSnackBar(

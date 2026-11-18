@@ -8,6 +8,8 @@ import 'universal_audio_stub.dart' if (dart.library.html) 'universal_audio_web.d
 class AudioService {
   static final AudioPlayer _player = AudioPlayer();
   static bool isPlaying = false;
+  static const String _streamUrl =
+      'https://streaming.nrjaudio.fm/ouf274tx4thg?origine=fluxradios&aw_0_1st.station=NRJ-Extravadance-Summer-2026';
 
   static Future<void> _play(String file) async {
     try {
@@ -18,7 +20,7 @@ class AudioService {
         mode: PlayerMode.lowLatency,
       );
     } catch (e) {
-      dlog("Erreur audio ($file) :$e");
+      dlog("Erreur audio ($file) : $e");
     }
   }
 
@@ -28,41 +30,34 @@ class AudioService {
   static Future<void> playNationGoal() => _play('goal.mp3');
   static Future<void> playSystemNotification() => _play('notifications.mp3');
 
-  // --- BASCULE LECTURE / PAUSE DU FLUX SÉCURISÉ ---
-  static Future<bool> toggleNrjStream() async {
+  // --- MÉTHODE DE SYNCHRONISATION DU FLUX NRJ (WEB & NATIF) ---
+  static Future<bool> setNrjStreamState(bool shouldPlay) async {
     try {
-      const String streamUrl = 'https://streaming.nrjaudio.fm/ouf274tx4thg?origine=fluxradios&aw_0_1st.station=NRJ-Extravadance-Summer-2026';
       if (kIsWeb) {
-        isPlaying = UniversalAudioWeb.toggle();
+        isPlaying = UniversalAudioWeb.setPlaying(shouldPlay);
       } else {
-        if (isPlaying) {
-          await _player.pause();
-          isPlaying = false;
-        } else {
+        if (shouldPlay) {
           await _player.setReleaseMode(ReleaseMode.loop);
-          await _player.play(UrlSource(streamUrl), mode: PlayerMode.mediaPlayer);
+          await _player.play(UrlSource(_streamUrl), mode: PlayerMode.mediaPlayer);
           isPlaying = true;
+        } else {
+          await _player.stop();
+          isPlaying = false;
         }
       }
-      dlog("[AUDIO SERVICE] État du flux radio - Lecture : $isPlaying");
+      dlog("[AUDIO SERVICE] État du flux radio imposé - Lecture : $isPlaying");
       return isPlaying;
     } catch (e) {
-      dlog("[AUDIO SERVICE] Erreur bascule flux radio : $e");
+      dlog("[AUDIO SERVICE] Erreur setNrjStreamState : $e");
       return isPlaying;
     }
   }
 
+  static Future<bool> toggleNrjStream() async {
+    return setNrjStreamState(!isPlaying);
+  }
+
   static Future<void> stopNrjStream() async {
-    try {
-      if (kIsWeb) {
-        UniversalAudioWeb.stop();
-      } else {
-        await _player.stop();
-      }
-      isPlaying = false;
-      dlog("[AUDIO SERVICE] Flux radio stoppé.");
-    } catch (e) {
-      dlog("[AUDIO SERVICE] Erreur arrêt flux radio : $e");
-    }
+    await setNrjStreamState(false);
   }
 }

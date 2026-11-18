@@ -3,6 +3,17 @@ import 'dart:js' as js;
 import '../core/log.dart';
 
 class UniversalAudioWeb {
+  static bool setPlaying(bool play) {
+    try {
+      var result = js.context.callMethod('setWebRadioState', [play]);
+      dlog("[WEB AUDIO] État radio forcé à $play -> $result");
+      return result == true;
+    } catch (e) {
+      dlog("[WEB AUDIO] Erreur interop JS setWebRadioState : $e");
+      return false;
+    }
+  }
+
   static bool toggle() {
     try {
       var result = js.context.callMethod('toggleWebRadio');

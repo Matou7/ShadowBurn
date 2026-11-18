@@ -31,7 +31,7 @@ class AuthRecoveryService {
     }
   }
 
-  /// 2. Transfert sécurisé par double preuve (E-mail Stripe + Clé OU 4 derniers chiffres carte)
+  /// 2. Transfert sécurisé par double preuve
   static Future<String?> recoverKeySecurely({
     required String email,
     required String proof,
