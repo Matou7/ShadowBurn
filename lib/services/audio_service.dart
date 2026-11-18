@@ -9,7 +9,7 @@ class AudioService {
   static final AudioPlayer _player = AudioPlayer();
   static bool isPlaying = false;
   static const String _streamUrl =
-      'https://streaming.nrjaudio.fm/ouf274tx4thg?origine=fluxradios&aw_0_1st.station=NRJ-Extravadance-Summer-2026';
+      'https://scdn.nrjaudio.fm/adwz2/fr/30001/mp3_128.mp3?origine=fluxradios';
 
   static Future<void> _play(String file) async {
     try {
@@ -30,7 +30,6 @@ class AudioService {
   static Future<void> playNationGoal() => _play('goal.mp3');
   static Future<void> playSystemNotification() => _play('notifications.mp3');
 
-  // --- MÉTHODE DE SYNCHRONISATION DU FLUX NRJ (WEB & NATIF) ---
   static Future<bool> setNrjStreamState(bool shouldPlay) async {
     try {
       if (kIsWeb) {

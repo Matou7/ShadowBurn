@@ -7,6 +7,7 @@
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
   <meta name="description" content="ShadowBurn Arène TV & Multijoueur">
 
+  <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
   <meta name="apple-mobile-web-app-title" content="shadowburn">
@@ -49,12 +50,38 @@
   <script>
     window._globalAudioStream = null;
     window._wantsAudioPlaying = false;
+    window._currentStreamIndex = 0;
+
+    // Liste ordonnée des flux directs officiels NRJ France (MP3 / AAC haute compatibilité HTML5)
+    const NRJ_FALLBACK_STREAMS = [
+      'https://scdn.nrjaudio.fm/adwz2/fr/30001/mp3_128.mp3?origine=fluxradios',
+      'https://scdn.nrjaudio.fm/fr/30001/mp3_128.mp3?origine=fluxradios',
+      'https://scdn.nrjaudio.fm/adwz2/fr/30001/aac_64.mp3?origine=fluxradios',
+      'https://scdn.nrjaudio.fm/fr/30001/aac_64.mp3?origine=fluxradios'
+    ];
 
     function _initAudioStream() {
       if (!window._globalAudioStream) {
-        // NE JAMAIS mettre crossOrigin = "anonymous" sur un flux Icecast/NRJ sinon le navigateur bloque le son (CORS)
-        var audio = new Audio('https://streaming.nrjaudio.fm/ouf274tx4thg?origine=fluxradios&aw_0_1st.station=NRJ-Extravadance-Summer-2026');
+        const url = NRJ_FALLBACK_STREAMS[window._currentStreamIndex];
+        console.log("[WEB AUDIO] Initialisation du flux #" + window._currentStreamIndex + " :", url);
+        
+        var audio = new Audio(url);
         audio.preload = 'none';
+        audio.volume = 1.0;
+
+        // Bascule automatique sur le serveur de secours en cas d'erreur de source ou de flux mort
+        audio.onerror = function() {
+          console.warn("[WEB AUDIO] Échec du flux #" + window._currentStreamIndex + ", tentative avec le flux suivant...");
+          if (window._wantsAudioPlaying && window._currentStreamIndex < NRJ_FALLBACK_STREAMS.length - 1) {
+            window._currentStreamIndex++;
+            window._globalAudioStream = null;
+            _attemptPlay();
+          } else {
+            console.error("[WEB AUDIO] Tous les flux de secours ont échoué.");
+            window._currentStreamIndex = 0;
+          }
+        };
+
         window._globalAudioStream = audio;
       }
       return window._globalAudioStream;
@@ -65,14 +92,21 @@
       var playPromise = audio.play();
       if (playPromise !== undefined) {
         playPromise.then(function() {
-          console.log("[WEB AUDIO] Flux NRJ actif.");
+          console.log("[WEB AUDIO] Flux NRJ actif et audible !");
         }).catch(function(err) {
-          console.warn("[WEB AUDIO] En attente d'un clic sur l'écran TV (Autoplay bloqué) :", err);
+          if (err.name === 'NotAllowedError') {
+            console.warn("[WEB AUDIO] Autoplay bloqué par le navigateur : cliquez n'importe où sur l'écran TV.");
+          } else if (err.name === 'NotSupportedError') {
+            // Déclenche manuellement le fallback si le navigateur rejette la promesse directement
+            if (audio.onerror) audio.onerror();
+          } else {
+            console.error("[WEB AUDIO] Erreur de lecture :", err);
+          }
         });
       }
     }
 
-    // Débloque automatiquement le son dès que tu cliques n'importe où sur la TV si un ordre de lecture était en attente
+    // Déverrouillage instantané dès la première interaction physique sur l'écran TV
     ['click', 'touchstart', 'keydown'].forEach(function(evt) {
       window.addEventListener(evt, function() {
         if (window._wantsAudioPlaying && window._globalAudioStream && window._globalAudioStream.paused) {
@@ -89,10 +123,10 @@
       } else {
         if (window._globalAudioStream) {
           window._globalAudioStream.pause();
-          // Coupe le buffer live pour éviter le décalage temporel à la reprise
           window._globalAudioStream.src = '';
           window._globalAudioStream = null;
         }
+        window._currentStreamIndex = 0;
         return false;
       }
     };
