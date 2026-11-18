@@ -1344,7 +1344,8 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
 
   Widget _buildDynamicMaximizedQrPanel(String raidStatus, {required bool isVictory}) {
     final String rawJoinUrl = 'https://shadowburn-1d8f8.web.app/#/join?room=$_roomId&token=${_joinToken ?? ""}';
-    final String rawAdminAppUrl = 'shadowburn://admin?room=$_roomId&key=${_adminKey ?? ""}';
+    // MODIFIÉ : Utilise désormais une URL Web hébergée pour la télécommande admin
+    final String rawAdminAppUrl = 'https://shadowburn-1d8f8.web.app/#/admin?room=$_roomId&key=${_adminKey ?? ""}';
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
@@ -1447,4 +1448,3 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
       ),
     );
   }
-}
