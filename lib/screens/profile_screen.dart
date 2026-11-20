@@ -42,6 +42,7 @@ class _ProfileScreenState extends State<ProfileScreen>
   StreamSubscription<DocumentSnapshot>? _roomWatchSubscription;
   int _selectedHpPreset = 5000;
   bool _isCheckingIntent = false;
+  bool _isBindingInProgress = false;
 
   static String? _deviceAdminToken;
   static String? _hardwareFingerprint;
@@ -111,70 +112,75 @@ class _ProfileScreenState extends State<ProfileScreen>
   }
 
   Future<void> _checkIncomingDeeplink() async {
-    if (_isCheckingIntent) return;
+    if (_isCheckingIntent || _isBindingInProgress) return;
     _isCheckingIntent = true;
 
-    String? rawUrl;
+    try {
+      String? rawUrl;
 
-    if (!kIsWeb) {
-      try {
-        rawUrl =
-            await _intentChannel.invokeMethod<String>('getInitialIntentUrl');
-      } catch (_) {}
-    }
-
-    if (rawUrl == null || rawUrl.isEmpty) {
-      rawUrl = Uri.base.toString();
-    }
-
-    if (rawUrl.contains('room=')) {
-      try {
-        final parsedUri = Uri.parse(rawUrl);
-        String? roomId = parsedUri.queryParameters['room'];
-        String? key = parsedUri.queryParameters['key'];
-
-        if (roomId == null && parsedUri.fragment.contains('?')) {
-          final fragParams =
-              Uri.splitQueryString(parsedUri.fragment.split('?').last);
-          roomId = fragParams['room'];
-          key = fragParams['key'];
-        }
-
-        if (roomId != null && roomId.isNotEmpty) {
-          await _attemptSecureBinding(roomId, key ?? '');
-        }
-      } catch (e) {
-        debugPrint("Erreur analyse deeplink: $e");
+      if (!kIsWeb) {
+        try {
+          rawUrl = await _intentChannel
+              .invokeMethod<String>('getInitialIntentUrl')
+              .timeout(const Duration(seconds: 2));
+        } catch (_) {}
       }
-    }
 
-    _isCheckingIntent = false;
+      if (rawUrl == null || rawUrl.isEmpty) {
+        rawUrl = Uri.base.toString();
+      }
+
+      if (rawUrl.contains('room=')) {
+        try {
+          final parsedUri = Uri.parse(rawUrl);
+          String? roomId = parsedUri.queryParameters['room'];
+          String? key = parsedUri.queryParameters['key'];
+
+          if (roomId == null && parsedUri.fragment.contains('?')) {
+            final fragParams =
+                Uri.splitQueryString(parsedUri.fragment.split('?').last);
+            roomId = fragParams['room'];
+            key = fragParams['key'];
+          }
+
+          if (roomId != null && roomId.isNotEmpty) {
+            await _attemptSecureBinding(roomId, key ?? '');
+          }
+        } catch (e) {
+          debugPrint("Erreur analyse deeplink: $e");
+        }
+      }
+    } finally {
+      _isCheckingIntent = false;
+    }
   }
 
   Future<void> _attemptSecureBinding(String roomId, String secretKey) async {
-    if (!mounted) return;
-    final game = Provider.of<GameProvider>(context, listen: false);
-    final bool isProVerified = await game.ensureProStatusLoaded();
-    if (!mounted) return;
-
-    if (!isProVerified) {
-      _unbindFromRoom("ACCÈS REFUSÉ : STATUT MONARQUE PRO REQUIS.");
-      return;
-    }
-
-    final cleanRoomId = roomId.trim();
-    final cleanKey = secretKey.trim();
-
-    if (cleanRoomId.isEmpty) return;
+    if (!mounted || _isBindingInProgress) return;
+    _isBindingInProgress = true;
 
     try {
+      final game = Provider.of<GameProvider>(context, listen: false);
+      final bool isProVerified = await game.ensureProStatusLoaded();
+      if (!mounted) return;
+
+      if (!isProVerified) {
+        _unbindFromRoom("ACCÈS REFUSÉ : STATUT MONARQUE PRO REQUIS.");
+        return;
+      }
+
+      final cleanRoomId = roomId.trim();
+      final cleanKey = secretKey.trim();
+
+      if (cleanRoomId.isEmpty) return;
+
       final docRef = FirebaseFirestore.instance
           .collection('current_raids')
           .doc(cleanRoomId);
-      final doc = await docRef.get();
+      final doc = await docRef.get().timeout(const Duration(seconds: 6));
 
       if (!doc.exists) {
-        _unbindFromRoom("Donjon [$cleanRoomId] inexistant.");
+        _unbindFromRoom("Donjon [$cleanRoomId] inexistant ou fermé.");
         return;
       }
 
@@ -213,7 +219,7 @@ class _ProfileScreenState extends State<ProfileScreen>
       await docRef.set({
         'admin_instance_token': _deviceAdminToken,
         'hardware_fingerprint': _hardwareFingerprint,
-      }, SetOptions(merge: true));
+      }, SetOptions(merge: true)).timeout(const Duration(seconds: 6));
 
       await game.pairAdminRoom(cleanRoomId, adminKey: cleanKey);
 
@@ -243,6 +249,8 @@ class _ProfileScreenState extends State<ProfileScreen>
             _selectedHpPreset = maxHp;
           });
         }
+      }, onError: (e) {
+        debugPrint("Erreur écoute salle admin: $e");
       });
 
       if (mounted) {
@@ -254,8 +262,19 @@ class _ProfileScreenState extends State<ProfileScreen>
           ),
         );
       }
+    } on TimeoutException {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Délai réseau dépassé lors de la liaison au portail."),
+            backgroundColor: Color(0xFFFF2E56),
+          ),
+        );
+      }
     } catch (e) {
       _unbindFromRoom("Erreur de connexion : $e");
+    } finally {
+      _isBindingInProgress = false;
     }
   }
 
@@ -267,7 +286,8 @@ class _ProfileScreenState extends State<ProfileScreen>
       await FirebaseFirestore.instance
           .collection('current_raids')
           .doc(roomToDelete)
-          .delete();
+          .delete()
+          .timeout(const Duration(seconds: 6));
       _unbindFromRoom("Salle [$roomToDelete] supprimée définitivement.");
     } catch (e) {
       debugPrint("Erreur suppression: $e");
@@ -507,11 +527,14 @@ class _ProfileScreenState extends State<ProfileScreen>
               );
 
               try {
-                final response = await http.post(
-                  Uri.parse('https://shadowburn-webhook.onrender.com/api/contact'),
-                  headers: {'Content-Type': 'application/json'},
-                  body: jsonEncode({'email': email, 'message': message}),
-                );
+                final response = await http
+                    .post(
+                      Uri.parse(
+                          'https://shadowburn-webhook.onrender.com/api/contact'),
+                      headers: {'Content-Type': 'application/json'},
+                      body: jsonEncode({'email': email, 'message': message}),
+                    )
+                    .timeout(const Duration(seconds: 10));
 
                 if (response.statusCode == 200) {
                   ScaffoldMessenger.of(context).showSnackBar(
@@ -556,9 +579,12 @@ class _ProfileScreenState extends State<ProfileScreen>
     if (game.isPro &&
         game.pairedAdminRoom != null &&
         game.pairedAdminRoom!.isNotEmpty &&
-        _activeRoom != game.pairedAdminRoom) {
+        _activeRoom != game.pairedAdminRoom &&
+        !_isBindingInProgress) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted && _activeRoom != game.pairedAdminRoom) {
+        if (mounted &&
+            _activeRoom != game.pairedAdminRoom &&
+            !_isBindingInProgress) {
           _attemptSecureBinding(
               game.pairedAdminRoom!, game.pairedAdminKey ?? '');
         }
