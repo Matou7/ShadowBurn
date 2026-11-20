@@ -1344,7 +1344,8 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
 
   Widget _buildDynamicMaximizedQrPanel(String raidStatus, {required bool isVictory}) {
     final String rawJoinUrl = 'https://shadowburn-1d8f8.web.app/#/join?room=$_roomId&token=${_joinToken ?? ""}';
-    final String rawAdminAppUrl = 'https://shadowburn-1d8f8.web.app/#/admin?room=$_roomId&key=${_adminKey ?? ""}';
+    final String rawAdminAppUrl =
+        'https://shadowburn-1d8f8.web.app/#/admin?room=$_roomId&key=${_adminKey ?? ""}&token=${_joinToken ?? ""}';
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
