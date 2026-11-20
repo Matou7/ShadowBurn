@@ -34,6 +34,9 @@ class _ProfileScreenState extends State<ProfileScreen>
   static const MethodChannel _intentChannel =
       MethodChannel('com.shadowburn.app/lock');
 
+  static const int _kAdminLeaseDurationMs = 45000;
+  static const Duration _kFirestoreTimeout = Duration(seconds: 6);
+
   final ScrollController _scrollController = ScrollController();
   final GlobalKey _remoteConsoleKey = GlobalKey();
 
@@ -60,13 +63,14 @@ class _ProfileScreenState extends State<ProfileScreen>
       if (!mounted) return;
 
       if (widget.initialRoomId != null && widget.initialRoomId!.isNotEmpty) {
-        _attemptSecureBinding(widget.initialRoomId!, widget.initialKey ?? '');
+        await _attemptSecureBinding(
+            widget.initialRoomId!, widget.initialKey ?? '');
       } else if (game.pairedAdminRoom != null &&
           game.pairedAdminRoom!.isNotEmpty) {
-        _attemptSecureBinding(
+        await _attemptSecureBinding(
             game.pairedAdminRoom!, game.pairedAdminKey ?? '');
       } else {
-        _checkIncomingDeeplink();
+        await _checkIncomingDeeplink();
       }
     });
   }
@@ -89,6 +93,40 @@ class _ProfileScreenState extends State<ProfileScreen>
       await prefs.setString('shadow_hardware_fingerprint', hw);
     }
     _hardwareFingerprint = hw;
+  }
+
+  /// Met à jour admin_last_seen_ms et lease_expires_at uniquement lors d'une action admin.
+  Future<void> _touchAdminActivity(String roomId) async {
+    if (roomId.isEmpty || _deviceAdminToken == null) return;
+    final int nowMs = DateTime.now().millisecondsSinceEpoch;
+    try {
+      await FirebaseFirestore.instance
+          .collection('current_raids')
+          .doc(roomId)
+          .update({
+        'admin_instance_token': _deviceAdminToken,
+        'admin_last_seen_ms': nowMs,
+        'lease_expires_at': nowMs + _kAdminLeaseDurationMs,
+      }).timeout(_kFirestoreTimeout);
+    } catch (_) {}
+  }
+
+  Future<void> _releaseAdminLease(String? roomId) async {
+    if (roomId == null || roomId.isEmpty || _deviceAdminToken == null) return;
+    try {
+      final docRef =
+          FirebaseFirestore.instance.collection('current_raids').doc(roomId);
+      final doc = await docRef.get().timeout(_kFirestoreTimeout);
+      if (!doc.exists) return;
+      final data = Map<String, dynamic>.from(doc.data() as Map? ?? {});
+      if (data['admin_instance_token']?.toString() == _deviceAdminToken) {
+        await docRef.update({
+          'admin_instance_token': FieldValue.delete(),
+          'admin_last_seen_ms': FieldValue.delete(),
+          'lease_expires_at': FieldValue.delete(),
+        }).timeout(_kFirestoreTimeout);
+      }
+    } catch (_) {}
   }
 
   @override
@@ -155,17 +193,33 @@ class _ProfileScreenState extends State<ProfileScreen>
     }
   }
 
+  void _rejectIntrusionAttempt(String reason) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(reason),
+        backgroundColor: const Color(0xFFFF2E56),
+        duration: const Duration(seconds: 3),
+      ),
+    );
+  }
+
+  /// Vérifie le verrou uniquement au moment de la tentative de liaison / prise de main.
   Future<void> _attemptSecureBinding(String roomId, String secretKey) async {
     if (!mounted || _isBindingInProgress) return;
     _isBindingInProgress = true;
 
     try {
+      if (_deviceAdminToken == null || _hardwareFingerprint == null) {
+        await _initDeviceAdminSecurity();
+      }
+
       final game = Provider.of<GameProvider>(context, listen: false);
       final bool isProVerified = await game.ensureProStatusLoaded();
       if (!mounted) return;
 
       if (!isProVerified) {
-        _unbindFromRoom("ACCÈS REFUSÉ : STATUT MONARQUE PRO REQUIS.");
+        _rejectIntrusionAttempt("ACCÈS REFUSÉ : STATUT MONARQUE PRO REQUIS.");
         return;
       }
 
@@ -177,7 +231,7 @@ class _ProfileScreenState extends State<ProfileScreen>
       final docRef = FirebaseFirestore.instance
           .collection('current_raids')
           .doc(cleanRoomId);
-      final doc = await docRef.get().timeout(const Duration(seconds: 6));
+      final doc = await docRef.get().timeout(_kFirestoreTimeout);
 
       if (!doc.exists) {
         _unbindFromRoom("Donjon [$cleanRoomId] inexistant ou fermé.");
@@ -191,35 +245,55 @@ class _ProfileScreenState extends State<ProfileScreen>
       if (expectedKey.isNotEmpty &&
           cleanKey.isNotEmpty &&
           expectedKey != cleanKey) {
-        _unbindFromRoom("ACCÈS REFUSÉ : Clé Maître invalide.");
+        _rejectIntrusionAttempt("ACCÈS REFUSÉ : Clé Maître invalide.");
         return;
       }
 
+      final int nowMs = DateTime.now().millisecondsSinceEpoch;
       final String? existingAdminInstance =
           data['admin_instance_token']?.toString();
-      final String? existingHwSignature =
-          data['hardware_fingerprint']?.toString();
+      final int lastAdminSeenMs =
+          (data['admin_last_seen_ms'] as num?)?.toInt() ?? 0;
+      final int leaseExpiresAtMs =
+          (data['lease_expires_at'] as num?)?.toInt() ??
+              (lastAdminSeenMs > 0 ? lastAdminSeenMs + _kAdminLeaseDurationMs : 0);
 
-      if (existingAdminInstance != null &&
+      final bool leaseStillValid = leaseExpiresAtMs > nowMs ||
+          (lastAdminSeenMs > 0 && (nowMs - lastAdminSeenMs) < _kAdminLeaseDurationMs);
+
+      final bool occupiedByOtherInstance = existingAdminInstance != null &&
           existingAdminInstance.isNotEmpty &&
-          existingAdminInstance != _deviceAdminToken) {
-        _unbindFromRoom(
-            "ACCÈS BLOQUÉ : Une autre personne contrôle déjà cette télécommande admin depuis son appareil.");
+          existingAdminInstance != _deviceAdminToken &&
+          leaseStillValid;
+
+      if (occupiedByOtherInstance) {
+        if (_activeRoom != cleanRoomId) {
+          await game.unpairAdminRoom();
+        }
+        _rejectIntrusionAttempt(
+            "INTRUSION REFUSÉE : Un autre administrateur contrôle déjà [$cleanRoomId].");
         return;
       }
 
-      if (existingHwSignature != null &&
+      final String? existingHwSignature =
+          data['hardware_fingerprint']?.toString();
+      final bool hardwareConflictOnActiveLease = existingHwSignature != null &&
           existingHwSignature.isNotEmpty &&
-          existingHwSignature != _hardwareFingerprint) {
-        _unbindFromRoom(
-            "ACCÈS REJETÉ : Empreinte matérielle non reconnue pour ce donjon.");
+          existingHwSignature != _hardwareFingerprint &&
+          occupiedByOtherInstance;
+
+      if (hardwareConflictOnActiveLease) {
+        _rejectIntrusionAttempt(
+            "INTRUSION REFUSÉE : Empreinte matérielle non autorisée pour [$cleanRoomId].");
         return;
       }
 
       await docRef.set({
         'admin_instance_token': _deviceAdminToken,
         'hardware_fingerprint': _hardwareFingerprint,
-      }, SetOptions(merge: true)).timeout(const Duration(seconds: 6));
+        'admin_last_seen_ms': nowMs,
+        'lease_expires_at': nowMs + _kAdminLeaseDurationMs,
+      }, SetOptions(merge: true)).timeout(_kFirestoreTimeout);
 
       await game.pairAdminRoom(cleanRoomId, adminKey: cleanKey);
 
@@ -256,7 +330,7 @@ class _ProfileScreenState extends State<ProfileScreen>
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text("Télécommande Maître jumelée sur [$cleanRoomId]"),
+            content: Text("Télécommande Maître active sur [$cleanRoomId]"),
             backgroundColor: const Color(0xFF00FF66),
             duration: const Duration(seconds: 2),
           ),
@@ -272,7 +346,7 @@ class _ProfileScreenState extends State<ProfileScreen>
         );
       }
     } catch (e) {
-      _unbindFromRoom("Erreur de connexion : $e");
+      _rejectIntrusionAttempt("Erreur de connexion : $e");
     } finally {
       _isBindingInProgress = false;
     }
@@ -283,11 +357,12 @@ class _ProfileScreenState extends State<ProfileScreen>
         Provider.of<GameProvider>(context, listen: false).pairedAdminRoom;
     if (roomToDelete == null || roomToDelete.isEmpty) return;
     try {
+      await _releaseAdminLease(roomToDelete);
       await FirebaseFirestore.instance
           .collection('current_raids')
           .doc(roomToDelete)
           .delete()
-          .timeout(const Duration(seconds: 6));
+          .timeout(_kFirestoreTimeout);
       _unbindFromRoom("Salle [$roomToDelete] supprimée définitivement.");
     } catch (e) {
       debugPrint("Erreur suppression: $e");
@@ -295,8 +370,12 @@ class _ProfileScreenState extends State<ProfileScreen>
   }
 
   void _unbindFromRoom(String reason) {
-    if (!mounted) return;
+    final roomToRelease = _activeRoom;
     _roomWatchSubscription?.cancel();
+    if (roomToRelease != null) {
+      _releaseAdminLease(roomToRelease);
+    }
+    if (!mounted) return;
     Provider.of<GameProvider>(context, listen: false).unpairAdminRoom();
     setState(() {
       _activeRoom = null;
@@ -1034,6 +1113,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                     if (newHp != null) {
                       final selected = RaidAdminService.raidPresets
                           .firstWhere((p) => p['hp'] == newHp);
+                      await _touchAdminActivity(effectiveRoom);
                       await RaidAdminService.applyPreset(
                           newHp, selected['label'] as String,
                           roomId: effectiveRoom);
@@ -1057,6 +1137,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                 Expanded(
                   child: _compactButton("+1 MIN", const Color(0xFF00E5FF),
                       () async {
+                    await _touchAdminActivity(effectiveRoom);
                     await RaidAdminService.extendRaidMinutes(1,
                         roomId: effectiveRoom);
                   }),
@@ -1064,6 +1145,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                 const SizedBox(width: 4),
                 Expanded(
                   child: _compactButton("+15 MIN", systemBlue, () async {
+                    await _touchAdminActivity(effectiveRoom);
                     await RaidAdminService.extendRaidMinutes(15,
                         roomId: effectiveRoom);
                   }),
@@ -1071,6 +1153,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                 const SizedBox(width: 4),
                 Expanded(
                   child: _compactButton("+30 MIN", systemBlue, () async {
+                    await _touchAdminActivity(effectiveRoom);
                     await RaidAdminService.extendRaidMinutes(30,
                         roomId: effectiveRoom);
                   }),
@@ -1078,6 +1161,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                 const SizedBox(width: 4),
                 Expanded(
                   child: _compactButton("RESET 24H", Colors.amber, () async {
+                    await _touchAdminActivity(effectiveRoom);
                     await RaidAdminService.resetToMidnight(
                         roomId: effectiveRoom);
                   }),
@@ -1090,6 +1174,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                 Expanded(
                   child: _compactButton("-1 MIN", const Color(0xFFFFAB91),
                       () async {
+                    await _touchAdminActivity(effectiveRoom);
                     await RaidAdminService.reduceRaidMinutes(1,
                         roomId: effectiveRoom);
                   }),
@@ -1098,6 +1183,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                 Expanded(
                   child: _compactButton("-15 MIN", const Color(0xFFFF7043),
                       () async {
+                    await _touchAdminActivity(effectiveRoom);
                     await RaidAdminService.reduceRaidMinutes(15,
                         roomId: effectiveRoom);
                   }),
@@ -1106,6 +1192,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                 Expanded(
                   child: _compactButton("-30 MIN", const Color(0xFFFF7043),
                       () async {
+                    await _touchAdminActivity(effectiveRoom);
                     await RaidAdminService.reduceRaidMinutes(30,
                         roomId: effectiveRoom);
                   }),
@@ -1114,6 +1201,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                 Expanded(
                   child: _compactButton("RESET À 0", const Color(0xFFFF2E56),
                       () async {
+                    await _touchAdminActivity(effectiveRoom);
                     await RaidAdminService.expireRaidNow(
                         roomId: effectiveRoom);
                   }),
@@ -1134,6 +1222,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                 Expanded(
                   child: _compactButton("LANCER", const Color(0xFF00FF66),
                       () async {
+                    await _touchAdminActivity(effectiveRoom);
                     await RaidAdminService.setRaidStatus('active',
                         roomId: effectiveRoom);
                   }),
@@ -1142,6 +1231,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                 Expanded(
                   child: _compactButton("-200 PV", const Color(0xFFFF9100),
                       () async {
+                    await _touchAdminActivity(effectiveRoom);
                     await RaidAdminService.strikeBoss(200,
                         roomId: effectiveRoom);
                   }),
@@ -1150,6 +1240,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                 Expanded(
                   child: _compactButton("RESET BOSS", const Color(0xFFFF2E56),
                       () async {
+                    await _touchAdminActivity(effectiveRoom);
                     await RaidAdminService.resetBoss(roomId: effectiveRoom);
                   }),
                 ),
