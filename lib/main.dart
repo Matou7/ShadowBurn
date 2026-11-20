@@ -73,12 +73,10 @@ void main() async {
       debugPrint("Erreur initialisation Firebase Web: $e");
     }
 
-    // Exécution stricte et exclusive de l'application Web TV / Arène
     runApp(const ShadowBurnTvApp());
     return;
   }
 
-  // --- LOGIQUE NATIVE ANDROID / MOBILE ---
   try {
     await Firebase.initializeApp(
       options: _shadowBurnFirebaseOptions,
@@ -89,10 +87,12 @@ void main() async {
   }
 
   final prefs = await SharedPreferences.getInstance();
-  final bool introAlreadyDone = prefs.getBool('has_completed_intro') ?? false;
+  final bool introAlreadyDone =
+      prefs.getBool('has_completed_intro') ?? false;
 
   final Map<String, dynamic>? godSave = await SandboxManager.loadSandbox();
-  final bool isPersistentGod = godSave != null && godSave['godModePersistPenalty'] == true;
+  final bool isPersistentGod =
+      godSave != null && godSave['godModePersistPenalty'] == true;
 
   bool startsInPenalty = false;
   int initialSquatsDone = 0;
@@ -116,8 +116,12 @@ void main() async {
     if (penaltyInReal || kForcePenaltyOnBoot) {
       final penaltyState = await StorageService.readPenaltyState();
       startsInPenalty = true;
-      initialSquatsDone = (penaltyState['squatsDone'] as int?) ?? (realData?['penaltySquats'] as int?) ?? 0;
-      initialSquatsGoal = (penaltyState['squatsGoal'] as int?) ?? (realData?['penaltyGoal'] as int?) ?? 100;
+      initialSquatsDone = (penaltyState['squatsDone'] as int?) ??
+          (realData?['penaltySquats'] as int?) ??
+          0;
+      initialSquatsGoal = (penaltyState['squatsGoal'] as int?) ??
+          (realData?['penaltyGoal'] as int?) ??
+          100;
       if (initialSquatsGoal <= 0) initialSquatsGoal = 100;
     } else {
       startsInPenalty = false;
@@ -230,16 +234,16 @@ class ShadowBurnTvApp extends StatelessWidget {
         if (settings.name == '/admin' ||
             currentUrl.contains('admin') ||
             fragment.contains('admin')) {
-          return MaterialPageRoute(builder: (_) => AdminScreen());
+          return MaterialPageRoute(builder: (_) => const AdminScreen());
         }
 
         if (settings.name == '/join' ||
             currentUrl.contains('join') ||
             fragment.contains('join')) {
-          return MaterialPageRoute(builder: (_) => HunterJoinScreen());
+          return MaterialPageRoute(builder: (_) => const HunterJoinScreen());
         }
 
-        return MaterialPageRoute(builder: (_) => ArenaTvScreen());
+        return MaterialPageRoute(builder: (_) => const ArenaTvScreen());
       },
     );
   }
@@ -252,9 +256,12 @@ class ShadowBurnApp extends StatefulWidget {
   State<ShadowBurnApp> createState() => _ShadowBurnAppState();
 }
 
-class _ShadowBurnAppState extends State<ShadowBurnApp> with WidgetsBindingObserver {
-  static const MethodChannel _intentChannel = MethodChannel('com.shadowburn.app/intents');
-  static const MethodChannel _lockChannel = MethodChannel('com.shadowburn.app/lock');
+class _ShadowBurnAppState extends State<ShadowBurnApp>
+    with WidgetsBindingObserver {
+  static const MethodChannel _intentChannel =
+      MethodChannel('com.shadowburn.app/intents');
+  static const MethodChannel _lockChannel =
+      MethodChannel('com.shadowburn.app/lock');
   bool _isShowingProPopup = false;
   Timer? _autoCloseTimer;
 
@@ -290,7 +297,7 @@ class _ShadowBurnAppState extends State<ShadowBurnApp> with WidgetsBindingObserv
     if (fullStr.contains('pro-success') || fragment.contains('pro-success')) {
       final Map<String, String> params = currentUri.queryParameters;
       String sessionKey = params['key'] ?? params['session_id'] ?? '';
-      
+
       if (sessionKey.isEmpty && fragment.contains('?')) {
         try {
           final fragQuery = fragment.split('?').last;
@@ -311,7 +318,8 @@ class _ShadowBurnAppState extends State<ShadowBurnApp> with WidgetsBindingObserv
 
         final ctx = rootNavigatorKey.currentContext;
         if (ctx != null && ctx.mounted && !_isShowingProPopup) {
-          _showProSuccessDialog(ctx, game.licenseKey.isNotEmpty ? game.licenseKey : "PASS-PRO-ACTIVÉ");
+          _showProSuccessDialog(ctx,
+              game.licenseKey.isNotEmpty ? game.licenseKey : "PASS-PRO-ACTIVÉ");
         }
       });
     }
@@ -320,27 +328,30 @@ class _ShadowBurnAppState extends State<ShadowBurnApp> with WidgetsBindingObserv
   Future<void> _silentCheckHardwarePurchase() async {
     if (!mounted || _isShowingProPopup) return;
     final game = Provider.of<GameProvider>(context, listen: false);
-    if (game.isPro) return;
+    if (await game.ensureProStatusLoaded()) return;
 
     final bool recovered = await game.requestHardwareAutoRecovery();
     if (recovered && mounted && !_isShowingProPopup) {
       final ctx = rootNavigatorKey.currentContext;
       if (ctx != null && ctx.mounted) {
-        _showProSuccessDialog(ctx, game.licenseKey.isNotEmpty ? game.licenseKey : "PASS-PRO-ACTIVÉ");
+        _showProSuccessDialog(ctx,
+            game.licenseKey.isNotEmpty ? game.licenseKey : "PASS-PRO-ACTIVÉ");
       }
     }
   }
 
   Future<void> _handleIncomingIntent() async {
     try {
-      final String? initialLink = await _intentChannel.invokeMethod<String>('getInitialLink');
+      final String? initialLink =
+          await _intentChannel.invokeMethod<String>('getInitialLink');
       if (initialLink != null && initialLink.isNotEmpty) {
         _routeDeepLink(initialLink);
       }
     } catch (_) {}
 
     try {
-      final String? altLink = await _lockChannel.invokeMethod<String>('getInitialIntentUrl');
+      final String? altLink =
+          await _lockChannel.invokeMethod<String>('getInitialIntentUrl');
       if (altLink != null && altLink.isNotEmpty) {
         _routeDeepLink(altLink);
       }
@@ -361,7 +372,10 @@ class _ShadowBurnAppState extends State<ShadowBurnApp> with WidgetsBindingObserv
     if (uri == null) return;
 
     if (uri.host == 'pro-success' || uri.path.contains('pro-success')) {
-      final String urlKey = (uri.queryParameters['key'] ?? uri.queryParameters['session_id'] ?? '').trim().toUpperCase();
+      final String urlKey =
+          (uri.queryParameters['key'] ?? uri.queryParameters['session_id'] ?? '')
+              .trim()
+              .toUpperCase();
 
       WidgetsBinding.instance.addPostFrameCallback((_) async {
         if (!mounted || _isShowingProPopup) return;
@@ -379,8 +393,54 @@ class _ShadowBurnAppState extends State<ShadowBurnApp> with WidgetsBindingObserv
 
         final ctx = rootNavigatorKey.currentContext;
         if (ctx != null && ctx.mounted && !_isShowingProPopup) {
-          _showProSuccessDialog(ctx, activeKey.isNotEmpty ? activeKey : "PASS-PRO-ACTIVÉ");
+          _showProSuccessDialog(
+              ctx, activeKey.isNotEmpty ? activeKey : "PASS-PRO-ACTIVÉ");
         }
+      });
+      return;
+    }
+
+    if (uri.host == 'admin' ||
+        uri.path.contains('admin') ||
+        link.contains('room=')) {
+      String? roomId = uri.queryParameters['room'];
+      String? adminKey = uri.queryParameters['key'];
+
+      if ((roomId == null || roomId.isEmpty) && uri.fragment.contains('?')) {
+        try {
+          final fragParams = Uri.splitQueryString(uri.fragment.split('?').last);
+          roomId = fragParams['room'];
+          adminKey ??= fragParams['key'];
+        } catch (_) {}
+      }
+
+      final String cleanRoom = (roomId ?? '').trim();
+      final String cleanKey = (adminKey ?? '').trim();
+      if (cleanRoom.isEmpty) return;
+
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
+        if (!mounted) return;
+        final game = Provider.of<GameProvider>(context, listen: false);
+
+        // Attend le chargement complet du statut Pro avant toute vérification
+        final bool isProVerified = await game.ensureProStatusLoaded();
+
+        if (!isProVerified) {
+          final ctx = rootNavigatorKey.currentContext;
+          if (ctx != null && ctx.mounted) {
+            ScaffoldMessenger.of(ctx).showSnackBar(
+              const SnackBar(
+                content: Text(
+                    "ACCÈS REFUSÉ : TÉLÉCOMMANDE RÉSERVÉE AU MODE MONARQUE PRO."),
+                backgroundColor: Color(0xFFFF2E56),
+                duration: Duration(seconds: 3),
+              ),
+            );
+          }
+          return;
+        }
+
+        await game.pairAdminRoom(cleanRoom, adminKey: cleanKey);
       });
     }
   }
@@ -439,12 +499,17 @@ class _ShadowBurnAppState extends State<ShadowBurnApp> with WidgetsBindingObserv
                 const Text(
                   "Statut Pro activé avec succès.",
                   textAlign: TextAlign.center,
-                  style: TextStyle(color: Colors.white70, fontSize: 13, height: 1.4),
+                  style: TextStyle(
+                      color: Colors.white70, fontSize: 13, height: 1.4),
                 ),
                 const SizedBox(height: 20),
                 const Text(
                   "VOTRE CLÉ DE LICENCE :",
-                  style: TextStyle(fontFamily: 'Orbitron', color: Color(0xFF00E5FF), fontSize: 10, letterSpacing: 1.5),
+                  style: TextStyle(
+                      fontFamily: 'Orbitron',
+                      color: Color(0xFF00E5FF),
+                      fontSize: 10,
+                      letterSpacing: 1.5),
                 ),
                 const SizedBox(height: 8),
                 Container(
@@ -452,7 +517,8 @@ class _ShadowBurnAppState extends State<ShadowBurnApp> with WidgetsBindingObserv
                   padding: const EdgeInsets.all(14),
                   decoration: BoxDecoration(
                     color: Colors.black,
-                    border: Border.all(color: const Color(0xFF00E5FF), width: 1.5),
+                    border:
+                        Border.all(color: const Color(0xFF00E5FF), width: 1.5),
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: SelectableText(
@@ -544,14 +610,17 @@ class _RootPermissionGatewayState extends State<RootPermissionGateway>
 
   Future<void> _evaluateGate() async {
     final prefs = await SharedPreferences.getInstance();
-    final bool introDone = kForceIntroOnBoot ? false : (prefs.getBool('has_completed_intro') ?? false);
+    final bool introDone = kForceIntroOnBoot
+        ? false
+        : (prefs.getBool('has_completed_intro') ?? false);
 
     final PermissionStatus overlay = await Permission.systemAlertWindow.status;
     final PermissionStatus activity = await Permission.activityRecognition.status;
 
     bool notifsGranted = false;
     try {
-      final bool? resNotifs = await _platform.invokeMethod<bool>('checkAllNotificationsEnabled');
+      final bool? resNotifs =
+          await _platform.invokeMethod<bool>('checkAllNotificationsEnabled');
       notifsGranted = resNotifs ?? false;
     } catch (_) {
       final PermissionStatus notifs = await Permission.notification.status;
@@ -560,7 +629,8 @@ class _RootPermissionGatewayState extends State<RootPermissionGateway>
 
     bool usageStatsGranted = false;
     try {
-      final bool? resUsage = await _platform.invokeMethod<bool>('checkUsagePermission');
+      final bool? resUsage =
+          await _platform.invokeMethod<bool>('checkUsagePermission');
       usageStatsGranted = resUsage ?? false;
     } catch (_) {
       usageStatsGranted = false;
@@ -568,18 +638,20 @@ class _RootPermissionGatewayState extends State<RootPermissionGateway>
 
     bool batteryGranted = false;
     try {
-      final bool? resBattery = await _platform.invokeMethod<bool>('checkBatteryOptimizations');
+      final bool? resBattery =
+          await _platform.invokeMethod<bool>('checkBatteryOptimizations');
       batteryGranted = resBattery ?? false;
     } catch (_) {
-      final PermissionStatus batteryStatus = await Permission.ignoreBatteryOptimizations.status;
+      final PermissionStatus batteryStatus =
+          await Permission.ignoreBatteryOptimizations.status;
       batteryGranted = batteryStatus.isGranted;
     }
 
     final bool allGranted = overlay.isGranted &&
-                          activity.isGranted &&
-                          notifsGranted &&
-                          usageStatsGranted &&
-                          batteryGranted;
+        activity.isGranted &&
+        notifsGranted &&
+        usageStatsGranted &&
+        batteryGranted;
 
     if (!mounted) return;
     setState(() {
@@ -611,7 +683,8 @@ class _RootPermissionGatewayState extends State<RootPermissionGateway>
           final game = context.read<GameProvider>();
           game.updateUsername(hunterName);
           final now = DateTime.now();
-          final todayStr = "${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}";
+          final todayStr =
+              "${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}";
           game.initializeFirstDay(todayStr);
 
           setState(() {
@@ -754,6 +827,7 @@ class MainScaffold extends StatefulWidget {
 class _MainScaffoldState extends State<MainScaffold> {
   final PageController _pageController = PageController(initialPage: 0);
   int _activePage = 0;
+  String? _lastSwitchedRoom;
 
   final List<Widget> _screens = [
     const StatsQuestsScreen(),
@@ -771,6 +845,25 @@ class _MainScaffoldState extends State<MainScaffold> {
   Widget build(BuildContext context) {
     final game = context.watch<GameProvider>();
     const Color systemBlue = Color(0xFF00E5FF);
+
+    final String? pairedRoom = game.pairedAdminRoom;
+    if (game.isPro &&
+        pairedRoom != null &&
+        pairedRoom.isNotEmpty &&
+        _lastSwitchedRoom != pairedRoom) {
+      _lastSwitchedRoom = pairedRoom;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _pageController.hasClients && _activePage != 2) {
+          _pageController.animateToPage(
+            2,
+            duration: const Duration(milliseconds: 250),
+            curve: Curves.easeOut,
+          );
+        }
+      });
+    } else if (pairedRoom == null || pairedRoom.isEmpty) {
+      _lastSwitchedRoom = null;
+    }
 
     return Scaffold(
       backgroundColor: Colors.black,

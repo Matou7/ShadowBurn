@@ -18,7 +18,6 @@ import '../providers/urgent_quest_provider.dart';
 import '../widgets/system_dialog.dart';
 import '../utils/admin_utils.dart';
 import '../services/raid_admin_service.dart';
-import '../services/auth_recovery_service.dart';
 
 class ProfileScreen extends StatefulWidget {
   final String? initialRoomId;
@@ -30,15 +29,20 @@ class ProfileScreen extends StatefulWidget {
   State<ProfileScreen> createState() => _ProfileScreenState();
 }
 
-class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserver {
-  static const MethodChannel _intentChannel = MethodChannel('com.shadowburn.app/lock');
+class _ProfileScreenState extends State<ProfileScreen>
+    with WidgetsBindingObserver {
+  static const MethodChannel _intentChannel =
+      MethodChannel('com.shadowburn.app/lock');
+
+  final ScrollController _scrollController = ScrollController();
+  final GlobalKey _remoteConsoleKey = GlobalKey();
 
   String? _activeRoom;
   String? _verifiedKey;
   StreamSubscription<DocumentSnapshot>? _roomWatchSubscription;
   int _selectedHpPreset = 5000;
   bool _isCheckingIntent = false;
-  
+
   static String? _deviceAdminToken;
   static String? _hardwareFingerprint;
 
@@ -48,26 +52,39 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
     WidgetsBinding.instance.addObserver(this);
     _initDeviceAdminSecurity();
 
-    if (widget.initialRoomId != null && widget.initialRoomId!.isNotEmpty) {
-      _attemptSecureBinding(widget.initialRoomId!, widget.initialKey ?? '');
-    } else {
-      _checkIncomingDeeplink();
-    }
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      final game = Provider.of<GameProvider>(context, listen: false);
+      await game.ensureProStatusLoaded();
+      if (!mounted) return;
+
+      if (widget.initialRoomId != null && widget.initialRoomId!.isNotEmpty) {
+        _attemptSecureBinding(widget.initialRoomId!, widget.initialKey ?? '');
+      } else if (game.pairedAdminRoom != null &&
+          game.pairedAdminRoom!.isNotEmpty) {
+        _attemptSecureBinding(
+            game.pairedAdminRoom!, game.pairedAdminKey ?? '');
+      } else {
+        _checkIncomingDeeplink();
+      }
+    });
   }
 
   Future<void> _initDeviceAdminSecurity() async {
     final prefs = await SharedPreferences.getInstance();
-    
+
     String? token = prefs.getString('shadow_device_admin_token');
     if (token == null || token.isEmpty) {
-      token = 'admin_inst_${DateTime.now().millisecondsSinceEpoch}_${Random().nextInt(999999)}';
+      token =
+          'admin_inst_${DateTime.now().millisecondsSinceEpoch}_${Random().nextInt(999999)}';
       await prefs.setString('shadow_device_admin_token', token);
     }
     _deviceAdminToken = token;
 
     String? hw = prefs.getString('shadow_hardware_fingerprint');
     if (hw == null || hw.isEmpty) {
-      hw = 'hw_sig_${PlatformDispatcher.instance.views.first.physicalSize.width.toInt()}_${Random().nextInt(99999999)}';
+      hw =
+          'hw_sig_${PlatformDispatcher.instance.views.first.physicalSize.width.toInt()}_${Random().nextInt(99999999)}';
       await prefs.setString('shadow_hardware_fingerprint', hw);
     }
     _hardwareFingerprint = hw;
@@ -80,6 +97,19 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
     }
   }
 
+  void _scrollToRemoteConsole() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final ctx = _remoteConsoleKey.currentContext;
+      if (ctx != null) {
+        Scrollable.ensureVisible(
+          ctx,
+          duration: const Duration(milliseconds: 350),
+          curve: Curves.easeOut,
+        );
+      }
+    });
+  }
+
   Future<void> _checkIncomingDeeplink() async {
     if (_isCheckingIntent) return;
     _isCheckingIntent = true;
@@ -88,7 +118,8 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
 
     if (!kIsWeb) {
       try {
-        rawUrl = await _intentChannel.invokeMethod<String>('getInitialIntentUrl');
+        rawUrl =
+            await _intentChannel.invokeMethod<String>('getInitialIntentUrl');
       } catch (_) {}
     }
 
@@ -103,7 +134,8 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
         String? key = parsedUri.queryParameters['key'];
 
         if (roomId == null && parsedUri.fragment.contains('?')) {
-          final fragParams = Uri.splitQueryString(parsedUri.fragment.split('?').last);
+          final fragParams =
+              Uri.splitQueryString(parsedUri.fragment.split('?').last);
           roomId = fragParams['room'];
           key = fragParams['key'];
         }
@@ -120,8 +152,12 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
   }
 
   Future<void> _attemptSecureBinding(String roomId, String secretKey) async {
+    if (!mounted) return;
     final game = Provider.of<GameProvider>(context, listen: false);
-    if (!game.isPro) {
+    final bool isProVerified = await game.ensureProStatusLoaded();
+    if (!mounted) return;
+
+    if (!isProVerified) {
       _unbindFromRoom("ACCÈS REFUSÉ : STATUT MONARQUE PRO REQUIS.");
       return;
     }
@@ -132,7 +168,9 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
     if (cleanRoomId.isEmpty) return;
 
     try {
-      final docRef = FirebaseFirestore.instance.collection('current_raids').doc(cleanRoomId);
+      final docRef = FirebaseFirestore.instance
+          .collection('current_raids')
+          .doc(cleanRoomId);
       final doc = await docRef.get();
 
       if (!doc.exists) {
@@ -140,24 +178,35 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
         return;
       }
 
-      final data = doc.data() as Map<String, dynamic>? ?? {};
-      final String expectedKey = data['admin_key'] ?? '';
+      final Map<String, dynamic> data =
+          Map<String, dynamic>.from(doc.data() as Map? ?? {});
+      final String expectedKey = (data['admin_key'] ?? '').toString().trim();
 
-      if (expectedKey.isNotEmpty && cleanKey.isNotEmpty && expectedKey != cleanKey) {
+      if (expectedKey.isNotEmpty &&
+          cleanKey.isNotEmpty &&
+          expectedKey != cleanKey) {
         _unbindFromRoom("ACCÈS REFUSÉ : Clé Maître invalide.");
         return;
       }
 
-      final String? existingAdminInstance = data['admin_instance_token'];
-      final String? existingHwSignature = data['hardware_fingerprint'];
+      final String? existingAdminInstance =
+          data['admin_instance_token']?.toString();
+      final String? existingHwSignature =
+          data['hardware_fingerprint']?.toString();
 
-      if (existingAdminInstance != null && existingAdminInstance.isNotEmpty && existingAdminInstance != _deviceAdminToken) {
-        _unbindFromRoom("ACCÈS BLOQUÉ : Une autre personne contrôle déjà cette télécommande admin depuis son appareil.");
+      if (existingAdminInstance != null &&
+          existingAdminInstance.isNotEmpty &&
+          existingAdminInstance != _deviceAdminToken) {
+        _unbindFromRoom(
+            "ACCÈS BLOQUÉ : Une autre personne contrôle déjà cette télécommande admin depuis son appareil.");
         return;
       }
 
-      if (existingHwSignature != null && existingHwSignature.isNotEmpty && existingHwSignature != _hardwareFingerprint) {
-        _unbindFromRoom("ACCÈS REJETÉ : Empreinte matérielle non reconnue pour ce donjon.");
+      if (existingHwSignature != null &&
+          existingHwSignature.isNotEmpty &&
+          existingHwSignature != _hardwareFingerprint) {
+        _unbindFromRoom(
+            "ACCÈS REJETÉ : Empreinte matérielle non reconnue pour ce donjon.");
         return;
       }
 
@@ -166,13 +215,18 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
         'hardware_fingerprint': _hardwareFingerprint,
       }, SetOptions(merge: true));
 
+      await game.pairAdminRoom(cleanRoomId, adminKey: cleanKey);
+
       _roomWatchSubscription?.cancel();
 
+      if (!mounted) return;
       setState(() {
         _activeRoom = cleanRoomId;
         _verifiedKey = cleanKey;
         _selectedHpPreset = ((data['max_hp'] ?? 5000) as num).toInt();
       });
+
+      _scrollToRemoteConsole();
 
       _roomWatchSubscription = docRef.snapshots().listen((snapshot) {
         if (!snapshot.exists) {
@@ -180,7 +234,8 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
           return;
         }
 
-        final roomData = snapshot.data() as Map<String, dynamic>? ?? {};
+        final Map<String, dynamic> roomData =
+            Map<String, dynamic>.from(snapshot.data() as Map? ?? {});
         final int maxHp = ((roomData['max_hp'] ?? 5000) as num).toInt();
 
         if (mounted) {
@@ -193,7 +248,7 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text("Jumelage sécurisé, matériel vérifié sur [$cleanRoomId]"),
+            content: Text("Télécommande Maître jumelée sur [$cleanRoomId]"),
             backgroundColor: const Color(0xFF00FF66),
             duration: const Duration(seconds: 2),
           ),
@@ -205,10 +260,14 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
   }
 
   Future<void> _deleteActiveRoom() async {
-    if (_activeRoom == null) return;
-    final roomToDelete = _activeRoom!;
+    final roomToDelete = _activeRoom ??
+        Provider.of<GameProvider>(context, listen: false).pairedAdminRoom;
+    if (roomToDelete == null || roomToDelete.isEmpty) return;
     try {
-      await FirebaseFirestore.instance.collection('current_raids').doc(roomToDelete).delete();
+      await FirebaseFirestore.instance
+          .collection('current_raids')
+          .doc(roomToDelete)
+          .delete();
       _unbindFromRoom("Salle [$roomToDelete] supprimée définitivement.");
     } catch (e) {
       debugPrint("Erreur suppression: $e");
@@ -218,6 +277,7 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
   void _unbindFromRoom(String reason) {
     if (!mounted) return;
     _roomWatchSubscription?.cancel();
+    Provider.of<GameProvider>(context, listen: false).unpairAdminRoom();
     setState(() {
       _activeRoom = null;
       _verifiedKey = null;
@@ -236,6 +296,7 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _roomWatchSubscription?.cancel();
+    _scrollController.dispose();
     super.dispose();
   }
 
@@ -270,8 +331,10 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
             decoration: const InputDecoration(
               hintText: "Clé de licence Pro (ex: SHADOW-...)",
               hintStyle: TextStyle(color: Colors.white24),
-              enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Color(0xFFFF9100))),
-              focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: Color(0xFFFF9100))),
+              enabledBorder: UnderlineInputBorder(
+                  borderSide: BorderSide(color: Color(0xFFFF9100))),
+              focusedBorder: UnderlineInputBorder(
+                  borderSide: BorderSide(color: Color(0xFFFF9100))),
             ),
           ),
           const SizedBox(height: 20),
@@ -283,7 +346,8 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
               style: OutlinedButton.styleFrom(
                 foregroundColor: const Color(0xFF00E5FF),
                 side: const BorderSide(color: Color(0xFF00E5FF)),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(4)),
               ),
               icon: const Icon(Icons.security, size: 16),
               label: const Text(
@@ -295,13 +359,17 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
                 Navigator.pop(context);
 
                 messenger.showSnackBar(
-                  const SnackBar(content: Text("Interrogation de l'empreinte matérielle...")),
+                  const SnackBar(
+                      content:
+                          Text("Interrogation de l'empreinte matérielle...")),
                 );
 
                 final bool success = await game.requestHardwareAutoRecovery();
                 messenger.showSnackBar(
                   SnackBar(
-                    content: Text(success ? "Pass Pro restauré et activé avec succès !" : "Aucun achat détecté pour cet appareil."),
+                    content: Text(success
+                        ? "Pass Pro restauré et activé avec succès !"
+                        : "Aucun achat détecté pour cet appareil."),
                     backgroundColor: success ? Colors.green : Colors.redAccent,
                   ),
                 );
@@ -312,12 +380,15 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
       ),
       color: const Color(0xFFFF9100),
       actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: const Text("ANNULER")),
+        TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text("ANNULER")),
         OutlinedButton(
           style: OutlinedButton.styleFrom(
             side: const BorderSide(color: Color(0xFFFF9100)),
             backgroundColor: const Color(0xFFFF9100).withOpacity(0.2),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
           ),
           onPressed: () async {
             final messenger = ScaffoldMessenger.of(context);
@@ -328,13 +399,16 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
               final bool success = await game.activateProKey(keyInput);
               messenger.showSnackBar(
                 SnackBar(
-                  content: Text(success ? "Statut Monarque activé avec succès !" : "Clé invalide ou déjà liée à un autre matériel."),
+                  content: Text(success
+                      ? "Statut Monarque activé avec succès !"
+                      : "Clé invalide ou déjà liée à un autre matériel."),
                   backgroundColor: success ? Colors.green : Colors.redAccent,
                 ),
               );
             }
           },
-          child: const Text("VALIDER LA CLÉ", style: TextStyle(color: Colors.white)),
+          child: const Text("VALIDER LA CLÉ",
+              style: TextStyle(color: Colors.white)),
         ),
       ],
     );
@@ -367,8 +441,10 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
               decoration: const InputDecoration(
                 labelText: "E-mail de contact (ex: hunter@domain.com)",
                 labelStyle: TextStyle(color: Colors.white54),
-                enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Color(0xFF00E5FF))),
-                focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: Color(0xFF00E5FF))),
+                enabledBorder: UnderlineInputBorder(
+                    borderSide: BorderSide(color: Color(0xFF00E5FF))),
+                focusedBorder: UnderlineInputBorder(
+                    borderSide: BorderSide(color: Color(0xFF00E5FF))),
                 errorStyle: TextStyle(color: Colors.redAccent, fontSize: 11),
               ),
               validator: (value) {
@@ -389,8 +465,10 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
               decoration: const InputDecoration(
                 labelText: "Votre message...",
                 labelStyle: TextStyle(color: Colors.white54),
-                enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Color(0xFF00E5FF))),
-                focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: Color(0xFF00E5FF))),
+                enabledBorder: UnderlineInputBorder(
+                    borderSide: BorderSide(color: Color(0xFF00E5FF))),
+                focusedBorder: UnderlineInputBorder(
+                    borderSide: BorderSide(color: Color(0xFF00E5FF))),
                 errorStyle: TextStyle(color: Colors.redAccent, fontSize: 11),
               ),
               validator: (value) {
@@ -412,7 +490,8 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
           style: OutlinedButton.styleFrom(
             side: const BorderSide(color: Color(0xFF00E5FF)),
             backgroundColor: const Color(0xFF00E5FF).withOpacity(0.2),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
           ),
           onPressed: () async {
             if (formKey.currentState!.validate()) {
@@ -422,7 +501,9 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
               Navigator.pop(context);
 
               ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text("Transmission du rapport au Système en cours..."), duration: Duration(seconds: 2)),
+                const SnackBar(
+                    content: Text("Transmission du rapport au Système en cours..."),
+                    duration: Duration(seconds: 2)),
               );
 
               try {
@@ -435,20 +516,26 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
                 if (response.statusCode == 200) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(
-                      content: Text("Rapport transmis avec succès ! Le Quartier Général a reçu votre message."),
+                      content: Text(
+                          "Rapport transmis avec succès ! Le Quartier Général a reçu votre message."),
                       backgroundColor: Color(0xFF00FF66),
                     ),
                   );
                 } else {
                   final errorData = jsonDecode(response.body);
-                  final errorMsg = errorData['detail'] ?? "Échec de la transmission du rapport.";
+                  final errorMsg = errorData['detail'] ??
+                      "Échec de la transmission du rapport.";
                   ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text(errorMsg), backgroundColor: Colors.redAccent),
+                    SnackBar(
+                        content: Text(errorMsg),
+                        backgroundColor: Colors.redAccent),
                   );
                 }
               } catch (e) {
                 ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text("Erreur de connexion au serveur : $e"), backgroundColor: Colors.redAccent),
+                  SnackBar(
+                      content: Text("Erreur de connexion au serveur : $e"),
+                      backgroundColor: Colors.redAccent),
                 );
               }
             }
@@ -466,6 +553,18 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
     final Color borderBlue = systemBlue.withOpacity(0.5);
     final Color rankColor = game.isGodMode ? Colors.redAccent : Colors.white;
 
+    if (game.isPro &&
+        game.pairedAdminRoom != null &&
+        game.pairedAdminRoom!.isNotEmpty &&
+        _activeRoom != game.pairedAdminRoom) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _activeRoom != game.pairedAdminRoom) {
+          _attemptSecureBinding(
+              game.pairedAdminRoom!, game.pairedAdminKey ?? '');
+        }
+      });
+    }
+
     return Scaffold(
       backgroundColor: Colors.black,
       body: Container(
@@ -480,6 +579,7 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
         ),
         child: SafeArea(
           child: SingleChildScrollView(
+            controller: _scrollController,
             padding: const EdgeInsets.fromLTRB(20, 20, 20, 40),
             child: Column(
               children: [
@@ -488,7 +588,10 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
                   decoration: BoxDecoration(
                     border: Border.all(color: borderBlue, width: 2),
                     color: Colors.black.withOpacity(0.7),
-                    boxShadow: [BoxShadow(color: systemBlue.withOpacity(0.15), blurRadius: 20)],
+                    boxShadow: [
+                      BoxShadow(
+                          color: systemBlue.withOpacity(0.15), blurRadius: 20)
+                    ],
                   ),
                   child: Column(
                     children: [
@@ -498,7 +601,8 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
                         child: Column(
                           children: [
                             GestureDetector(
-                              onLongPress: () => _showEditUsernameDialog(context, game),
+                              onLongPress: () =>
+                                  _showEditUsernameDialog(context, game),
                               child: Text(
                                 game.username.toUpperCase(),
                                 style: GoogleFonts.orbitron(
@@ -506,7 +610,11 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
                                   fontSize: 18,
                                   fontWeight: FontWeight.bold,
                                   letterSpacing: 3,
-                                  shadows: [Shadow(color: systemBlue.withOpacity(0.5), blurRadius: 10)],
+                                  shadows: [
+                                    Shadow(
+                                        color: systemBlue.withOpacity(0.5),
+                                        blurRadius: 10)
+                                  ],
                                 ),
                               ),
                             ),
@@ -517,8 +625,11 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
                               children: [
                                 GestureDetector(
                                   onLongPress: () {
-                                    if (!kDebugMode && game.rank.toUpperCase() != "MONARQUE") return;
-                                    
+                                    if (!kDebugMode &&
+                                        game.rank.toUpperCase() != "MONARQUE") {
+                                      return;
+                                    }
+
                                     if (game.isGodMode) {
                                       showExitGodModeDialog(context, game);
                                     } else {
@@ -531,9 +642,17 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
                                           fontSize: 60,
                                           fontWeight: FontWeight.bold,
                                           shadows: [
-                                            const Shadow(color: systemBlue, blurRadius: 10),
-                                            Shadow(color: systemBlue.withOpacity(0.8), blurRadius: 30),
-                                            if (game.isGodMode) const Shadow(color: Colors.red, blurRadius: 50),
+                                            const Shadow(
+                                                color: systemBlue,
+                                                blurRadius: 10),
+                                            Shadow(
+                                                color:
+                                                    systemBlue.withOpacity(0.8),
+                                                blurRadius: 30),
+                                            if (game.isGodMode)
+                                              const Shadow(
+                                                  color: Colors.red,
+                                                  blurRadius: 50),
                                           ])),
                                 ),
                                 const SizedBox(width: 8),
@@ -541,7 +660,9 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
                                   padding: const EdgeInsets.only(bottom: 12),
                                   child: Text("RANG",
                                       style: GoogleFonts.orbitron(
-                                          color: systemBlue, fontSize: 16, fontWeight: FontWeight.bold)),
+                                          color: systemBlue,
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.bold)),
                                 ),
                               ],
                             ),
@@ -549,14 +670,20 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
                               Padding(
                                 padding: const EdgeInsets.only(bottom: 6.0),
                                 child: Text("[ GOD MODE ACTIF : BAC À SABLE ]",
-                                    style: GoogleFonts.orbitron(color: Colors.redAccent, fontSize: 10, letterSpacing: 2)),
+                                    style: GoogleFonts.orbitron(
+                                        color: Colors.redAccent,
+                                        fontSize: 10,
+                                        letterSpacing: 2)),
                               ),
-
                             GestureDetector(
                               onTap: () => _showTitlesDialog(context, game),
-                              child: Text("TITRE: ${game.equippedTitle.toUpperCase()}",
+                              child: Text(
+                                  "TITRE: ${game.equippedTitle.toUpperCase()}",
                                   style: GoogleFonts.rajdhani(
-                                      color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold, letterSpacing: 1.5)),
+                                      color: Colors.white,
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.bold,
+                                      letterSpacing: 1.5)),
                             ),
                             const SizedBox(height: 6),
                             Text(
@@ -578,14 +705,22 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
                         padding: const EdgeInsets.all(15),
                         child: Column(
                           children: [
-                            _buildStatusLine("PV", game.currentHealth, game.maxHealth, systemBlue, context,
+                            _buildStatusLine("PV", game.currentHealth,
+                                game.maxHealth, systemBlue, context,
                                 isEditable: true, game: game, stat: "HP"),
                             const SizedBox(height: 15),
-                            _buildStatusLine("XP", game.currentXP.toInt(), game.nextRankThreshold.toInt(),
-                                const Color(0xFFD500F9), context,
-                                isEditable: true, game: game, stat: "XP"),
+                            _buildStatusLine(
+                                "XP",
+                                game.currentXP.toInt(),
+                                game.nextRankThreshold.toInt(),
+                                const Color(0xFFD500F9),
+                                context,
+                                isEditable: true,
+                                game: game,
+                                stat: "XP"),
                             const SizedBox(height: 10),
-                            _buildSurpassement(context, game, game.totalSurpassement),
+                            _buildSurpassement(
+                                context, game, game.totalSurpassement),
                           ],
                         ),
                       ),
@@ -594,30 +729,34 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
                     ],
                   ),
                 ),
-
                 const SizedBox(height: 25),
                 Text("HISTORIQUE DE DÉVELOPPEMENT",
                     style: GoogleFonts.orbitron(
-                        color: systemBlue, fontSize: 12, letterSpacing: 2, fontWeight: FontWeight.bold)),
+                        color: systemBlue,
+                        fontSize: 12,
+                        letterSpacing: 2,
+                        fontWeight: FontWeight.bold)),
                 const SizedBox(height: 10),
                 _buildHeatMap(game, context),
-
                 const SizedBox(height: 35),
                 if (game.saveHistory.isNotEmpty) ...[
                   _buildArchiveList(context, game, systemBlue),
                 ],
                 const SizedBox(height: 35),
-
-                _buildRaidRemoteConsole(context, game, systemBlue),
+                Container(
+                  key: _remoteConsoleKey,
+                  child: _buildRaidRemoteConsole(context, game, systemBlue),
+                ),
                 const SizedBox(height: 35),
-
                 if (game.isGodMode) ...[
                   _buildTestSection(context, game, systemBlue),
                   const SizedBox(height: 15),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                     decoration: BoxDecoration(
-                      border: Border.all(color: Colors.redAccent.withOpacity(0.5)),
+                      border:
+                          Border.all(color: Colors.redAccent.withOpacity(0.5)),
                       borderRadius: BorderRadius.circular(4),
                       color: Colors.red.withOpacity(0.05),
                     ),
@@ -626,7 +765,8 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
                       children: [
                         Text(
                           "PERSISTANCE PÉNALITÉ",
-                          style: GoogleFonts.orbitron(color: Colors.redAccent, fontSize: 11),
+                          style: GoogleFonts.orbitron(
+                              color: Colors.redAccent, fontSize: 11),
                         ),
                         Switch(
                           value: game.godModePersistPenalty,
@@ -640,7 +780,6 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
                   ),
                   const SizedBox(height: 25),
                 ],
-
                 SizedBox(
                   width: double.infinity,
                   child: _holoButton(
@@ -651,7 +790,6 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
                   ),
                 ),
                 const SizedBox(height: 15),
-
                 _buildSystemButtons(context, game, systemBlue),
               ],
             ),
@@ -661,7 +799,8 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
     );
   }
 
-  Widget _buildRaidRemoteConsole(BuildContext context, GameProvider game, Color systemBlue) {
+  Widget _buildRaidRemoteConsole(
+      BuildContext context, GameProvider game, Color systemBlue) {
     if (!game.isPro) {
       return Container(
         width: double.infinity,
@@ -692,7 +831,7 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
             ),
             const SizedBox(height: 10),
             const Text(
-              "Réservé aux Chasseurs de rang Monarque Pro (shadowburn-1d8f8.web.app).\nEn mode gratuit, rejoignez les raids comme invité via le scan Chasseur.",
+              "Réservé exclusivement aux détenteurs de la clé Monarque Pro.\nEn mode gratuit, rejoignez les raids comme invité via le scan Chasseur.",
               textAlign: TextAlign.center,
               style: TextStyle(color: Colors.white38, fontSize: 11, height: 1.4),
             ),
@@ -701,10 +840,12 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
               style: OutlinedButton.styleFrom(
                 foregroundColor: const Color(0xFFFF9100),
                 side: const BorderSide(color: Color(0xFFFF9100)),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(4)),
               ),
               icon: const Icon(Icons.vpn_key, size: 16),
-              label: const Text("ACTIVER / RESTAURER LE STATUT PRO", style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+              label: const Text("ACTIVER / RESTAURER LE STATUT PRO",
+                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
               onPressed: () => _showProKeyDialog(context, game),
             ),
           ],
@@ -712,7 +853,9 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
       );
     }
 
-    final bool hasActiveLink = (_activeRoom != null);
+    final String? effectiveRoom = _activeRoom ?? game.pairedAdminRoom;
+    final bool hasActiveLink =
+        effectiveRoom != null && effectiveRoom.trim().isNotEmpty;
 
     return Container(
       width: double.infinity,
@@ -735,14 +878,17 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
                 children: [
                   Icon(
                     hasActiveLink ? Icons.security : Icons.lock_outline,
-                    color: hasActiveLink ? const Color(0xFFFF9100) : Colors.white38,
+                    color:
+                        hasActiveLink ? const Color(0xFFFF9100) : Colors.white38,
                     size: 18,
                   ),
                   const SizedBox(width: 8),
                   Text(
                     "TÉLÉCOMMANDE MAÎTRE",
                     style: GoogleFonts.orbitron(
-                      color: hasActiveLink ? const Color(0xFFFF9100) : Colors.white38,
+                      color: hasActiveLink
+                          ? const Color(0xFFFF9100)
+                          : Colors.white38,
                       fontSize: 11,
                       fontWeight: FontWeight.bold,
                       letterSpacing: 1.2,
@@ -753,16 +899,22 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 decoration: BoxDecoration(
-                  color: hasActiveLink ? const Color(0xFFFF9100).withOpacity(0.15) : Colors.white10,
+                  color: hasActiveLink
+                      ? const Color(0xFFFF9100).withOpacity(0.15)
+                      : Colors.white10,
                   border: Border.all(
-                    color: hasActiveLink ? const Color(0xFFFF9100) : Colors.white24,
+                    color: hasActiveLink
+                        ? const Color(0xFFFF9100)
+                        : Colors.white24,
                   ),
                   borderRadius: BorderRadius.circular(4),
                 ),
                 child: Text(
-                  hasActiveLink ? _activeRoom!.toUpperCase() : "NON JUMELÉ",
+                  hasActiveLink ? effectiveRoom!.toUpperCase() : "NON JUMELÉ",
                   style: GoogleFonts.orbitron(
-                    color: hasActiveLink ? const Color(0xFFFF9100) : Colors.white38,
+                    color: hasActiveLink
+                        ? const Color(0xFFFF9100)
+                        : Colors.white38,
                     fontSize: 9,
                     fontWeight: FontWeight.bold,
                   ),
@@ -773,13 +925,14 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
           const SizedBox(height: 14),
           if (!hasActiveLink) ...[
             Padding(
-              padding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 10.0),
+              padding:
+                  const EdgeInsets.symmetric(vertical: 8.0, horizontal: 10.0),
               child: Column(
                 children: [
                   ConstrainedBox(
                     constraints: const BoxConstraints(maxWidth: 320),
                     child: const Text(
-                      "Scannez le QR Code « TÉLÉCOMMANDE MAÎTRE » sur l'écran TV\n(shadowburn-1d8f8.web.app) pour jumeler votre admin.",
+                      "Scannez le QR Code « TÉLÉCOMMANDE » sur l'écran TV pour ouvrir directement l'application et activer la salle.",
                       textAlign: TextAlign.center,
                       style: TextStyle(
                         color: Colors.white54,
@@ -793,9 +946,12 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
                     style: OutlinedButton.styleFrom(
                       foregroundColor: const Color(0xFFFF9100),
                       backgroundColor: const Color(0xFFFF9100).withOpacity(0.08),
-                      side: const BorderSide(color: Color(0xFFFF9100), width: 1.2),
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+                      side:
+                          const BorderSide(color: Color(0xFFFF9100), width: 1.2),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 8),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(4)),
                     ),
                     icon: const Icon(Icons.sync, size: 16),
                     label: Text(
@@ -824,7 +980,8 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
               padding: const EdgeInsets.symmetric(horizontal: 10),
               decoration: BoxDecoration(
                 color: Colors.black45,
-                border: Border.all(color: const Color(0xFFFF9100).withOpacity(0.5)),
+                border:
+                    Border.all(color: const Color(0xFFFF9100).withOpacity(0.5)),
                 borderRadius: BorderRadius.circular(4),
               ),
               child: DropdownButtonHideUnderline(
@@ -832,7 +989,10 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
                   value: _selectedHpPreset,
                   isExpanded: true,
                   dropdownColor: const Color(0xFF04101E),
-                  style: const TextStyle(color: Colors.white, fontFamily: 'monospace', fontSize: 11),
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontFamily: 'monospace',
+                      fontSize: 11),
                   items: RaidAdminService.raidPresets.map((preset) {
                     final int hp = preset['hp'] as int;
                     final String label = preset['label'] as String;
@@ -845,9 +1005,12 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
                     );
                   }).toList(),
                   onChanged: (int? newHp) async {
-                    if (newHp != null && _activeRoom != null) {
-                      final selected = RaidAdminService.raidPresets.firstWhere((p) => p['hp'] == newHp);
-                      await RaidAdminService.applyPreset(newHp, selected['label'] as String, roomId: _activeRoom!);
+                    if (newHp != null) {
+                      final selected = RaidAdminService.raidPresets
+                          .firstWhere((p) => p['hp'] == newHp);
+                      await RaidAdminService.applyPreset(
+                          newHp, selected['label'] as String,
+                          roomId: effectiveRoom);
                       setState(() => _selectedHpPreset = newHp);
                     }
                   },
@@ -855,7 +1018,6 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
               ),
             ),
             const SizedBox(height: 14),
-
             Align(
               alignment: Alignment.centerLeft,
               child: Text(
@@ -867,26 +1029,31 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
             Row(
               children: [
                 Expanded(
-                  child: _compactButton("+1 MIN", const Color(0xFF00E5FF), () async {
-                    await RaidAdminService.extendRaidMinutes(1, roomId: _activeRoom!);
+                  child: _compactButton("+1 MIN", const Color(0xFF00E5FF),
+                      () async {
+                    await RaidAdminService.extendRaidMinutes(1,
+                        roomId: effectiveRoom);
                   }),
                 ),
                 const SizedBox(width: 4),
                 Expanded(
                   child: _compactButton("+15 MIN", systemBlue, () async {
-                    await RaidAdminService.extendRaidMinutes(15, roomId: _activeRoom!);
+                    await RaidAdminService.extendRaidMinutes(15,
+                        roomId: effectiveRoom);
                   }),
                 ),
                 const SizedBox(width: 4),
                 Expanded(
                   child: _compactButton("+30 MIN", systemBlue, () async {
-                    await RaidAdminService.extendRaidMinutes(30, roomId: _activeRoom!);
+                    await RaidAdminService.extendRaidMinutes(30,
+                        roomId: effectiveRoom);
                   }),
                 ),
                 const SizedBox(width: 4),
                 Expanded(
                   child: _compactButton("RESET 24H", Colors.amber, () async {
-                    await RaidAdminService.resetToMidnight(roomId: _activeRoom!);
+                    await RaidAdminService.resetToMidnight(
+                        roomId: effectiveRoom);
                   }),
                 ),
               ],
@@ -895,32 +1062,39 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
             Row(
               children: [
                 Expanded(
-                  child: _compactButton("-1 MIN", const Color(0xFFFFAB91), () async {
-                    await RaidAdminService.reduceRaidMinutes(1, roomId: _activeRoom!);
+                  child: _compactButton("-1 MIN", const Color(0xFFFFAB91),
+                      () async {
+                    await RaidAdminService.reduceRaidMinutes(1,
+                        roomId: effectiveRoom);
                   }),
                 ),
                 const SizedBox(width: 4),
                 Expanded(
-                  child: _compactButton("-15 MIN", const Color(0xFFFF7043), () async {
-                    await RaidAdminService.reduceRaidMinutes(15, roomId: _activeRoom!);
+                  child: _compactButton("-15 MIN", const Color(0xFFFF7043),
+                      () async {
+                    await RaidAdminService.reduceRaidMinutes(15,
+                        roomId: effectiveRoom);
                   }),
                 ),
                 const SizedBox(width: 4),
                 Expanded(
-                  child: _compactButton("-30 MIN", const Color(0xFFFF7043), () async {
-                    await RaidAdminService.reduceRaidMinutes(30, roomId: _activeRoom!);
+                  child: _compactButton("-30 MIN", const Color(0xFFFF7043),
+                      () async {
+                    await RaidAdminService.reduceRaidMinutes(30,
+                        roomId: effectiveRoom);
                   }),
                 ),
                 const SizedBox(width: 4),
                 Expanded(
-                  child: _compactButton("RESET À 0", const Color(0xFFFF2E56), () async {
-                    await RaidAdminService.expireRaidNow(roomId: _activeRoom!);
+                  child: _compactButton("RESET À 0", const Color(0xFFFF2E56),
+                      () async {
+                    await RaidAdminService.expireRaidNow(
+                        roomId: effectiveRoom);
                   }),
                 ),
               ],
             ),
             const SizedBox(height: 12),
-
             Align(
               alignment: Alignment.centerLeft,
               child: Text(
@@ -932,32 +1106,37 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
             Row(
               children: [
                 Expanded(
-                  child: _compactButton("LANCER", const Color(0xFF00FF66), () async {
-                    await RaidAdminService.setRaidStatus('active', roomId: _activeRoom!);
+                  child: _compactButton("LANCER", const Color(0xFF00FF66),
+                      () async {
+                    await RaidAdminService.setRaidStatus('active',
+                        roomId: effectiveRoom);
                   }),
                 ),
                 const SizedBox(width: 6),
                 Expanded(
-                  child: _compactButton("-200 PV", const Color(0xFFFF9100), () async {
-                    await RaidAdminService.strikeBoss(200, roomId: _activeRoom!);
+                  child: _compactButton("-200 PV", const Color(0xFFFF9100),
+                      () async {
+                    await RaidAdminService.strikeBoss(200,
+                        roomId: effectiveRoom);
                   }),
                 ),
                 const SizedBox(width: 6),
                 Expanded(
-                  child: _compactButton("RESET BOSS", const Color(0xFFFF2E56), () async {
-                    await RaidAdminService.resetBoss(roomId: _activeRoom!);
+                  child: _compactButton("RESET BOSS", const Color(0xFFFF2E56),
+                      () async {
+                    await RaidAdminService.resetBoss(roomId: effectiveRoom);
                   }),
                 ),
               ],
             ),
             const SizedBox(height: 12),
-
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 TextButton.icon(
                   onPressed: () => _unbindFromRoom("Déconnexion volontaire."),
-                  icon: const Icon(Icons.link_off, color: Colors.white38, size: 14),
+                  icon: const Icon(Icons.link_off,
+                      color: Colors.white38, size: 14),
                   label: const Text(
                     "DÉCONNECTER",
                     style: TextStyle(color: Colors.white38, fontSize: 10),
@@ -965,10 +1144,14 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
                 ),
                 TextButton.icon(
                   onPressed: _deleteActiveRoom,
-                  icon: const Icon(Icons.delete_forever, color: Color(0xFFFF2E56), size: 14),
+                  icon: const Icon(Icons.delete_forever,
+                      color: Color(0xFFFF2E56), size: 14),
                   label: const Text(
                     "FERMER & SUPPRIMER LA SALLE",
-                    style: TextStyle(color: Color(0xFFFF2E56), fontSize: 10, fontWeight: FontWeight.bold),
+                    style: TextStyle(
+                        color: Color(0xFFFF2E56),
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold),
                   ),
                 ),
               ],
@@ -1086,11 +1269,13 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
     );
   }
 
-  Widget _buildTestSection(BuildContext context, GameProvider game, Color color) {
+  Widget _buildTestSection(
+      BuildContext context, GameProvider game, Color color) {
     return Column(
       children: [
         Text("LABORATOIRE DE TEST (5S)",
-            style: GoogleFonts.orbitron(color: Colors.redAccent, fontSize: 10, letterSpacing: 2)),
+            style: GoogleFonts.orbitron(
+                color: Colors.redAccent, fontSize: 10, letterSpacing: 2)),
         const SizedBox(height: 10),
         Row(
           children: [
@@ -1101,7 +1286,9 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
                 () {
                   game.testDungeonWithDelay();
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text("Apparition d'un Portail (10s) dans 5s... Allez voir vos clés.")),
+                    const SnackBar(
+                        content: Text(
+                            "Apparition d'un Portail (10s) dans 5s... Allez voir vos clés.")),
                   );
                 },
                 icon: Icons.door_sliding_outlined,
@@ -1117,18 +1304,22 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
             Colors.purpleAccent,
             () {
               try {
-                final urgentProv = Provider.of<UrgentQuestProvider>(context, listen: false);
+                final urgentProv =
+                    Provider.of<UrgentQuestProvider>(context, listen: false);
                 urgentProv.spawnTestUrgentQuest();
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(
-                    content: Text("Alerte ! Une Quête Urgente vient de se déclencher."),
+                    content:
+                        Text("Alerte ! Une Quête Urgente vient de se déclencher."),
                     backgroundColor: Colors.purpleAccent,
                     duration: Duration(seconds: 2),
                   ),
                 );
               } catch (e) {
                 ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text("Erreur déclenchement quête urgente : $e"), backgroundColor: Colors.red),
+                  SnackBar(
+                      content: Text("Erreur déclenchement quête urgente : $e"),
+                      backgroundColor: Colors.red),
                 );
               }
             },
@@ -1147,10 +1338,14 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
       content: TextField(
         controller: controller,
         style: const TextStyle(color: Colors.white),
-        decoration: const InputDecoration(hintText: "Nouveau pseudo", hintStyle: TextStyle(color: Colors.white24)),
+        decoration: const InputDecoration(
+            hintText: "Nouveau pseudo",
+            hintStyle: TextStyle(color: Colors.white24)),
       ),
       actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: const Text("ANNULER")),
+        TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text("ANNULER")),
         TextButton(
             onPressed: () {
               if (controller.text.isNotEmpty) {
@@ -1166,7 +1361,8 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
   Widget _buildGoldBadge(GameProvider game, BuildContext context) {
     return GestureDetector(
       onTap: () => _showShopDialog(context, game),
-      onLongPress: game.isGodMode ? () => _showEditStatDialog(context, game, "OR") : null,
+      onLongPress:
+          game.isGodMode ? () => _showEditStatDialog(context, game, "OR") : null,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 6),
         decoration: BoxDecoration(
@@ -1174,7 +1370,10 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
             borderRadius: BorderRadius.circular(4),
             color: const Color(0xFFFFD700).withOpacity(0.05)),
         child: Text("OR: ${game.goldCoins}",
-            style: GoogleFonts.orbitron(color: const Color(0xFFFFD700), fontSize: 12, fontWeight: FontWeight.bold)),
+            style: GoogleFonts.orbitron(
+                color: const Color(0xFFFFD700),
+                fontSize: 12,
+                fontWeight: FontWeight.bold)),
       ),
     );
   }
@@ -1187,33 +1386,48 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
         spacing: 15,
         runSpacing: 20,
         children: [
-          _buildEditableAttribute(context, game, "POMPES", _formatStat(game.totalPompes)),
-          _buildEditableAttribute(context, game, "ABDOS", _formatStat(game.totalAbdos)),
-          _buildEditableAttribute(context, game, "SQUATS", _formatStat(game.totalSquats)),
-          _buildEditableAttribute(context, game, "ENDURANCE", "${game.totalKm.toStringAsFixed(1)} KM"),
-          _buildEditableAttribute(context, game, "DISCIPLINE", game.currentStreak.toString()),
+          _buildEditableAttribute(
+              context, game, "POMPES", _formatStat(game.totalPompes)),
+          _buildEditableAttribute(
+              context, game, "ABDOS", _formatStat(game.totalAbdos)),
+          _buildEditableAttribute(
+              context, game, "SQUATS", _formatStat(game.totalSquats)),
+          _buildEditableAttribute(
+              context, game, "ENDURANCE", "${game.totalKm.toStringAsFixed(1)} KM"),
+          _buildEditableAttribute(
+              context, game, "DISCIPLINE", game.currentStreak.toString()),
         ],
       ),
     );
   }
 
-  Widget _buildEditableAttribute(BuildContext context, GameProvider game, String label, String value) {
+  Widget _buildEditableAttribute(
+      BuildContext context, GameProvider game, String label, String value) {
     return GestureDetector(
-      onLongPress: game.isGodMode ? () => _showEditStatDialog(context, game, label) : null,
+      onLongPress:
+          game.isGodMode ? () => _showEditStatDialog(context, game, label) : null,
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           Icon(Icons.add_box_outlined,
-              color: game.isGodMode ? Colors.redAccent : const Color(0xFF00E5FF), size: 14),
+              color: game.isGodMode ? Colors.redAccent : const Color(0xFF00E5FF),
+              size: 14),
           const SizedBox(width: 5),
-          Text("$label: ", style: GoogleFonts.orbitron(color: const Color(0xFF00E5FF), fontSize: 11)),
-          Text(value, style: GoogleFonts.orbitron(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
+          Text("$label: ",
+              style: GoogleFonts.orbitron(
+                  color: const Color(0xFF00E5FF), fontSize: 11)),
+          Text(value,
+              style: GoogleFonts.orbitron(
+                  color: Colors.white,
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold)),
         ],
       ),
     );
   }
 
-  void _showEditStatDialog(BuildContext context, GameProvider game, String label) {
+  void _showEditStatDialog(
+      BuildContext context, GameProvider game, String label) {
     String initialText = "0";
     final upper = label.toUpperCase();
     if (upper == "OR") {
@@ -1245,10 +1459,14 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
         controller: controller,
         keyboardType: const TextInputType.numberWithOptions(decimal: true),
         style: const TextStyle(color: Colors.white),
-        decoration: const InputDecoration(hintText: "Nouvelle valeur", hintStyle: TextStyle(color: Colors.white24)),
+        decoration: const InputDecoration(
+            hintText: "Nouvelle valeur",
+            hintStyle: TextStyle(color: Colors.white24)),
       ),
       actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: const Text("ANNULER")),
+        TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text("ANNULER")),
         TextButton(
             onPressed: () {
               if (label == "OR") {
@@ -1297,7 +1515,10 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
         shrinkWrap: true,
         physics: const NeverScrollableScrollPhysics(),
         gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: 14, crossAxisSpacing: 4, mainAxisSpacing: 4, childAspectRatio: 1.0),
+            crossAxisCount: 14,
+            crossAxisSpacing: 4,
+            mainAxisSpacing: 4,
+            childAspectRatio: 1.0),
         itemCount: 70,
         itemBuilder: (context, index) {
           final dateToShow = today.subtract(Duration(days: 69 - index));
@@ -1317,7 +1538,9 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
           }
 
           return GestureDetector(
-            onLongPress: game.isGodMode ? () => _showEditHistoryDialog(context, game, dateKey) : null,
+            onLongPress: game.isGodMode
+                ? () => _showEditHistoryDialog(context, game, dateKey)
+                : null,
             child: Container(
               decoration: BoxDecoration(
                 color: boxColor,
@@ -1333,11 +1556,13 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
     );
   }
 
-  void _showEditHistoryDialog(BuildContext context, GameProvider game, String dateKey) {
+  void _showEditHistoryDialog(
+      BuildContext context, GameProvider game, String dateKey) {
     SystemDialog.show(
       context,
       title: "JOUR : $dateKey",
-      content: const Text("Modifier l'état de ce jour ?", style: TextStyle(color: Colors.white70)),
+      content: const Text("Modifier l'état de ce jour ?",
+          style: TextStyle(color: Colors.white70)),
       actions: [
         Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
           IconButton(
@@ -1352,21 +1577,24 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
               game.updateHistoryStatus(dateKey, 'blue');
               Navigator.pop(context);
             },
-            child: Container(width: 30, height: 30, color: const Color(0xFF00E5FF)),
+            child:
+                Container(width: 30, height: 30, color: const Color(0xFF00E5FF)),
           ),
           InkWell(
             onTap: () {
               game.updateHistoryStatus(dateKey, 'gold');
               Navigator.pop(context);
             },
-            child: Container(width: 30, height: 30, color: const Color(0xFFFFD700)),
+            child:
+                Container(width: 30, height: 30, color: const Color(0xFFFFD700)),
           ),
           InkWell(
             onTap: () {
               game.updateHistoryStatus(dateKey, 'grey');
               Navigator.pop(context);
             },
-            child: Container(width: 30, height: 30, color: const Color(0xFF1A1A2E)),
+            child:
+                Container(width: 30, height: 30, color: const Color(0xFF1A1A2E)),
           ),
         ])
       ],
@@ -1377,14 +1605,20 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(vertical: 10),
-      decoration: BoxDecoration(border: Border(bottom: BorderSide(color: color.withOpacity(0.5)))),
+      decoration: BoxDecoration(
+          border: Border(bottom: BorderSide(color: color.withOpacity(0.5)))),
       child: Center(
           child: Text(title,
-              style: GoogleFonts.orbitron(color: color, fontSize: 20, letterSpacing: 10, fontWeight: FontWeight.bold))),
+              style: GoogleFonts.orbitron(
+                  color: color,
+                  fontSize: 20,
+                  letterSpacing: 10,
+                  fontWeight: FontWeight.bold))),
     );
   }
 
-  Widget _buildStatusLine(String label, int val, int max, Color color, BuildContext context,
+  Widget _buildStatusLine(
+      String label, int val, int max, Color color, BuildContext context,
       {bool isEditable = false, GameProvider? game, String? stat}) {
     double progress = (max > 0) ? (val / max).clamp(0.0, 1.0) : 0.0;
     return GestureDetector(
@@ -1395,20 +1629,29 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
         children: [
           SizedBox(
               width: 35,
-              child: Text(label, style: GoogleFonts.orbitron(color: color, fontSize: 12, fontWeight: FontWeight.bold))),
+              child: Text(label,
+                  style: GoogleFonts.orbitron(
+                      color: color, fontSize: 12, fontWeight: FontWeight.bold))),
           const SizedBox(width: 10),
           Expanded(
             child: LayoutBuilder(builder: (context, constraints) {
               return Stack(
                 children: [
-                  Container(height: 10, decoration: BoxDecoration(color: Colors.white10, borderRadius: BorderRadius.circular(2))),
+                  Container(
+                      height: 10,
+                      decoration: BoxDecoration(
+                          color: Colors.white10,
+                          borderRadius: BorderRadius.circular(2))),
                   Container(
                       height: 10,
                       width: constraints.maxWidth * progress,
                       decoration: BoxDecoration(
                           color: color,
                           borderRadius: BorderRadius.circular(2),
-                          boxShadow: [BoxShadow(color: color.withOpacity(0.5), blurRadius: 5)])),
+                          boxShadow: [
+                            BoxShadow(
+                                color: color.withOpacity(0.5), blurRadius: 5)
+                          ])),
                 ],
               );
             }),
@@ -1418,24 +1661,32 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
             width: 110,
             child: Text("${_formatStat(val)}/${_formatStat(max)}",
                 textAlign: TextAlign.right,
-                style: GoogleFonts.rajdhani(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold)),
+                style: GoogleFonts.rajdhani(
+                    color: Colors.white,
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold)),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildSurpassement(BuildContext context, GameProvider game, int value) {
+  Widget _buildSurpassement(
+      BuildContext context, GameProvider game, int value) {
     String displayValue = value.toString();
     if (value >= 1000) {
       displayValue = "${(value / 1000).toStringAsFixed(1)} K";
     }
     return GestureDetector(
-      onLongPress: game.isGodMode ? () => _showEditStatDialog(context, game, "SURPASSEMENT") : null,
+      onLongPress: game.isGodMode
+          ? () => _showEditStatDialog(context, game, "SURPASSEMENT")
+          : null,
       child: Row(
         mainAxisAlignment: MainAxisAlignment.end,
         children: [
-          Icon(Icons.bolt, color: game.isGodMode ? Colors.redAccent : Colors.yellowAccent, size: 16),
+          Icon(Icons.bolt,
+              color: game.isGodMode ? Colors.redAccent : Colors.yellowAccent,
+              size: 16),
           const SizedBox(width: 5),
           Text(
             "SURPASSEMENT: $displayValue",
@@ -1452,11 +1703,16 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
     );
   }
 
-  Widget _buildArchiveList(BuildContext context, GameProvider game, Color systemBlue) {
+  Widget _buildArchiveList(
+      BuildContext context, GameProvider game, Color systemBlue) {
     return Column(
       children: [
         Text("ARCHIVES DU SYSTÈME",
-            style: GoogleFonts.orbitron(color: systemBlue, fontSize: 12, letterSpacing: 2, fontWeight: FontWeight.bold)),
+            style: GoogleFonts.orbitron(
+                color: systemBlue,
+                fontSize: 12,
+                letterSpacing: 2,
+                fontWeight: FontWeight.bold)),
         const SizedBox(height: 10),
         ListView.builder(
           padding: EdgeInsets.zero,
@@ -1466,11 +1722,14 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
           itemBuilder: (ctx, i) {
             final item = game.saveHistory[i];
             return ListTile(
-              title: Text("Séquence du ${_formatDate(item['date'])}", style: GoogleFonts.rajdhani(color: Colors.white)),
-              trailing: const Icon(Icons.copy, color: Colors.white24, size: 16),
+              title: Text("Séquence du ${_formatDate(item['date'])}",
+                  style: GoogleFonts.rajdhani(color: Colors.white)),
+              trailing:
+                  const Icon(Icons.copy, color: Colors.white24, size: 16),
               onTap: () {
                 Clipboard.setData(ClipboardData(text: item['code']));
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Copié !")));
+                ScaffoldMessenger.of(context)
+                    .showSnackBar(const SnackBar(content: Text("Copié !")));
               },
             );
           },
@@ -1479,7 +1738,8 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
     );
   }
 
-  Widget _buildSystemButtons(BuildContext context, GameProvider game, Color color) {
+  Widget _buildSystemButtons(
+      BuildContext context, GameProvider game, Color color) {
     return Column(
       children: [
         Row(
@@ -1492,7 +1752,8 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
                   Clipboard.setData(ClipboardData(text: game.exportSaveCode()));
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(
-                      content: Text("Code de sauvegarde copié ! Conservez-le en lieu sûr."),
+                      content: Text(
+                          "Code de sauvegarde copié ! Conservez-le en lieu sûr."),
                       backgroundColor: Color(0xFF00FF66),
                     ),
                   );
@@ -1515,13 +1776,15 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
         const Text(
           "Générez un code de secours pour ne jamais perdre votre progression en changeant de téléphone.",
           textAlign: TextAlign.center,
-          style: TextStyle(color: Colors.white38, fontSize: 10, fontFamily: 'monospace'),
+          style: TextStyle(
+              color: Colors.white38, fontSize: 10, fontFamily: 'monospace'),
         ),
       ],
     );
   }
 
-  Widget _holoButton(String text, Color color, VoidCallback onTap, {IconData? icon}) {
+  Widget _holoButton(String text, Color color, VoidCallback onTap,
+      {IconData? icon}) {
     return SizedBox(
       height: 42,
       child: OutlinedButton(
@@ -1570,7 +1833,9 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
         style: const TextStyle(color: Colors.white),
       ),
       actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: const Text("ANNULER")),
+        TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text("ANNULER")),
         TextButton(
           onPressed: () async {
             final messenger = ScaffoldMessenger.of(context);
@@ -1578,7 +1843,9 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
             if (context.mounted) Navigator.pop(context);
             messenger.showSnackBar(
               SnackBar(
-                content: Text(ok ? "Sauvegarde importée." : "Code invalide : rien n'a été modifié."),
+                content: Text(ok
+                    ? "Sauvegarde importée."
+                    : "Code invalide : rien n'a été modifié."),
                 backgroundColor: ok ? null : Colors.red,
               ),
             );
@@ -1596,16 +1863,23 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
       content: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          _buildShopItem(context, game, "Potion Mineure", "Soigne 50 PV", game.priceMinorPotion, "mineure"),
-          _buildShopItem(context, game, "Potion Majeure", "Soigne 200 PV", game.priceMajorPotion, "majeure"),
-          _buildShopItem(context, game, "Élixir Royal", "Restaure 100% des PV", game.priceFullHeal, "guérison"),
+          _buildShopItem(context, game, "Potion Mineure", "Soigne 50 PV",
+              game.priceMinorPotion, "mineure"),
+          _buildShopItem(context, game, "Potion Majeure", "Soigne 200 PV",
+              game.priceMajorPotion, "majeure"),
+          _buildShopItem(context, game, "Élixir Royal", "Restaure 100% des PV",
+              game.priceFullHeal, "guérison"),
         ],
       ),
-      actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text("FERMER"))],
+      actions: [
+        TextButton(
+            onPressed: () => Navigator.pop(context), child: const Text("FERMER"))
+      ],
     );
   }
 
-  Widget _buildShopItem(BuildContext ctx, GameProvider game, String name, String desc, int price, String id) {
+  Widget _buildShopItem(BuildContext ctx, GameProvider game, String name,
+      String desc, int price, String id) {
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       decoration: BoxDecoration(
@@ -1615,35 +1889,52 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
       ),
       child: ListTile(
         dense: true,
-        leading: const Icon(Icons.local_drink_outlined, color: Color(0xFF00E5FF), size: 22),
-        title: Text(name, style: GoogleFonts.orbitron(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
-        subtitle: Text(desc, style: GoogleFonts.rajdhani(color: Colors.white60, fontSize: 12)),
+        leading: const Icon(Icons.local_drink_outlined,
+            color: Color(0xFF00E5FF), size: 22),
+        title: Text(name,
+            style: GoogleFonts.orbitron(
+                color: Colors.white,
+                fontSize: 12,
+                fontWeight: FontWeight.bold)),
+        subtitle: Text(desc,
+            style: GoogleFonts.rajdhani(color: Colors.white60, fontSize: 12)),
         trailing: OutlinedButton(
           style: OutlinedButton.styleFrom(
             side: const BorderSide(color: Color(0xFFFFD700)),
             backgroundColor: const Color(0xFFFFD700).withOpacity(0.1),
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
           ),
           onPressed: () {
             if (game.currentHealth >= game.maxHealth) {
               ScaffoldMessenger.of(ctx).showSnackBar(
-                const SnackBar(content: Text("Santé déjà au maximum."), backgroundColor: Colors.blueAccent),
+                const SnackBar(
+                    content: Text("Santé déjà au maximum."),
+                    backgroundColor: Colors.blueAccent),
               );
               return;
             }
             bool success = game.buyItem(id);
             if (success) {
               ScaffoldMessenger.of(ctx).showSnackBar(
-                const SnackBar(content: Text("Ravitaillement consommé."), duration: Duration(seconds: 1)),
+                const SnackBar(
+                    content: Text("Ravitaillement consommé."),
+                    duration: Duration(seconds: 1)),
               );
             } else {
               ScaffoldMessenger.of(ctx).showSnackBar(
-                const SnackBar(content: Text("Or insuffisant."), backgroundColor: Colors.red),
+                const SnackBar(
+                    content: Text("Or insuffisant."),
+                    backgroundColor: Colors.red),
               );
             }
           },
-          child: Text("$price OR", style: GoogleFonts.orbitron(color: const Color(0xFFFFD700), fontSize: 10, fontWeight: FontWeight.bold)),
+          child: Text("$price OR",
+              style: GoogleFonts.orbitron(
+                  color: const Color(0xFFFFD700),
+                  fontSize: 10,
+                  fontWeight: FontWeight.bold)),
         ),
       ),
     );

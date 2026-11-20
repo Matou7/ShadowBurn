@@ -48,12 +48,19 @@ class GameProvider extends _GameBase
         _AdminLogic,
         _XpLogic,
         _LegacyUiCompat {
-  
   String _persistedLicenseKey = '';
   String _awakeningDate = '';
+  String? _pairedAdminRoom;
+  String? _pairedAdminKey;
+  Future<void>? _licenseInitFuture;
 
   String get licenseKey => _persistedLicenseKey;
-  String get awakeningDate => _awakeningDate.isNotEmpty ? _awakeningDate : '--/--/----';
+  String get awakeningDate =>
+      _awakeningDate.isNotEmpty ? _awakeningDate : '--/--/----';
+  String? get pairedAdminRoom => _pairedAdminRoom;
+  String? get pairedAdminKey => _pairedAdminKey;
+  bool get isAdminPaired =>
+      _pairedAdminRoom != null && _pairedAdminRoom!.trim().isNotEmpty;
 
   String get shortLicenseKey {
     if (_persistedLicenseKey.isEmpty) return '';
@@ -69,22 +76,86 @@ class GameProvider extends _GameBase
 
   GameProvider() {
     WidgetsBinding.instance.addObserver(this);
-    _restoreCachedLicense();
+    _licenseInitFuture = _restoreCachedLicense();
+    _restorePairedAdminRoom();
     _initAwakeningDate();
     initializeGame();
+  }
+
+  /// Garantit que le statut Pro et la clé de licence sont chargés depuis le stockage local
+  /// avant toute vérification d'accès (ex: ouverture par QR Code / Deep Link à froid).
+  Future<bool> ensureProStatusLoaded() async {
+    if (_isPro) return true;
+    if (_licenseInitFuture != null) {
+      await _licenseInitFuture;
+    } else {
+      await _restoreCachedLicense();
+    }
+    if (_isPro) return true;
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final savedKey = prefs.getString('shadow_user_license_key');
+      if (savedKey != null && savedKey.trim().isNotEmpty) {
+        _persistedLicenseKey = savedKey.trim().toUpperCase();
+        _isPro = true;
+        notifyListeners();
+        return true;
+      }
+    } catch (_) {}
+
+    return _isPro;
+  }
+
+  Future<void> _restorePairedAdminRoom() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final room = prefs.getString('shadow_paired_admin_room');
+      final key = prefs.getString('shadow_paired_admin_key');
+      if (room != null && room.trim().isNotEmpty) {
+        _pairedAdminRoom = room.trim();
+        _pairedAdminKey = (key ?? '').trim();
+        notifyListeners();
+      }
+    } catch (_) {}
+  }
+
+  Future<void> pairAdminRoom(String roomId, {String adminKey = ''}) async {
+    final cleanRoom = roomId.trim();
+    if (cleanRoom.isEmpty) return;
+    _pairedAdminRoom = cleanRoom;
+    _pairedAdminKey = adminKey.trim();
+    notifyListeners();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('shadow_paired_admin_room', _pairedAdminRoom!);
+      await prefs.setString('shadow_paired_admin_key', _pairedAdminKey ?? '');
+    } catch (_) {}
+  }
+
+  Future<void> unpairAdminRoom() async {
+    _pairedAdminRoom = null;
+    _pairedAdminKey = null;
+    notifyListeners();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('shadow_paired_admin_room');
+      await prefs.remove('shadow_paired_admin_key');
+    } catch (_) {}
   }
 
   Future<void> _initAwakeningDate() async {
     try {
       final prefs = await SharedPreferences.getInstance();
       String? savedDate = prefs.getString('shadow_awakening_date');
-      
+
       if (savedDate == null || savedDate.trim().isEmpty) {
         final now = DateTime.now();
-        savedDate = "${now.day.toString().padLeft(2, '0')}/${now.month.toString().padLeft(2, '0')}/${now.year}";
+        savedDate =
+            "${now.day.toString().padLeft(2, '0')}/${now.month.toString().padLeft(2, '0')}/${now.year}";
         await prefs.setString('shadow_awakening_date', savedDate);
       }
-      
+
       _awakeningDate = savedDate;
       notifyListeners();
     } catch (_) {}
@@ -112,7 +183,8 @@ class GameProvider extends _GameBase
       _persistedLicenseKey = '';
       _isPro = false;
       notifyListeners();
-      debugPrint("[MONARCH SYSTEM] Rétrogradation forcée vers le plan Free : Licence révoquée ou non liée.");
+      debugPrint(
+          "[MONARCH SYSTEM] Rétrogradation forcée vers le plan Free : Licence révoquée ou non liée.");
     } catch (_) {}
   }
 
@@ -127,28 +199,39 @@ class GameProvider extends _GameBase
     } catch (_) {}
   }
 
-  /// Génère ou récupère l'identifiant matériel unique pour l'appareil
   @override
   Future<String> getUniqueHardwareIdForCheckout() async {
     try {
       final DeviceInfoPlugin deviceInfo = DeviceInfoPlugin();
       if (kIsWeb) {
         final webInfo = await deviceInfo.webBrowserInfo;
-        return "WEB_${webInfo.vendor ?? 'unknown'}_${webInfo.userAgent ?? 'unknown'}".hashCode.abs().toString();
+        return "WEB_${webInfo.vendor ?? 'unknown'}_${webInfo.userAgent ?? 'unknown'}"
+            .hashCode
+            .abs()
+            .toString();
       } else if (Platform.isAndroid) {
         final androidInfo = await deviceInfo.androidInfo;
-        return "ANDROID_${androidInfo.id}_${androidInfo.model}".hashCode.abs().toString();
+        return "ANDROID_${androidInfo.id}_${androidInfo.model}"
+            .hashCode
+            .abs()
+            .toString();
       } else if (Platform.isIOS) {
         final iosInfo = await deviceInfo.iosInfo;
-        return "IOS_${iosInfo.identifierForVendor ?? 'unknown'}".hashCode.abs().toString();
+        return "IOS_${iosInfo.identifierForVendor ?? 'unknown'}"
+            .hashCode
+            .abs()
+            .toString();
       }
     } catch (_) {}
     return "UNKNOWN_HARDWARE_ID";
   }
 
-  /// Restauration automatique par l'empreinte matérielle avec signature complète
   @override
-  Future<bool> requestHardwareAutoRecovery({bool silent = false, String? email, String? proof}) async {
+  Future<bool> requestHardwareAutoRecovery({
+    bool silent = false,
+    String? email,
+    String? proof,
+  }) async {
     try {
       final String hwId = await getUniqueHardwareIdForCheckout();
       final String? foundKey = await AuthRecoveryService.fetchKeyForHardware(hwId);
@@ -160,7 +243,6 @@ class GameProvider extends _GameBase
     return false;
   }
 
-  /// Active explicitement une clé Pro saisie manuellement ou reçue par webhook
   @override
   Future<bool> activateProKey(String rawKey) async {
     final cleanKey = rawKey.trim().toUpperCase();
@@ -172,7 +254,10 @@ class GameProvider extends _GameBase
         return true;
       }
 
-      final doc = await FirebaseFirestore.instance.collection('pro_licenses').doc(cleanKey).get();
+      final doc = await FirebaseFirestore.instance
+          .collection('pro_licenses')
+          .doc(cleanKey)
+          .get();
       if (doc.exists) {
         final data = doc.data();
         if (data != null) {
@@ -192,7 +277,11 @@ class GameProvider extends _GameBase
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: const Color(0xFF121217),
-        title: const Text("RESTAURATION MATÉRIELLE", style: TextStyle(color: Color(0xFF00E5FF), fontFamily: 'Orbitron', fontSize: 14)),
+        title: const Text(
+          "RESTAURATION MATÉRIELLE",
+          style: TextStyle(
+              color: Color(0xFF00E5FF), fontFamily: 'Orbitron', fontSize: 14),
+        ),
         content: const Text(
           "Tentative de récupération de la licence liée à cet appareil...",
           style: TextStyle(color: Colors.white70, fontSize: 12),
@@ -205,12 +294,15 @@ class GameProvider extends _GameBase
               final success = await requestHardwareAutoRecovery(silent: false);
               messenger.showSnackBar(
                 SnackBar(
-                  content: Text(success ? "Licence restaurée avec succès !" : "Aucune licence trouvée pour cet appareil."),
+                  content: Text(success
+                      ? "Licence restaurée avec succès !"
+                      : "Aucune licence trouvée pour cet appareil."),
                   backgroundColor: success ? Colors.green : Colors.redAccent,
                 ),
               );
             },
-            child: const Text("LANCER LA RESTAURATION", style: TextStyle(color: Color(0xFF00E5FF))),
+            child: const Text("LANCER LA RESTAURATION",
+                style: TextStyle(color: Color(0xFF00E5FF))),
           ),
         ],
       ),

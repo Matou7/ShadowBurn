@@ -6,8 +6,6 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
 import android.os.PowerManager
 import android.os.Process
 import android.provider.Settings
@@ -20,10 +18,12 @@ import io.flutter.plugin.common.MethodChannel
 class MainActivity: FlutterActivity() {
     private val PRIMARY_CHANNEL = "com.shadowburn.app/lock"
     private val LEGACY_CHANNEL = "com.shadowburn.lock/channel"
+    private val INTENT_CHANNEL = "com.shadowburn.app/intents"
 
     private var lastIntentUrl: String? = null
     private var primaryMethodChannel: MethodChannel? = null
     private var legacyMethodChannel: MethodChannel? = null
+    private var intentMethodChannel: MethodChannel? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -43,7 +43,7 @@ class MainActivity: FlutterActivity() {
         intent?.dataString?.let {
             lastIntentUrl = it
         }
-        
+
         checkAndEnforcePenaltyOnStartup()
     }
 
@@ -65,8 +65,9 @@ class MainActivity: FlutterActivity() {
         super.onNewIntent(intent)
         overridePendingTransition(0, 0)
         setIntent(intent)
-        intent.dataString?.let {
-            lastIntentUrl = it
+        intent.dataString?.let { url ->
+            lastIntentUrl = url
+            intentMethodChannel?.invokeMethod("onNewIntent", url)
         }
         checkAndEnforcePenaltyOnStartup()
     }
@@ -92,7 +93,7 @@ class MainActivity: FlutterActivity() {
 
         val handler = MethodChannel.MethodCallHandler { call, result ->
             when (call.method) {
-                "getInitialIntentUrl" -> {
+                "getInitialIntentUrl", "getInitialLink" -> {
                     val url = lastIntentUrl
                     lastIntentUrl = null
                     result.success(url)
@@ -134,7 +135,7 @@ class MainActivity: FlutterActivity() {
 
                     try {
                         val intent = Intent(Intent.ACTION_DIAL).apply {
-                            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
                         }
                         startActivity(intent)
                         overridePendingTransition(0, 0)
@@ -152,7 +153,7 @@ class MainActivity: FlutterActivity() {
 
                     try {
                         val intent = Intent(Intent.ACTION_VIEW, Uri.parse("sms:")).apply {
-                            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
                         }
                         startActivity(intent)
                         overridePendingTransition(0, 0)
@@ -160,7 +161,7 @@ class MainActivity: FlutterActivity() {
                         try {
                             val fallback = Intent(Intent.ACTION_MAIN).apply {
                                 addCategory(Intent.CATEGORY_APP_MESSAGING)
-                                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
                             }
                             startActivity(fallback)
                             overridePendingTransition(0, 0)
@@ -216,15 +217,20 @@ class MainActivity: FlutterActivity() {
         legacyMethodChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, LEGACY_CHANNEL).apply {
             setMethodCallHandler(handler)
         }
+        intentMethodChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, INTENT_CHANNEL).apply {
+            setMethodCallHandler(handler)
+        }
     }
 
     override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
         try {
             primaryMethodChannel?.setMethodCallHandler(null)
             legacyMethodChannel?.setMethodCallHandler(null)
+            intentMethodChannel?.setMethodCallHandler(null)
         } catch (_: Exception) {}
         primaryMethodChannel = null
         legacyMethodChannel = null
+        intentMethodChannel = null
         super.cleanUpFlutterEngine(flutterEngine)
     }
 
@@ -288,7 +294,7 @@ class MainActivity: FlutterActivity() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             if (!Settings.canDrawOverlays(this)) {
                 val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")).apply {
-                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
                 }
                 startActivity(intent)
                 overridePendingTransition(0, 0)
@@ -303,14 +309,14 @@ class MainActivity: FlutterActivity() {
     private fun openDeepUsageSettings() {
         val intentWithPackage = Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS).apply {
             data = Uri.parse("package:$packageName")
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
         }
         try {
             startActivity(intentWithPackage)
             overridePendingTransition(0, 0)
         } catch (_: Exception) {
             val genericIntent = Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
             }
             try {
                 startActivity(genericIntent)
@@ -326,7 +332,7 @@ class MainActivity: FlutterActivity() {
             setClassName("com.miui.powerkeeper", "com.miui.powerkeeper.ui.HiddenAppsConfigActivity")
             putExtra("package_name", packageName)
             putExtra("package_label", "ShadowBurn")
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
         }
         try {
             startActivity(miuiIntent)
@@ -337,7 +343,7 @@ class MainActivity: FlutterActivity() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             val batteryIntent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
                 data = Uri.parse("package:$packageName")
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
             }
             try {
                 startActivity(batteryIntent)
@@ -348,7 +354,7 @@ class MainActivity: FlutterActivity() {
 
         try {
             val globalBattery = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
             }
             startActivity(globalBattery)
             overridePendingTransition(0, 0)
@@ -361,7 +367,7 @@ class MainActivity: FlutterActivity() {
         try {
             val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
                 data = Uri.parse("package:$packageName")
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
             }
             startActivity(intent)
             overridePendingTransition(0, 0)
