@@ -78,7 +78,8 @@ class _AdminScreenState extends State<AdminScreen> {
         return;
       }
 
-      final data = doc.data() as Map<String, dynamic>? ?? {};
+      final Map<String, dynamic> data =
+          Map<String, dynamic>.from(doc.data() as Map? ?? {});
       final String expectedKey = (data['admin_key'] ?? '').toString().trim();
       final String expectedToken = (data['join_token'] ?? '').toString().trim();
 
@@ -97,7 +98,7 @@ class _AdminScreenState extends State<AdminScreen> {
         return;
       }
 
-      final String? activeAdmin = data['active_admin_session'];
+      final String? activeAdmin = data['active_admin_session']?.toString();
       final int lastAdminHeartbeat = (data['admin_last_seen'] as num?)?.toInt() ?? 0;
       final int now = DateTime.now().millisecondsSinceEpoch;
 
@@ -166,7 +167,8 @@ class _AdminScreenState extends State<AdminScreen> {
       final ref = FirebaseFirestore.instance.collection('current_raids').doc(_roomId);
       final doc = await ref.get();
       if (doc.exists) {
-        final data = doc.data() as Map<String, dynamic>? ?? {};
+        final Map<String, dynamic> data =
+            Map<String, dynamic>.from(doc.data() as Map? ?? {});
         bool currentAudio = data['audio_playing'] == true;
         await ref.update({'audio_playing': !currentAudio});
 
@@ -401,7 +403,7 @@ class NativeRemoteControlScreen extends StatefulWidget {
 }
 
 class _NativeRemoteControlScreenState extends State<NativeRemoteControlScreen> {
-  late DocumentReference> _raidRef;
+  late DocumentReference _raidRef;
 
   @override
   void initState() {
@@ -454,7 +456,7 @@ class _NativeRemoteControlScreenState extends State<NativeRemoteControlScreen> {
           onPressed: () => Navigator.of(context).pop(),
         ),
       ),
-      body: StreamBuilder<DocumentSnapshot>>(
+      body: StreamBuilder<DocumentSnapshot>(
         stream: _raidRef.snapshots(),
         builder: (context, snapshot) {
           if (!snapshot.hasData) {
@@ -476,7 +478,8 @@ class _NativeRemoteControlScreenState extends State<NativeRemoteControlScreen> {
             );
           }
 
-          final data = snapshot.data!.data() ?? {};
+          final Map<String, dynamic> data =
+              Map<String, dynamic>.from(snapshot.data!.data() as Map? ?? {});
           final String status = (data['status'] ?? 'waiting').toString();
           final int hp = (data['current_hp'] as num?)?.toInt() ?? 5000;
           final int maxHp = (data['max_hp'] as num?)?.toInt() ?? 5000;
