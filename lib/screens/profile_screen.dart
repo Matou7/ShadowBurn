@@ -42,7 +42,6 @@ class _ProfileScreenState extends State<ProfileScreen>
 
   String? _activeRoom;
   String? _verifiedKey;
-  StreamSubscription<DocumentSnapshot>? _roomWatchSubscription;
   int _selectedHpPreset = 5000;
   bool _isCheckingIntent = false;
   bool _isBindingInProgress = false;
@@ -93,22 +92,6 @@ class _ProfileScreenState extends State<ProfileScreen>
       await prefs.setString('shadow_hardware_fingerprint', hw);
     }
     _hardwareFingerprint = hw;
-  }
-
-  /// Met à jour admin_last_seen_ms et lease_expires_at uniquement lors d'une action admin.
-  Future<void> _touchAdminActivity(String roomId) async {
-    if (roomId.isEmpty || _deviceAdminToken == null) return;
-    final int nowMs = DateTime.now().millisecondsSinceEpoch;
-    try {
-      await FirebaseFirestore.instance
-          .collection('current_raids')
-          .doc(roomId)
-          .update({
-        'admin_instance_token': _deviceAdminToken,
-        'admin_last_seen_ms': nowMs,
-        'lease_expires_at': nowMs + _kAdminLeaseDurationMs,
-      }).timeout(_kFirestoreTimeout);
-    } catch (_) {}
   }
 
   Future<void> _releaseAdminLease(String? roomId) async {
@@ -204,7 +187,6 @@ class _ProfileScreenState extends State<ProfileScreen>
     );
   }
 
-  /// Vérifie le verrou uniquement au moment de la tentative de liaison / prise de main.
   Future<void> _attemptSecureBinding(String roomId, String secretKey) async {
     if (!mounted || _isBindingInProgress) return;
     _isBindingInProgress = true;
@@ -254,12 +236,14 @@ class _ProfileScreenState extends State<ProfileScreen>
           data['admin_instance_token']?.toString();
       final int lastAdminSeenMs =
           (data['admin_last_seen_ms'] as num?)?.toInt() ?? 0;
-      final int leaseExpiresAtMs =
-          (data['lease_expires_at'] as num?)?.toInt() ??
-              (lastAdminSeenMs > 0 ? lastAdminSeenMs + _kAdminLeaseDurationMs : 0);
+      final int leaseExpiresAtMs = (data['lease_expires_at'] as num?)?.toInt() ??
+          (lastAdminSeenMs > 0
+              ? lastAdminSeenMs + _kAdminLeaseDurationMs
+              : 0);
 
       final bool leaseStillValid = leaseExpiresAtMs > nowMs ||
-          (lastAdminSeenMs > 0 && (nowMs - lastAdminSeenMs) < _kAdminLeaseDurationMs);
+          (lastAdminSeenMs > 0 &&
+              (nowMs - lastAdminSeenMs) < _kAdminLeaseDurationMs);
 
       final bool occupiedByOtherInstance = existingAdminInstance != null &&
           existingAdminInstance.isNotEmpty &&
@@ -275,19 +259,6 @@ class _ProfileScreenState extends State<ProfileScreen>
         return;
       }
 
-      final String? existingHwSignature =
-          data['hardware_fingerprint']?.toString();
-      final bool hardwareConflictOnActiveLease = existingHwSignature != null &&
-          existingHwSignature.isNotEmpty &&
-          existingHwSignature != _hardwareFingerprint &&
-          occupiedByOtherInstance;
-
-      if (hardwareConflictOnActiveLease) {
-        _rejectIntrusionAttempt(
-            "INTRUSION REFUSÉE : Empreinte matérielle non autorisée pour [$cleanRoomId].");
-        return;
-      }
-
       await docRef.set({
         'admin_instance_token': _deviceAdminToken,
         'hardware_fingerprint': _hardwareFingerprint,
@@ -297,8 +268,6 @@ class _ProfileScreenState extends State<ProfileScreen>
 
       await game.pairAdminRoom(cleanRoomId, adminKey: cleanKey);
 
-      _roomWatchSubscription?.cancel();
-
       if (!mounted) return;
       setState(() {
         _activeRoom = cleanRoomId;
@@ -307,25 +276,6 @@ class _ProfileScreenState extends State<ProfileScreen>
       });
 
       _scrollToRemoteConsole();
-
-      _roomWatchSubscription = docRef.snapshots().listen((snapshot) {
-        if (!snapshot.exists) {
-          _unbindFromRoom("Le Donjon a été dissous.");
-          return;
-        }
-
-        final Map<String, dynamic> roomData =
-            Map<String, dynamic>.from(snapshot.data() as Map? ?? {});
-        final int maxHp = ((roomData['max_hp'] ?? 5000) as num).toInt();
-
-        if (mounted) {
-          setState(() {
-            _selectedHpPreset = maxHp;
-          });
-        }
-      }, onError: (e) {
-        debugPrint("Erreur écoute salle admin: $e");
-      });
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -357,7 +307,6 @@ class _ProfileScreenState extends State<ProfileScreen>
         Provider.of<GameProvider>(context, listen: false).pairedAdminRoom;
     if (roomToDelete == null || roomToDelete.isEmpty) return;
     try {
-      await _releaseAdminLease(roomToDelete);
       await FirebaseFirestore.instance
           .collection('current_raids')
           .doc(roomToDelete)
@@ -371,7 +320,6 @@ class _ProfileScreenState extends State<ProfileScreen>
 
   void _unbindFromRoom(String reason) {
     final roomToRelease = _activeRoom;
-    _roomWatchSubscription?.cancel();
     if (roomToRelease != null) {
       _releaseAdminLease(roomToRelease);
     }
@@ -394,7 +342,6 @@ class _ProfileScreenState extends State<ProfileScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _roomWatchSubscription?.cancel();
     _scrollController.dispose();
     super.dispose();
   }
@@ -1113,7 +1060,6 @@ class _ProfileScreenState extends State<ProfileScreen>
                     if (newHp != null) {
                       final selected = RaidAdminService.raidPresets
                           .firstWhere((p) => p['hp'] == newHp);
-                      await _touchAdminActivity(effectiveRoom);
                       await RaidAdminService.applyPreset(
                           newHp, selected['label'] as String,
                           roomId: effectiveRoom);
@@ -1137,7 +1083,6 @@ class _ProfileScreenState extends State<ProfileScreen>
                 Expanded(
                   child: _compactButton("+1 MIN", const Color(0xFF00E5FF),
                       () async {
-                    await _touchAdminActivity(effectiveRoom);
                     await RaidAdminService.extendRaidMinutes(1,
                         roomId: effectiveRoom);
                   }),
@@ -1145,7 +1090,6 @@ class _ProfileScreenState extends State<ProfileScreen>
                 const SizedBox(width: 4),
                 Expanded(
                   child: _compactButton("+15 MIN", systemBlue, () async {
-                    await _touchAdminActivity(effectiveRoom);
                     await RaidAdminService.extendRaidMinutes(15,
                         roomId: effectiveRoom);
                   }),
@@ -1153,7 +1097,6 @@ class _ProfileScreenState extends State<ProfileScreen>
                 const SizedBox(width: 4),
                 Expanded(
                   child: _compactButton("+30 MIN", systemBlue, () async {
-                    await _touchAdminActivity(effectiveRoom);
                     await RaidAdminService.extendRaidMinutes(30,
                         roomId: effectiveRoom);
                   }),
@@ -1161,7 +1104,6 @@ class _ProfileScreenState extends State<ProfileScreen>
                 const SizedBox(width: 4),
                 Expanded(
                   child: _compactButton("RESET 24H", Colors.amber, () async {
-                    await _touchAdminActivity(effectiveRoom);
                     await RaidAdminService.resetToMidnight(
                         roomId: effectiveRoom);
                   }),
@@ -1174,7 +1116,6 @@ class _ProfileScreenState extends State<ProfileScreen>
                 Expanded(
                   child: _compactButton("-1 MIN", const Color(0xFFFFAB91),
                       () async {
-                    await _touchAdminActivity(effectiveRoom);
                     await RaidAdminService.reduceRaidMinutes(1,
                         roomId: effectiveRoom);
                   }),
@@ -1183,7 +1124,6 @@ class _ProfileScreenState extends State<ProfileScreen>
                 Expanded(
                   child: _compactButton("-15 MIN", const Color(0xFFFF7043),
                       () async {
-                    await _touchAdminActivity(effectiveRoom);
                     await RaidAdminService.reduceRaidMinutes(15,
                         roomId: effectiveRoom);
                   }),
@@ -1192,7 +1132,6 @@ class _ProfileScreenState extends State<ProfileScreen>
                 Expanded(
                   child: _compactButton("-30 MIN", const Color(0xFFFF7043),
                       () async {
-                    await _touchAdminActivity(effectiveRoom);
                     await RaidAdminService.reduceRaidMinutes(30,
                         roomId: effectiveRoom);
                   }),
@@ -1201,7 +1140,6 @@ class _ProfileScreenState extends State<ProfileScreen>
                 Expanded(
                   child: _compactButton("RESET À 0", const Color(0xFFFF2E56),
                       () async {
-                    await _touchAdminActivity(effectiveRoom);
                     await RaidAdminService.expireRaidNow(
                         roomId: effectiveRoom);
                   }),
@@ -1222,7 +1160,6 @@ class _ProfileScreenState extends State<ProfileScreen>
                 Expanded(
                   child: _compactButton("LANCER", const Color(0xFF00FF66),
                       () async {
-                    await _touchAdminActivity(effectiveRoom);
                     await RaidAdminService.setRaidStatus('active',
                         roomId: effectiveRoom);
                   }),
@@ -1231,7 +1168,6 @@ class _ProfileScreenState extends State<ProfileScreen>
                 Expanded(
                   child: _compactButton("-200 PV", const Color(0xFFFF9100),
                       () async {
-                    await _touchAdminActivity(effectiveRoom);
                     await RaidAdminService.strikeBoss(200,
                         roomId: effectiveRoom);
                   }),
@@ -1240,7 +1176,6 @@ class _ProfileScreenState extends State<ProfileScreen>
                 Expanded(
                   child: _compactButton("RESET BOSS", const Color(0xFFFF2E56),
                       () async {
-                    await _touchAdminActivity(effectiveRoom);
                     await RaidAdminService.resetBoss(roomId: effectiveRoom);
                   }),
                 ),

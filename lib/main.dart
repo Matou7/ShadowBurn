@@ -262,13 +262,18 @@ class _ShadowBurnAppState extends State<ShadowBurnApp>
       MethodChannel('com.shadowburn.app/intents');
   static const MethodChannel _lockChannel =
       MethodChannel('com.shadowburn.app/lock');
+
   bool _isShowingProPopup = false;
+  bool _isHandlingIntent = false;
+  String? _lastHandledLink;
+  int _lastHandledTimestampMs = 0;
   Timer? _autoCloseTimer;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _setupMethodCallHandler();
     _handleIncomingIntent();
     _checkWebProSuccessUrl();
   }
@@ -286,6 +291,17 @@ class _ShadowBurnAppState extends State<ShadowBurnApp>
       _handleIncomingIntent();
       _silentCheckHardwarePurchase();
     }
+  }
+
+  void _setupMethodCallHandler() {
+    _intentChannel.setMethodCallHandler((call) async {
+      if (call.method == 'onNewIntent') {
+        final String? link = call.arguments as String?;
+        if (link != null && link.isNotEmpty) {
+          _routeDeepLink(link);
+        }
+      }
+    });
   }
 
   void _checkWebProSuccessUrl() {
@@ -341,33 +357,44 @@ class _ShadowBurnAppState extends State<ShadowBurnApp>
   }
 
   Future<void> _handleIncomingIntent() async {
-    try {
-      final String? initialLink =
-          await _intentChannel.invokeMethod<String>('getInitialLink');
-      if (initialLink != null && initialLink.isNotEmpty) {
-        _routeDeepLink(initialLink);
-      }
-    } catch (_) {}
+    if (_isHandlingIntent) return;
+    _isHandlingIntent = true;
 
     try {
-      final String? altLink =
-          await _lockChannel.invokeMethod<String>('getInitialIntentUrl');
-      if (altLink != null && altLink.isNotEmpty) {
-        _routeDeepLink(altLink);
-      }
-    } catch (_) {}
+      String? link;
+      try {
+        link = await _intentChannel
+            .invokeMethod<String>('getInitialLink')
+            .timeout(const Duration(seconds: 2));
+      } catch (_) {}
 
-    _intentChannel.setMethodCallHandler((call) async {
-      if (call.method == 'onNewIntent') {
-        final String? link = call.arguments as String?;
-        if (link != null && link.isNotEmpty) {
-          _routeDeepLink(link);
-        }
+      if (link == null || link.isEmpty) {
+        try {
+          link = await _lockChannel
+              .invokeMethod<String>('getInitialIntentUrl')
+              .timeout(const Duration(seconds: 2));
+        } catch (_) {}
       }
-    });
+
+      if (link != null && link.isNotEmpty) {
+        _routeDeepLink(link);
+      }
+    } finally {
+      _isHandlingIntent = false;
+    }
   }
 
-  void _routeDeepLink(String link) {
+  void _routeDeepLink(String rawLink) {
+    final String link = rawLink.trim();
+    if (link.isEmpty) return;
+
+    final int nowMs = DateTime.now().millisecondsSinceEpoch;
+    if (_lastHandledLink == link && (nowMs - _lastHandledTimestampMs) < 3000) {
+      return;
+    }
+    _lastHandledLink = link;
+    _lastHandledTimestampMs = nowMs;
+
     final uri = Uri.tryParse(link);
     if (uri == null) return;
 
@@ -421,8 +448,6 @@ class _ShadowBurnAppState extends State<ShadowBurnApp>
       WidgetsBinding.instance.addPostFrameCallback((_) async {
         if (!mounted) return;
         final game = Provider.of<GameProvider>(context, listen: false);
-
-        // Attend le chargement complet du statut Pro avant toute vérification
         final bool isProVerified = await game.ensureProStatusLoaded();
 
         if (!isProVerified) {
