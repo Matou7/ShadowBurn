@@ -32,8 +32,6 @@ class QuotaGuardService {
     return used >= softBlockThreshold;
   }
 
-  /// Autorise les écritures courantes tant qu'il reste plus de 500 écritures.
-  /// Réserve les 500 dernières écritures aux clôtures critiques (victoire boss).
   static Future<bool> checkAndIncrementWrite({
     bool isCriticalClosure = false,
   }) async {

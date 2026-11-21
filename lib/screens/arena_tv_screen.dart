@@ -51,7 +51,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
 
   static const int kMaxGlobalRooms = 100;
   static const int kMaxHuntersPerRoom = 10;
-  static const int kRoomDeathThresholdMs = 45000;
+  static const int kRoomInactivityThresholdMs = 600000; // 10 minutes
   static const Duration _kFirestoreTimeout = Duration(seconds: 6);
 
   @override
@@ -62,7 +62,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
 
     if (kIsWeb) {
       ArenaWebHelper.registerBeforeUnload(() {
-        _despawnAndStopAllTimers();
+        _markDormantAndStopAllTimers();
       });
     }
 
@@ -77,7 +77,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
           _isNightLockActive = isNightClosed;
         });
         if (isNightClosed) {
-          _despawnAndStopAllTimers();
+          _markDormantAndStopAllTimers();
           return;
         }
       }
@@ -107,9 +107,11 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
     _lastRoomActivityMs = DateTime.now().millisecondsSinceEpoch;
   }
 
-  void _despawnAndStopAllTimers() {
+  /// Passe la salle en mode dormant sans .delete() (économie d'opérations de suppression).
+  void _markDormantAndStopAllTimers() {
     _queueRetryTimer?.cancel();
     _raidSubscription?.cancel();
+    _raidSubscription = null;
 
     if (_isRadioPlaying) {
       _isRadioPlaying = false;
@@ -117,14 +119,17 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
     }
 
     if (_raidRef != null && _lastKnownHunterCount > 0 && !_isQuotaExhausted) {
-      _raidRef!.delete().catchError((_) {});
+      _raidRef!.update({
+        'status': 'dormant',
+        'audio_playing': false,
+      }).catchError((_) {});
     }
-    _raidRef = null;
   }
 
   void _triggerQuotaExhaustedPodium() {
     _queueRetryTimer?.cancel();
     _raidSubscription?.cancel();
+    _raidSubscription = null;
     if (_isRadioPlaying) {
       _isRadioPlaying = false;
       AudioService.stopNrjStream();
@@ -150,6 +155,8 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
       if (canWrite) {
         await _raidRef!.update({
           'status': 'failed',
+          'audio_playing': false,
+          'last_activity_ms': DateTime.now().millisecondsSinceEpoch,
         }).timeout(_kFirestoreTimeout).catchError((_) {});
       } else {
         _triggerQuotaExhaustedPodium();
@@ -160,7 +167,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.detached) {
-      _despawnAndStopAllTimers();
+      _markDormantAndStopAllTimers();
     }
   }
 
@@ -248,6 +255,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
           .collection('current_raids')
           .doc(chosenRoom);
       final midnight = DateTime(now.year, now.month, now.day, 23, 58, 0);
+      final nowMs = DateTime.now().millisecondsSinceEpoch;
 
       try {
         final existingDoc = await ref.get().timeout(_kFirestoreTimeout);
@@ -266,7 +274,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
             'hunters': [],
             'logs': [],
             'target_end_time': midnight.millisecondsSinceEpoch,
-            'arena_last_seen': DateTime.now().millisecondsSinceEpoch,
+            'last_activity_ms': nowMs,
           }).timeout(_kFirestoreTimeout);
         } else {
           final Map data = existingDoc.data() ?? {};
@@ -283,18 +291,19 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
             'instance_token': myInstanceToken,
             'join_token': tokenToUse,
             'admin_key': keyToUse,
-            'status': data['status'] ?? 'waiting',
+            'status': data['status'] == 'dormant'
+                ? 'waiting'
+                : (data['status'] ?? 'waiting'),
             'preset_label': data['preset_label'] ?? 'RAID STANDARD (5 000 PV)',
             'current_hp': data['current_hp'] ?? 5000,
             'max_hp': data['max_hp'] ?? 5000,
-            'audio_playing':
-                data.containsKey('audio_playing') ? data['audio_playing'] : false,
+            'audio_playing': false,
             'hunters': data['hunters'] ?? [],
             'logs': data['logs'] ?? [],
             'target_end_time':
                 data['target_end_time'] ?? midnight.millisecondsSinceEpoch,
-            'arena_last_seen': DateTime.now().millisecondsSinceEpoch,
-          }, SetOptions(merge: true)).timeout(_kFirestoreTimeout);
+            'last_activity_ms': nowMs,
+          }).timeout(_kFirestoreTimeout);
         }
       } catch (e) {
         if (e.toString().toLowerCase().contains('resource-exhausted') ||
@@ -341,23 +350,57 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
     final ref =
         FirebaseFirestore.instance.collection('current_raids').doc(chosenRoom);
 
-    setState(() {
-      _roomId = chosenRoom;
-      _instanceToken = myInstanceToken;
-      _adminKey = keyToUse;
-      _joinToken = tokenToUse;
-      _raidRef = ref;
-      _isAllocating = false;
-      _isWorldSaturated = false;
-      _isDespawnedForInactivity = false;
-    });
+    try {
+      final snap = await ref.get().timeout(_kFirestoreTimeout);
+      final Map<String, dynamic> initialMap = snap.exists
+          ? Map<String, dynamic>.from(snap.data() as Map? ?? {})
+          : {
+              'roomId': chosenRoom,
+              'status': 'waiting',
+              'preset_label': 'RAID STANDARD (5 000 PV)',
+              'current_hp': 5000,
+              'max_hp': 5000,
+              'hunters': [],
+              'logs': [],
+            };
 
-    _startListeningToRaid();
+      if (!mounted || _isQuotaExhausted) return;
+
+      setState(() {
+        _roomId = chosenRoom;
+        _instanceToken = myInstanceToken;
+        _adminKey = keyToUse;
+        _joinToken = tokenToUse;
+        _raidRef = ref;
+        _raidData = initialMap;
+        _isRaidDataLoaded = true;
+        _isAllocating = false;
+        _isWorldSaturated = false;
+        _isDespawnedForInactivity = false;
+      });
+
+      final String currentSt = (initialMap['status'] ?? 'waiting').toString();
+      if (currentSt == 'active' || currentSt == 'victory' || currentSt == 'failed') {
+        _startListeningToRaid();
+      }
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _roomId = chosenRoom;
+        _instanceToken = myInstanceToken;
+        _adminKey = keyToUse;
+        _joinToken = tokenToUse;
+        _raidRef = ref;
+        _isRaidDataLoaded = true;
+        _isAllocating = false;
+      });
+    }
   }
 
   void _startListeningToRaid() {
-    _raidSubscription?.cancel();
-    if (_raidRef == null) return;
+    if (_raidSubscription != null || _raidRef == null || _isQuotaExhausted) {
+      return;
+    }
 
     _raidSubscription = _raidRef!.snapshots().listen((doc) async {
       if (!mounted) return;
@@ -392,7 +435,11 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
             _raidRef!.update({
               'status': 'victory',
               'current_hp': 0,
+              'audio_playing': false,
             }).catchError((_) {});
+          } else {
+            _triggerQuotaExhaustedPodium();
+            return;
           }
           mapData['status'] = 'victory';
           mapData['current_hp'] = 0;
@@ -422,15 +469,18 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
         _triggerQuotaExhaustedPodium();
       } else if (errStr.contains('permission-denied')) {
         FirebaseAuth.instance.signInAnonymously().then((_) {
-          if (mounted && !_isQuotaExhausted) _startListeningToRaid();
+          if (mounted && !_isQuotaExhausted) {
+            _raidSubscription?.cancel();
+            _raidSubscription = null;
+            _startListeningToRaid();
+          }
         }).catchError((_) {});
       }
     });
   }
 
-  /// Allocation progressive :
-  /// 1. Sondage rapide sur 6 salles aléatoires (1 à 2 lectures en moyenne).
-  /// 2. Si les 6 sont occupées, scan complet de current_raids pour garantir l'accès jusqu'à 100 salles réelles.
+  /// Sondage ciblé sur 6 salles aléatoires puis repli jusqu'à 100 salles max.
+  /// Aucune suppression (.delete()) : écrasement direct par .set().
   Future<String?> _claimNextAvailableRoomSlot(
     String instanceToken,
     String joinToken,
@@ -447,7 +497,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
       0,
     );
 
-    Map<String, dynamic> buildInitialRoomData(String roomName) => {
+    Map<String, dynamic> buildFreshRoomData(String roomName) => {
           'roomId': roomName,
           'instance_token': instanceToken,
           'join_token': joinToken,
@@ -460,16 +510,20 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
           'hunters': [],
           'logs': [],
           'target_end_time': midnight.millisecondsSinceEpoch,
-          'arena_last_seen': now,
+          'last_activity_ms': now,
         };
 
     bool isSlotAvailable(DocumentSnapshot doc) {
       if (!doc.exists) return true;
       final Map data = doc.data() as Map? ?? {};
-      final int lastSeen = (data['arena_last_seen'] as num?)?.toInt() ?? 0;
       final String st = (data['status'] ?? 'waiting').toString();
-      return lastSeen == 0 ||
-          (now - lastSeen > kRoomDeathThresholdMs && st != 'active');
+      if (st == 'dormant' || st == 'victory' || st == 'failed') {
+        return true;
+      }
+      final int lastActivity = (data['last_activity_ms'] as num?)?.toInt() ??
+          (data['arena_last_seen'] as num?)?.toInt() ??
+          0;
+      return lastActivity == 0 || (now - lastActivity > kRoomInactivityThresholdMs);
     }
 
     try {
@@ -482,7 +536,6 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
       final rand = Random();
       final Set<int> tested = {};
 
-      // Phase 1 : Sondage rapide (6 tirages aléatoires entre 1 et 100)
       for (int attempt = 0; attempt < 6; attempt++) {
         int candidate = rand.nextInt(kMaxGlobalRooms) + 1;
         while (tested.contains(candidate) && tested.length < kMaxGlobalRooms) {
@@ -496,13 +549,12 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
 
         if (isSlotAvailable(doc)) {
           await docRef
-              .set(buildInitialRoomData(roomName))
+              .set(buildFreshRoomData(roomName))
               .timeout(_kFirestoreTimeout);
           return roomName;
         }
       }
 
-      // Phase 2 : Repli haute affluence (garantit l'utilisation jusqu'aux 100 salles)
       final snapshot = await firestore
           .collection('current_raids')
           .get()
@@ -525,14 +577,14 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
       }
 
       if (candidate > kMaxGlobalRooms) {
-        return null; // Réellement 100 salles actives simultanées
+        return null;
       }
 
       final allocatedRoom = 'room_$candidate';
       await firestore
           .collection('current_raids')
           .doc(allocatedRoom)
-          .set(buildInitialRoomData(allocatedRoom))
+          .set(buildFreshRoomData(allocatedRoom))
           .timeout(_kFirestoreTimeout);
 
       return allocatedRoom;
@@ -573,7 +625,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _localTickTimer?.cancel();
-    _despawnAndStopAllTimers();
+    _markDormantAndStopAllTimers();
     super.dispose();
   }
 
@@ -795,6 +847,11 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
     _currentRaidStatus = status;
     _currentBossHp = currentHp;
 
+    // Écoute temps réel ouverte uniquement lorsque le raid est lancé ou terminé
+    if (status == 'active' || status == 'victory' || status == 'failed') {
+      _startListeningToRaid();
+    }
+
     if (data.containsKey('target_end_time')) {
       _syncTargetTime(data['target_end_time']);
     }
@@ -965,9 +1022,11 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
                               bool playing = await AudioService.setNrjStreamState(
                                   nextState);
                               if (_raidRef != null) {
-                                await _raidRef!
-                                    .update({'audio_playing': nextState})
-                                    .catchError((_) {});
+                                await _raidRef!.update({
+                                  'audio_playing': nextState,
+                                  'last_activity_ms':
+                                      DateTime.now().millisecondsSinceEpoch,
+                                }).catchError((_) {});
                               }
                               setState(() {});
                               if (mounted) {

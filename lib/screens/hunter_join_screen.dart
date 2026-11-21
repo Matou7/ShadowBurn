@@ -79,6 +79,7 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
 
   static const int kMaxHuntersPerRoom = 10;
   static const int kBatchIntervalSeconds = 14;
+  static const int kMaxLogsStored = 10;
   static const Duration _kFirestoreTimeout = Duration(seconds: 6);
 
   static const List trainingModes = [
@@ -392,6 +393,7 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
     _nameController.text = detected;
   }
 
+  /// Entrée 100 % locale (0 écriture Firestore).
   void _joinRaid() {
     final name = _nameController.text.trim();
     if (name.isEmpty || _raidRef == null) return;
@@ -558,7 +560,7 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
     if (raidStatus != 'active') {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text("LE MAÎTRE DU JEU N'A PAS ENCORE LANCÉ LE RAID !"),
+          content: Text("CONNECTEZ-VOUS : EN ATTENTE DU LANCEMENT DE L'ADMIN."),
           backgroundColor: Color(0xFFFF9100),
         ),
       );
@@ -585,6 +587,9 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
       'glowing': glowEffect,
       'timestamp': DateTime.now().millisecondsSinceEpoch,
     });
+    if (_pendingLogs.length > kMaxLogsStored) {
+      _pendingLogs.removeRange(kMaxLogsStored, _pendingLogs.length);
+    }
 
     final num maxHp = (data['max_hp'] as num?) ?? 5000;
     final num currentHp = (data['current_hp'] as num?) ?? maxHp;
@@ -595,7 +600,9 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
       final dynamic rawLogs = _raidData['logs'];
       final List logsList = rawLogs is Iterable ? List.from(rawLogs) : [];
       logsList.insert(0, _pendingLogs.first);
-      if (logsList.length > 15) logsList.removeRange(15, logsList.length);
+      if (logsList.length > kMaxLogsStored) {
+        logsList.removeRange(kMaxLogsStored, logsList.length);
+      }
       _raidData['logs'] = logsList;
     });
 
@@ -626,7 +633,8 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
     if (_pendingDamage == 0 ||
         _raidRef == null ||
         _isFlushing ||
-        !_hasStruckAtLeastOnce) {
+        !_hasStruckAtLeastOnce ||
+        _isQuotaExhausted) {
       return;
     }
 
@@ -666,7 +674,10 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
 
       final dynamic rawLogs = data['logs'];
       final List logs = rawLogs is Iterable ? List.from(rawLogs) : [];
-      if (logs.length > 15) logs.removeRange(15, logs.length);
+      logs.insertAll(0, logsToSend);
+      if (logs.length > kMaxLogsStored) {
+        logs.removeRange(kMaxLogsStored, logs.length);
+      }
 
       final dynamic rawHunters = data['hunters'];
       final List hunterList = rawHunters is Iterable ? List.from(rawHunters) : [];
@@ -716,10 +727,12 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
       _raidData['hunters'] = hunterList;
       _raidData['logs'] = logs;
 
+      final int nowMs = DateTime.now().millisecondsSinceEpoch;
       final Map<String, dynamic> updates = {
         'current_hp': FieldValue.increment(-dmgToSend),
         'logs': logs,
         'hunters': hunterList,
+        'last_activity_ms': nowMs,
       };
 
       if (isVictoryClosure) {
@@ -1150,7 +1163,8 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
                 child: Text(
                   isCombatActive
                       ? "COMBAT EN COURS (BOSS: ${currentHp.toInt()} / $maxHp PV)"
-                      : "EN ATTENTE DU MAÎTRE DU JEU...",
+                      : "CONNECTEZ-VOUS — EN ATTENTE DU LANCEMENT DE L'ADMIN...",
+                  textAlign: TextAlign.center,
                   style: TextStyle(
                       color: isCombatActive
                           ? const Color(0xFF00FF66)
@@ -1261,7 +1275,6 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
       }
     }
 
-    // Fusionne les dégâts/reps locaux non encore envoyés pour afficher le score exact sur le podium
     if (_hasStruckAtLeastOnce || _pendingDamage > 0) {
       bool foundLocal = false;
       for (int i = 0; i < hunters.length; i++) {
