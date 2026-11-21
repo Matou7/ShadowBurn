@@ -17,7 +17,8 @@ class ArenaTvScreen extends StatefulWidget {
   State<ArenaTvScreen> createState() => _ArenaTvScreenState();
 }
 
-class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserver {
+class _ArenaTvScreenState extends State<ArenaTvScreen>
+    with WidgetsBindingObserver {
   String? _roomId;
   String? _adminKey;
   String? _joinToken;
@@ -36,6 +37,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
   bool _isAllocating = true;
   bool _isWorldSaturated = false;
   bool _isNightLockActive = false;
+  bool _isQuotaExhausted = false;
   bool _isDespawnedForInactivity = false;
   bool _isRadioPlaying = false;
 
@@ -50,6 +52,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
   static const int kMaxGlobalRooms = 100;
   static const int kMaxHuntersPerRoom = 10;
   static const int kRoomDeathThresholdMs = 45000;
+  static const Duration _kFirestoreTimeout = Duration(seconds: 6);
 
   @override
   void initState() {
@@ -67,7 +70,8 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
       if (!mounted) return;
 
       final now = DateTime.now();
-      bool isNightClosed = (now.hour >= 0 && now.hour < 6) || (now.hour == 23 && now.minute >= 58);
+      bool isNightClosed =
+          (now.hour >= 0 && now.hour < 6) || (now.hour == 23 && now.minute >= 58);
       if (isNightClosed != _isNightLockActive) {
         setState(() {
           _isNightLockActive = isNightClosed;
@@ -78,7 +82,10 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
         }
       }
 
-      if (_targetEndTimeMs > 0 && !_isDespawnedForInactivity && !_isNightLockActive) {
+      if (_targetEndTimeMs > 0 &&
+          !_isDespawnedForInactivity &&
+          !_isNightLockActive &&
+          !_isQuotaExhausted) {
         final nowMs = now.millisecondsSinceEpoch;
         final diff = (_targetEndTimeMs - nowMs) ~/ 1000;
         final remaining = diff > 0 ? diff : 0;
@@ -87,7 +94,9 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
           _remainingSeconds = remaining;
         });
 
-        if (remaining == 0 && _currentRaidStatus == 'active' && _currentBossHp > 0) {
+        if (remaining == 0 &&
+            _currentRaidStatus == 'active' &&
+            _currentBossHp > 0) {
           _triggerDefeat();
         }
       }
@@ -107,10 +116,26 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
       AudioService.stopNrjStream();
     }
 
-    if (_raidRef != null) {
+    if (_raidRef != null && _lastKnownHunterCount > 0 && !_isQuotaExhausted) {
       _raidRef!.delete().catchError((_) {});
-      _raidRef = null;
     }
+    _raidRef = null;
+  }
+
+  void _triggerQuotaExhaustedPodium() {
+    _queueRetryTimer?.cancel();
+    _raidSubscription?.cancel();
+    if (_isRadioPlaying) {
+      _isRadioPlaying = false;
+      AudioService.stopNrjStream();
+    }
+    if (!mounted) return;
+    setState(() {
+      _isQuotaExhausted = true;
+      _isAllocating = false;
+      _isWorldSaturated = false;
+      _isRaidDataLoaded = true;
+    });
   }
 
   Future _triggerDefeat() async {
@@ -120,13 +145,14 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
       AudioService.stopNrjStream();
     }
     if (_raidRef != null) {
-      bool canWrite = await QuotaGuardService.checkAndIncrementWrite();
+      bool canWrite =
+          await QuotaGuardService.checkAndIncrementWrite(isCriticalClosure: true);
       if (canWrite) {
         await _raidRef!.update({
           'status': 'failed',
-          'join_token': _joinToken ?? '',
-          'admin_key': _adminKey ?? '',
-        }).catchError((_) {});
+        }).timeout(_kFirestoreTimeout).catchError((_) {});
+      } else {
+        _triggerQuotaExhaustedPodium();
       }
     }
   }
@@ -142,7 +168,8 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
   void didChangeDependencies() {
     super.didChangeDependencies();
     final now = DateTime.now();
-    bool isNightClosed = (now.hour >= 0 && now.hour < 6) || (now.hour == 23 && now.minute >= 58);
+    bool isNightClosed =
+        (now.hour >= 0 && now.hour < 6) || (now.hour == 23 && now.minute >= 58);
     if (isNightClosed) {
       setState(() {
         _isNightLockActive = true;
@@ -150,7 +177,11 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
       });
       return;
     }
-    if (_roomId == null && !_isWorldSaturated && !_isNightLockActive && !_isDespawnedForInactivity) {
+    if (_roomId == null &&
+        !_isWorldSaturated &&
+        !_isNightLockActive &&
+        !_isQuotaExhausted &&
+        !_isDespawnedForInactivity) {
       _resolveRoomAllocation();
     }
   }
@@ -158,12 +189,14 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
   String _generateRandomToken(int length) {
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
     final rand = Random();
-    return List.generate(length, (index) => chars[rand.nextInt(chars.length)]).join();
+    return List.generate(length, (index) => chars[rand.nextInt(chars.length)])
+        .join();
   }
 
   Future _resolveRoomAllocation() async {
     final now = DateTime.now();
-    bool isNightClosed = (now.hour >= 0 && now.hour < 6) || (now.hour == 23 && now.minute >= 58);
+    bool isNightClosed =
+        (now.hour >= 0 && now.hour < 6) || (now.hour == 23 && now.minute >= 58);
     if (isNightClosed) {
       if (mounted) {
         setState(() {
@@ -174,9 +207,16 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
       return;
     }
 
+    if (await QuotaGuardService.isReserveReached()) {
+      _triggerQuotaExhaustedPodium();
+      return;
+    }
+
     try {
       if (FirebaseAuth.instance.currentUser == null) {
-        await FirebaseAuth.instance.signInAnonymously().timeout(const Duration(seconds: 5));
+        await FirebaseAuth.instance
+            .signInAnonymously()
+            .timeout(const Duration(seconds: 5));
       }
     } catch (_) {}
 
@@ -198,11 +238,83 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
 
     if (explicitRoom != null && explicitRoom.trim().isNotEmpty) {
       chosenRoom = explicitRoom.trim();
+      bool canWrite = await QuotaGuardService.checkAndIncrementWrite();
+      if (!canWrite) {
+        _triggerQuotaExhaustedPodium();
+        return;
+      }
+
+      final ref = FirebaseFirestore.instance
+          .collection('current_raids')
+          .doc(chosenRoom);
+      final midnight = DateTime(now.year, now.month, now.day, 23, 58, 0);
+
+      try {
+        final existingDoc = await ref.get().timeout(_kFirestoreTimeout);
+
+        if (!existingDoc.exists) {
+          await ref.set({
+            'roomId': chosenRoom,
+            'instance_token': myInstanceToken,
+            'join_token': tokenToUse,
+            'admin_key': keyToUse,
+            'status': 'waiting',
+            'preset_label': 'RAID STANDARD (5 000 PV)',
+            'current_hp': 5000,
+            'max_hp': 5000,
+            'audio_playing': false,
+            'hunters': [],
+            'logs': [],
+            'target_end_time': midnight.millisecondsSinceEpoch,
+            'arena_last_seen': DateTime.now().millisecondsSinceEpoch,
+          }).timeout(_kFirestoreTimeout);
+        } else {
+          final Map data = existingDoc.data() ?? {};
+          final String existingKey =
+              (data['admin_key'] ?? '').toString().trim();
+          final String existingToken =
+              (data['join_token'] ?? '').toString().trim();
+
+          if (existingKey.isNotEmpty) keyToUse = existingKey;
+          if (existingToken.isNotEmpty) tokenToUse = existingToken;
+
+          await ref.set({
+            'roomId': chosenRoom,
+            'instance_token': myInstanceToken,
+            'join_token': tokenToUse,
+            'admin_key': keyToUse,
+            'status': data['status'] ?? 'waiting',
+            'preset_label': data['preset_label'] ?? 'RAID STANDARD (5 000 PV)',
+            'current_hp': data['current_hp'] ?? 5000,
+            'max_hp': data['max_hp'] ?? 5000,
+            'audio_playing':
+                data.containsKey('audio_playing') ? data['audio_playing'] : false,
+            'hunters': data['hunters'] ?? [],
+            'logs': data['logs'] ?? [],
+            'target_end_time':
+                data['target_end_time'] ?? midnight.millisecondsSinceEpoch,
+            'arena_last_seen': DateTime.now().millisecondsSinceEpoch,
+          }, SetOptions(merge: true)).timeout(_kFirestoreTimeout);
+        }
+      } catch (e) {
+        if (e.toString().toLowerCase().contains('resource-exhausted') ||
+            e.toString().toLowerCase().contains('quota')) {
+          _triggerQuotaExhaustedPodium();
+          return;
+        }
+        if (!mounted) return;
+        setState(() {
+          _isAllocating = false;
+          _isNightLockActive = true;
+        });
+        return;
+      }
     } else {
-      chosenRoom = await _claimNextAvailableRoomSlot(myInstanceToken, tokenToUse, keyToUse);
+      chosenRoom = await _claimNextAvailableRoomSlot(
+          myInstanceToken, tokenToUse, keyToUse);
     }
 
-    if (!mounted) return;
+    if (!mounted || _isQuotaExhausted) return;
 
     if (chosenRoom == null) {
       setState(() {
@@ -212,7 +324,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
 
       _queueRetryTimer?.cancel();
       _queueRetryTimer = Timer(const Duration(seconds: 10), () {
-        if (mounted) {
+        if (mounted && !_isQuotaExhausted) {
           setState(() {
             _isAllocating = true;
             _isWorldSaturated = false;
@@ -224,91 +336,23 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
     }
 
     _queueRetryTimer?.cancel();
+    _recordActivity();
 
-    bool canWrite = await QuotaGuardService.checkAndIncrementWrite();
-    if (!canWrite) {
-      if (mounted) {
-        setState(() {
-          _isAllocating = false;
-          _isNightLockActive = true;
-        });
-      }
-      return;
-    }
+    final ref =
+        FirebaseFirestore.instance.collection('current_raids').doc(chosenRoom);
 
-    final ref = FirebaseFirestore.instance.collection('current_raids').doc(chosenRoom);
-    final midnight = DateTime(now.year, now.month, now.day, 23, 58, 0);
+    setState(() {
+      _roomId = chosenRoom;
+      _instanceToken = myInstanceToken;
+      _adminKey = keyToUse;
+      _joinToken = tokenToUse;
+      _raidRef = ref;
+      _isAllocating = false;
+      _isWorldSaturated = false;
+      _isDespawnedForInactivity = false;
+    });
 
-    try {
-      final existingDoc = await ref.get();
-
-      if (!existingDoc.exists) {
-        final Map<String, dynamic> roomData = {
-          'roomId': chosenRoom,
-          'instance_token': myInstanceToken,
-          'join_token': tokenToUse,
-          'admin_key': keyToUse,
-          'status': 'waiting',
-          'preset_label': 'RAID STANDARD (5 000 PV)',
-          'current_hp': 5000,
-          'max_hp': 5000,
-          'audio_playing': false,
-          'hunters': [],
-          'logs': [],
-          'target_end_time': midnight.millisecondsSinceEpoch,
-          'arena_last_seen': DateTime.now().millisecondsSinceEpoch,
-        };
-        await ref.set(roomData);
-      } else {
-        final Map data = existingDoc.data() ?? {};
-        final String existingKey = (data['admin_key'] ?? '').toString().trim();
-        final String existingToken = (data['join_token'] ?? '').toString().trim();
-
-        if (existingKey.isNotEmpty) keyToUse = existingKey;
-        if (existingToken.isNotEmpty) tokenToUse = existingToken;
-
-        final Map<String, dynamic> updateData = {
-          'roomId': chosenRoom,
-          'instance_token': myInstanceToken,
-          'join_token': tokenToUse,
-          'admin_key': keyToUse,
-          'status': data['status'] ?? 'waiting',
-          'preset_label': 'RAID STANDARD (5 000 PV)',
-          'current_hp': data['current_hp'] ?? 5000,
-          'max_hp': 5000,
-          'audio_playing': data.containsKey('audio_playing') ? data['audio_playing'] : false,
-          'hunters': data['hunters'] ?? [],
-          'logs': data['logs'] ?? [],
-          'target_end_time': data['target_end_time'] ?? midnight.millisecondsSinceEpoch,
-          'arena_last_seen': DateTime.now().millisecondsSinceEpoch,
-        };
-
-        await ref.set(updateData, SetOptions(merge: true));
-      }
-
-      if (!mounted) return;
-
-      _recordActivity();
-
-      setState(() {
-        _roomId = chosenRoom;
-        _instanceToken = myInstanceToken;
-        _adminKey = keyToUse;
-        _joinToken = tokenToUse;
-        _raidRef = ref;
-        _isAllocating = false;
-        _isWorldSaturated = false;
-        _isDespawnedForInactivity = false;
-      });
-
-      _startListeningToRaid();
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _isAllocating = false;
-        _isNightLockActive = true;
-      });
-    }
+    _startListeningToRaid();
   }
 
   void _startListeningToRaid() {
@@ -319,7 +363,8 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
       if (!mounted) return;
       if (doc.exists) {
         final Map mapData = Map.from(doc.data() as Map? ?? {});
-        final double hp = ((mapData['current_hp'] ?? 5000) as num).toDouble();
+        final double maxHp = ((mapData['max_hp'] ?? 5000) as num).toDouble();
+        final double hp = ((mapData['current_hp'] ?? maxHp) as num).toDouble();
         final String st = (mapData['status'] ?? 'waiting').toString();
         final dynamic rawHunters = mapData['hunters'];
         final int hunterCount = rawHunters is Iterable ? rawHunters.length : 0;
@@ -330,7 +375,9 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
           AudioService.setNrjStreamState(_isRadioPlaying);
         }
 
-        if (hunterCount != _lastKnownHunterCount || hp != _lastKnownHp || st != _lastKnownStatus) {
+        if (hunterCount != _lastKnownHunterCount ||
+            hp != _lastKnownHp ||
+            st != _lastKnownStatus) {
           _recordActivity();
           _lastKnownHunterCount = hunterCount;
           _lastKnownHp = hp;
@@ -338,13 +385,13 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
         }
 
         if (hp <= 0 && st == 'active') {
-          bool canWrite = await QuotaGuardService.checkAndIncrementWrite();
+          _lastKnownStatus = 'victory';
+          bool canWrite = await QuotaGuardService.checkAndIncrementWrite(
+              isCriticalClosure: true);
           if (canWrite) {
             _raidRef!.update({
               'status': 'victory',
               'current_hp': 0,
-              'join_token': _joinToken ?? '',
-              'admin_key': _adminKey ?? '',
             }).catchError((_) {});
           }
           mapData['status'] = 'victory';
@@ -372,24 +419,18 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
       final String errStr = e.toString().toLowerCase();
 
       if (errStr.contains('resource-exhausted') || errStr.contains('quota')) {
-        if (mounted) {
-          setState(() {
-            _isWorldSaturated = true;
-          });
-        }
-        Future.delayed(const Duration(seconds: 5), () {
-          if (mounted) {
-            _startListeningToRaid();
-          }
-        });
+        _triggerQuotaExhaustedPodium();
       } else if (errStr.contains('permission-denied')) {
         FirebaseAuth.instance.signInAnonymously().then((_) {
-          if (mounted) _startListeningToRaid();
+          if (mounted && !_isQuotaExhausted) _startListeningToRaid();
         }).catchError((_) {});
       }
     });
   }
 
+  /// Allocation progressive :
+  /// 1. Sondage rapide sur 6 salles aléatoires (1 à 2 lectures en moyenne).
+  /// 2. Si les 6 sont occupées, scan complet de current_raids pour garantir l'accès jusqu'à 100 salles réelles.
   Future<String?> _claimNextAvailableRoomSlot(
     String instanceToken,
     String joinToken,
@@ -406,58 +447,100 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
       0,
     );
 
+    Map<String, dynamic> buildInitialRoomData(String roomName) => {
+          'roomId': roomName,
+          'instance_token': instanceToken,
+          'join_token': joinToken,
+          'admin_key': adminKey,
+          'status': 'waiting',
+          'preset_label': 'RAID STANDARD (5 000 PV)',
+          'current_hp': 5000,
+          'max_hp': 5000,
+          'audio_playing': false,
+          'hunters': [],
+          'logs': [],
+          'target_end_time': midnight.millisecondsSinceEpoch,
+          'arena_last_seen': now,
+        };
+
+    bool isSlotAvailable(DocumentSnapshot doc) {
+      if (!doc.exists) return true;
+      final Map data = doc.data() as Map? ?? {};
+      final int lastSeen = (data['arena_last_seen'] as num?)?.toInt() ?? 0;
+      final String st = (data['status'] ?? 'waiting').toString();
+      return lastSeen == 0 ||
+          (now - lastSeen > kRoomDeathThresholdMs && st != 'active');
+    }
+
     try {
       bool canWrite = await QuotaGuardService.checkAndIncrementWrite();
-      if (!canWrite) return null;
+      if (!canWrite) {
+        _triggerQuotaExhaustedPodium();
+        return null;
+      }
 
-      final snapshot = await firestore.collection('current_raids').get();
-      final Map occupiedNumbers = {};
+      final rand = Random();
+      final Set<int> tested = {};
 
-      for (var doc in snapshot.docs) {
+      // Phase 1 : Sondage rapide (6 tirages aléatoires entre 1 et 100)
+      for (int attempt = 0; attempt < 6; attempt++) {
+        int candidate = rand.nextInt(kMaxGlobalRooms) + 1;
+        while (tested.contains(candidate) && tested.length < kMaxGlobalRooms) {
+          candidate = (candidate % kMaxGlobalRooms) + 1;
+        }
+        tested.add(candidate);
+
+        final roomName = 'room_$candidate';
+        final docRef = firestore.collection('current_raids').doc(roomName);
+        final doc = await docRef.get().timeout(_kFirestoreTimeout);
+
+        if (isSlotAvailable(doc)) {
+          await docRef
+              .set(buildInitialRoomData(roomName))
+              .timeout(_kFirestoreTimeout);
+          return roomName;
+        }
+      }
+
+      // Phase 2 : Repli haute affluence (garantit l'utilisation jusqu'aux 100 salles)
+      final snapshot = await firestore
+          .collection('current_raids')
+          .get()
+          .timeout(_kFirestoreTimeout);
+      final Set<int> occupiedNumbers = {};
+
+      for (final doc in snapshot.docs) {
         if (doc.id.startsWith('room_')) {
           final numPart = int.tryParse(doc.id.replaceFirst('room_', ''));
-          if (numPart != null) {
-            final Map data = doc.data();
-            final int lastSeen = (data['arena_last_seen'] as num?)?.toInt() ?? 0;
-
-            if (lastSeen == 0 || (now - lastSeen > kRoomDeathThresholdMs)) {
-              await doc.reference.delete().catchError((_) {});
-            } else {
-              occupiedNumbers[numPart] = true;
-            }
+          if (numPart != null && !isSlotAvailable(doc)) {
+            occupiedNumbers.add(numPart);
           }
         }
       }
 
       int candidate = 1;
-      while (occupiedNumbers[candidate] == true) {
+      while (occupiedNumbers.contains(candidate) &&
+          candidate <= kMaxGlobalRooms) {
         candidate++;
       }
 
       if (candidate > kMaxGlobalRooms) {
-        return null;
+        return null; // Réellement 100 salles actives simultanées
       }
 
       final allocatedRoom = 'room_$candidate';
-
-      await firestore.collection('current_raids').doc(allocatedRoom).set({
-        'roomId': allocatedRoom,
-        'instance_token': instanceToken,
-        'join_token': joinToken,
-        'admin_key': adminKey,
-        'status': 'waiting',
-        'preset_label': 'RAID STANDARD (5 000 PV)',
-        'current_hp': 5000,
-        'max_hp': 5000,
-        'audio_playing': false,
-        'hunters': [],
-        'logs': [],
-        'target_end_time': midnight.millisecondsSinceEpoch,
-        'arena_last_seen': now,
-      });
+      await firestore
+          .collection('current_raids')
+          .doc(allocatedRoom)
+          .set(buildInitialRoomData(allocatedRoom))
+          .timeout(_kFirestoreTimeout);
 
       return allocatedRoom;
     } catch (e) {
+      if (e.toString().toLowerCase().contains('resource-exhausted') ||
+          e.toString().toLowerCase().contains('quota')) {
+        _triggerQuotaExhaustedPodium();
+      }
       debugPrint("Erreur allocation slot: $e");
       return null;
     }
@@ -515,14 +598,74 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
                 Text(
                   "[ SYSTÈMES : PORTAILS SCELLÉS (23H58 - 06H00) ]",
                   textAlign: TextAlign.center,
-                  style: TextStyle(color: Color(0xFFFF2E56), fontFamily: 'monospace', fontSize: 20, fontWeight: FontWeight.bold, letterSpacing: 2),
+                  style: TextStyle(
+                      color: Color(0xFFFF2E56),
+                      fontFamily: 'monospace',
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 2),
                 ),
                 SizedBox(height: 12),
                 Text(
                   "Le quota d'énergie du Donjon est en repos nocturne.\nReposez votre Hardware. Réouverture automatique à 6h00 du matin.",
                   textAlign: TextAlign.center,
-                  style: TextStyle(color: Colors.white70, fontFamily: 'monospace', fontSize: 13, height: 1.5),
+                  style: TextStyle(
+                      color: Colors.white70,
+                      fontFamily: 'monospace',
+                      fontSize: 13,
+                      height: 1.5),
                 ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    if (_isQuotaExhausted) {
+      final Map data = _raidData;
+      final double maxHp = ((data['max_hp'] ?? 5000) as num).toDouble();
+      final double safeMax = maxHp > 0 ? maxHp : 5000.0;
+      final double currentHp =
+          ((data['current_hp'] ?? safeMax) as num).toDouble().clamp(0.0, safeMax);
+      final String presetLabel =
+          (data['preset_label'] ?? 'RAID STANDARD (5 000 PV)').toString();
+      final dynamic rawHunters = data['hunters'];
+      final List hunters = rawHunters is Iterable ? rawHunters.toList() : [];
+      final dynamic rawLogs = data['logs'];
+      final List logs = rawLogs is Iterable ? rawLogs.toList() : [];
+
+      return Scaffold(
+        backgroundColor: const Color(0xFF02070D),
+        body: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(12.0),
+            child: Column(
+              children: [
+                Container(
+                  width: double.infinity,
+                  margin: const EdgeInsets.only(bottom: 8),
+                  padding:
+                      const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFF2E56).withOpacity(0.22),
+                    border:
+                        Border.all(color: const Color(0xFFFF2E56), width: 1.5),
+                  ),
+                  child: const Text(
+                    "⚠ DONJON ÉPUISÉ — REVENIR DEMAIN (QUOTA JOURNALIER ATTEINT) ⚠",
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                        color: Color(0xFFFFD700),
+                        fontFamily: 'monospace',
+                        fontWeight: FontWeight.bold,
+                        fontSize: 13,
+                        letterSpacing: 1.4),
+                  ),
+                ),
+                _buildTopHeader(currentHp, safeMax, true, false, presetLabel),
+                const SizedBox(height: 10),
+                Expanded(child: _buildCompleteMultiWayPodium(logs, hunters)),
               ],
             ),
           ),
@@ -544,17 +687,27 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: const [
-                CircularProgressIndicator(color: Color(0xFFFF9100), strokeWidth: 3),
+                CircularProgressIndicator(
+                    color: Color(0xFFFF9100), strokeWidth: 3),
                 SizedBox(height: 24),
                 Text(
                   "PORTAILS MONDIAUX SATURÉS",
-                  style: TextStyle(color: Color(0xFFFF9100), fontFamily: 'monospace', fontSize: 20, fontWeight: FontWeight.bold, letterSpacing: 2),
+                  style: TextStyle(
+                      color: Color(0xFFFF9100),
+                      fontFamily: 'monospace',
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 2),
                 ),
                 SizedBox(height: 12),
                 Text(
                   "Les 100 failles dimensionnelles sont actuellement engagées en combat.\nEn attente de libération d'un slot... (Nouvelle tentative dans 10 secondes)",
                   textAlign: TextAlign.center,
-                  style: TextStyle(color: Colors.white70, fontFamily: 'monospace', fontSize: 13, height: 1.5),
+                  style: TextStyle(
+                      color: Colors.white70,
+                      fontFamily: 'monospace',
+                      fontSize: 13,
+                      height: 1.5),
                 ),
               ],
             ),
@@ -574,7 +727,10 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
               SizedBox(height: 16),
               Text(
                 "VERROUILLAGE DU PORTAIL...",
-                style: TextStyle(color: Color(0xFF00E5FF), fontFamily: 'monospace', letterSpacing: 2),
+                style: TextStyle(
+                    color: Color(0xFF00E5FF),
+                    fontFamily: 'monospace',
+                    letterSpacing: 2),
               ),
             ],
           ),
@@ -595,11 +751,17 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
             child: const Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(Icons.portable_wifi_off, color: Color(0xFFFF2E56), size: 54),
+                Icon(Icons.portable_wifi_off,
+                    color: Color(0xFFFF2E56), size: 54),
                 SizedBox(height: 16),
                 Text(
                   "LE PORTAIL S'EST REFERMÉ",
-                  style: TextStyle(color: Color(0xFFFF2E56), fontFamily: 'monospace', fontSize: 16, fontWeight: FontWeight.bold, letterSpacing: 2),
+                  style: TextStyle(
+                      color: Color(0xFFFF2E56),
+                      fontFamily: 'monospace',
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 2),
                 ),
               ],
             ),
@@ -610,9 +772,12 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
 
     final Map data = _raidData;
     final String status = (data['status'] ?? 'waiting').toString();
-    final String presetLabel = (data['preset_label'] ?? 'RAID STANDARD (5 000 PV)').toString();
-    final double maxHp = 5000.0;
-    final double currentHp = ((data['current_hp'] ?? 5000) as num).toDouble().clamp(0.0, 5000.0);
+    final String presetLabel =
+        (data['preset_label'] ?? 'RAID STANDARD (5 000 PV)').toString();
+    final double maxHp = ((data['max_hp'] ?? 5000) as num).toDouble();
+    final double safeMax = maxHp > 0 ? maxHp : 5000.0;
+    final double currentHp =
+        ((data['current_hp'] ?? safeMax) as num).toDouble().clamp(0.0, safeMax);
     final dynamic rawHunters = data['hunters'];
     final List hunters = rawHunters is Iterable ? rawHunters.toList() : [];
     final dynamic rawLogs = data['logs'];
@@ -620,8 +785,12 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
 
     final String dbJoinToken = (data['join_token'] ?? '').toString().trim();
     final String dbAdminKey = (data['admin_key'] ?? '').toString().trim();
-    if (dbJoinToken.isNotEmpty && dbJoinToken != _joinToken) _joinToken = dbJoinToken;
-    if (dbAdminKey.isNotEmpty && dbAdminKey != _adminKey) _adminKey = dbAdminKey;
+    if (dbJoinToken.isNotEmpty && dbJoinToken != _joinToken) {
+      _joinToken = dbJoinToken;
+    }
+    if (dbAdminKey.isNotEmpty && dbAdminKey != _adminKey) {
+      _adminKey = dbAdminKey;
+    }
 
     _currentRaidStatus = status;
     _currentBossHp = currentHp;
@@ -631,14 +800,16 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
     }
 
     final bool isDefeat = (status == 'failed') ||
-        (_remainingSeconds == 0 && (status == 'active' || status == 'failed') && currentHp > 0);
+        (_remainingSeconds == 0 &&
+            (status == 'active' || status == 'failed') &&
+            currentHp > 0);
     final bool isVictory = (status == 'victory') || (currentHp <= 0);
 
     Widget innerContent;
     if (isVictory) {
       innerContent = _buildCompleteMultiWayPodium(logs, hunters);
     } else if (isDefeat) {
-      innerContent = _buildDefeatScreen(currentHp, maxHp, logs, hunters);
+      innerContent = _buildDefeatScreen(currentHp, safeMax, logs, hunters);
     } else {
       innerContent = status == 'waiting'
           ? _buildWaitingLobby(hunters)
@@ -657,7 +828,8 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
               const SizedBox(width: 16),
               Expanded(
                 flex: 1,
-                child: _buildDynamicMaximizedQrPanel(status, isVictory: isVictory),
+                child:
+                    _buildDynamicMaximizedQrPanel(status, isVictory: isVictory),
               ),
             ],
           );
@@ -669,11 +841,15 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
           padding: const EdgeInsets.all(12.0),
           child: Column(
             children: [
-              if (_remainingSeconds > 0 && _remainingSeconds <= 600 && !isVictory && !isDefeat)
+              if (_remainingSeconds > 0 &&
+                  _remainingSeconds <= 600 &&
+                  !isVictory &&
+                  !isDefeat)
                 Container(
                   width: double.infinity,
                   margin: const EdgeInsets.only(bottom: 8),
-                  padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 10),
+                  padding:
+                      const EdgeInsets.symmetric(vertical: 4, horizontal: 10),
                   decoration: BoxDecoration(
                     color: const Color(0xFFFF2E56).withOpacity(0.2),
                     border: Border.all(color: const Color(0xFFFF2E56)),
@@ -681,10 +857,16 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
                   child: const Text(
                     "⚠ ALERTE : LE DONJON MONDIAL SE REFERME À 23H58. FIN DE LA PÉRIODE D'ASSAUT IMMINENTE.",
                     textAlign: TextAlign.center,
-                    style: TextStyle(color: Color(0xFFFF2E56), fontFamily: 'monospace', fontWeight: FontWeight.bold, fontSize: 10, letterSpacing: 1.1),
+                    style: TextStyle(
+                        color: Color(0xFFFF2E56),
+                        fontFamily: 'monospace',
+                        fontWeight: FontWeight.bold,
+                        fontSize: 10,
+                        letterSpacing: 1.1),
                   ),
                 ),
-              _buildTopHeader(currentHp, maxHp, isVictory, isDefeat, presetLabel),
+              _buildTopHeader(
+                  currentHp, safeMax, isVictory, isDefeat, presetLabel),
               const SizedBox(height: 10),
               Expanded(child: mainContent),
             ],
@@ -694,14 +876,18 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
     );
   }
 
-  Widget _buildTopHeader(double currentHp, double maxHp, bool isVictory, bool isDefeat, String presetLabel) {
+  Widget _buildTopHeader(double currentHp, double maxHp, bool isVictory,
+      bool isDefeat, String presetLabel) {
     final double safeMax = maxHp > 0 ? maxHp : 5000.0;
     final double hpRatio = (currentHp / safeMax).clamp(0.0, 1.0);
 
     Color themeColor = const Color(0xFF00E5FF);
-    String titleText = 'DONJON QUOTIDIEN [SALLE : $_roomId]';
+    String titleText = 'DONJON QUOTIDIEN [SALLE : ${_roomId ?? "HORS-LIGNE"}]';
 
-    if (isVictory) {
+    if (_isQuotaExhausted) {
+      themeColor = const Color(0xFFFFD700);
+      titleText = 'DONJON ÉPUISÉ — CLASSEMENT FINAL';
+    } else if (isVictory) {
       themeColor = const Color(0xFFFFD700);
       titleText = 'SALLE [$_roomId] : MONARQUE DU FEU TERRASSÉ';
     } else if (isDefeat) {
@@ -727,13 +913,22 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
                   children: [
                     Text(
                       titleText,
-                      style: TextStyle(color: themeColor, fontFamily: 'monospace', fontSize: 15, fontWeight: FontWeight.bold, letterSpacing: 1.2),
+                      style: TextStyle(
+                          color: themeColor,
+                          fontFamily: 'monospace',
+                          fontSize: 15,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 1.2),
                       overflow: TextOverflow.ellipsis,
                     ),
                     const SizedBox(height: 2),
                     Text(
                       "CONFIGURATION : $presetLabel (BOSS: ${currentHp.toInt()} / ${safeMax.toInt()} PV)",
-                      style: const TextStyle(color: Color(0xFF00FF66), fontFamily: 'monospace', fontSize: 10, fontWeight: FontWeight.bold),
+                      style: const TextStyle(
+                          color: Color(0xFF00FF66),
+                          fontFamily: 'monospace',
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold),
                     ),
                   ],
                 ),
@@ -747,55 +942,69 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
                     child: OutlinedButton.icon(
                       style: OutlinedButton.styleFrom(
                         foregroundColor: const Color(0xFF00E5FF),
-                        side: const BorderSide(color: Color(0xFF00E5FF), width: 1.2),
-                        backgroundColor: const Color(0xFF00E5FF).withOpacity(0.1),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+                        side: const BorderSide(
+                            color: Color(0xFF00E5FF), width: 1.2),
+                        backgroundColor:
+                            const Color(0xFF00E5FF).withOpacity(0.1),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(4)),
                         padding: const EdgeInsets.symmetric(horizontal: 10),
                       ),
-                      onPressed: () async {
-                        bool canWrite = await QuotaGuardService.checkAndIncrementWrite();
-                        if (!canWrite) {
-                          if (mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text("[QUOTA] Seuil de sécurité atteint. Écriture bloquée."), backgroundColor: Colors.red),
-                            );
-                          }
-                          return;
-                        }
+                      onPressed: _isQuotaExhausted
+                          ? null
+                          : () async {
+                              bool canWrite =
+                                  await QuotaGuardService.checkAndIncrementWrite();
+                              if (!canWrite) {
+                                _triggerQuotaExhaustedPodium();
+                                return;
+                              }
 
-                        final bool nextState = !_isRadioPlaying;
-                        _isRadioPlaying = nextState;
-                        bool playing = await AudioService.setNrjStreamState(nextState);
-                        if (_raidRef != null) {
-                          await _raidRef!.update({'audio_playing': nextState}).catchError((_) {});
-                        }
-                        setState(() {});
-                        if (mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text(playing ? "[AUDIO] Lecture en cours..." : "[AUDIO] Musique en pause."),
-                              duration: const Duration(milliseconds: 800),
-                            ),
-                          );
-                        }
-                      },
+                              final bool nextState = !_isRadioPlaying;
+                              _isRadioPlaying = nextState;
+                              bool playing = await AudioService.setNrjStreamState(
+                                  nextState);
+                              if (_raidRef != null) {
+                                await _raidRef!
+                                    .update({'audio_playing': nextState})
+                                    .catchError((_) {});
+                              }
+                              setState(() {});
+                              if (mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text(playing
+                                        ? "[AUDIO] Lecture en cours..."
+                                        : "[AUDIO] Musique en pause."),
+                                    duration:
+                                        const Duration(milliseconds: 800),
+                                  ),
+                                );
+                              }
+                            },
                       icon: Icon(
                         AudioService.isPlaying ? Icons.pause : Icons.volume_up,
                         size: 14,
                       ),
                       label: Text(
                         AudioService.isPlaying ? "PAUSE" : "AUDIO",
-                        style: const TextStyle(fontSize: 10, fontFamily: 'monospace', fontWeight: FontWeight.bold),
+                        style: const TextStyle(
+                            fontSize: 10,
+                            fontFamily: 'monospace',
+                            fontWeight: FontWeight.bold),
                       ),
                     ),
                   ),
                   Text(
                     'FIN : ${_formatTimer(_remainingSeconds)}',
                     style: TextStyle(
-                      color: isDefeat || (_remainingSeconds <= 60 && !isVictory) ? const Color(0xFFFF2E56) : Colors.white70,
+                      color: isDefeat || (_remainingSeconds <= 60 && !isVictory)
+                          ? const Color(0xFFFF2E56)
+                          : Colors.white70,
                       fontFamily: 'monospace',
                       fontSize: 12,
-                      fontWeight: isDefeat ? FontWeight.bold : FontWeight.normal,
+                      fontWeight:
+                          isDefeat ? FontWeight.bold : FontWeight.normal,
                     ),
                   ),
                 ],
@@ -837,7 +1046,8 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
     );
   }
 
-  Widget _buildDefeatScreen(double currentHp, double maxHp, List logs, List hunters) {
+  Widget _buildDefeatScreen(
+      double currentHp, double maxHp, List logs, List hunters) {
     int totalInflicted = 0;
 
     for (final h in hunters) {
@@ -864,27 +1074,37 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          const Icon(Icons.dangerous_outlined, color: Color(0xFFFF2E56), size: 60),
+          const Icon(Icons.dangerous_outlined,
+              color: Color(0xFFFF2E56), size: 60),
           const SizedBox(height: 10),
           const Text(
             "☠ ÉCHEC DU RAID ☠",
-            style: TextStyle(color: Color(0xFFFF2E56), fontFamily: 'monospace', fontSize: 20, fontWeight: FontWeight.bold, letterSpacing: 2),
+            style: TextStyle(
+                color: Color(0xFFFF2E56),
+                fontFamily: 'monospace',
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+                letterSpacing: 2),
           ),
           const SizedBox(height: 6),
           const Text(
             "Le temps imparti est écoulé. Le Monarque du Feu a survécu à votre assaut.",
             textAlign: TextAlign.center,
-            style: TextStyle(color: Colors.white70, fontFamily: 'monospace', fontSize: 12),
+            style: TextStyle(
+                color: Colors.white70, fontFamily: 'monospace', fontSize: 12),
           ),
           const SizedBox(height: 20),
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              _buildDefeatStatBox("DÉGÂTS", "$totalInflicted PV", const Color(0xFF00E5FF)),
+              _buildDefeatStatBox(
+                  "DÉGÂTS", "$totalInflicted PV", const Color(0xFF00E5FF)),
               const SizedBox(width: 12),
-              _buildDefeatStatBox("RESTANTS", "${currentHp.toInt()} PV", const Color(0xFFFF2E56)),
+              _buildDefeatStatBox("RESTANTS", "${currentHp.toInt()} PV",
+                  const Color(0xFFFF2E56)),
               const SizedBox(width: 12),
-              _buildDefeatStatBox("CHASSEURS", "${hunters.length}", const Color(0xFFFF9100)),
+              _buildDefeatStatBox(
+                  "CHASSEURS", "${hunters.length}", const Color(0xFFFF9100)),
             ],
           ),
         ],
@@ -901,9 +1121,19 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
       ),
       child: Column(
         children: [
-          Text(label, style: TextStyle(color: color, fontFamily: 'monospace', fontSize: 9, fontWeight: FontWeight.bold)),
+          Text(label,
+              style: TextStyle(
+                  color: color,
+                  fontFamily: 'monospace',
+                  fontSize: 9,
+                  fontWeight: FontWeight.bold)),
           const SizedBox(height: 3),
-          Text(value, style: const TextStyle(color: Colors.white, fontFamily: 'monospace', fontSize: 14, fontWeight: FontWeight.bold)),
+          Text(value,
+              style: const TextStyle(
+                  color: Colors.white,
+                  fontFamily: 'monospace',
+                  fontSize: 14,
+                  fontWeight: FontWeight.bold)),
         ],
       ),
     );
@@ -948,7 +1178,8 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
             decoration: BoxDecoration(
               color: Colors.black54,
-              border: Border.all(color: const Color(0xFFFFD700).withOpacity(0.6), width: 1.2),
+              border: Border.all(
+                  color: const Color(0xFFFFD700).withOpacity(0.6), width: 1.2),
               borderRadius: BorderRadius.circular(4),
             ),
             child: Column(
@@ -956,11 +1187,17 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
               children: [
                 const Row(
                   children: [
-                    Icon(Icons.leaderboard, color: Color(0xFFFFD700), size: 14),
+                    Icon(Icons.leaderboard,
+                        color: Color(0xFFFFD700), size: 14),
                     SizedBox(width: 6),
                     Text(
                       "CLASSEMENT PROVISOIRE (TOP 3 EN DIRECT)",
-                      style: TextStyle(color: Color(0xFFFFD700), fontFamily: 'monospace', fontWeight: FontWeight.bold, fontSize: 10, letterSpacing: 1.1),
+                      style: TextStyle(
+                          color: Color(0xFFFFD700),
+                          fontFamily: 'monospace',
+                          fontWeight: FontWeight.bold,
+                          fontSize: 10,
+                          letterSpacing: 1.1),
                     ),
                   ],
                 ),
@@ -968,7 +1205,10 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
                 if (liveTop3.isEmpty)
                   const Text(
                     "En attente des premières frappes...",
-                    style: TextStyle(color: Colors.white30, fontSize: 9, fontFamily: 'monospace'),
+                    style: TextStyle(
+                        color: Colors.white30,
+                        fontSize: 9,
+                        fontFamily: 'monospace'),
                   )
                 else
                   Row(
@@ -976,32 +1216,49 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
                       final item = liveTop3[idx];
                       final Color medalColor = idx == 0
                           ? const Color(0xFFFFD700)
-                          : (idx == 1 ? const Color(0xFFC0C0C0) : const Color(0xFFCD7F32));
+                          : (idx == 1
+                              ? const Color(0xFFC0C0C0)
+                              : const Color(0xFFCD7F32));
                       return Expanded(
                         child: Container(
-                          margin: EdgeInsets.only(right: idx < liveTop3.length - 1 ? 6 : 0),
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                          margin: EdgeInsets.only(
+                              right: idx < liveTop3.length - 1 ? 6 : 0),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 6, vertical: 4),
                           decoration: BoxDecoration(
                             color: medalColor.withOpacity(0.08),
-                            border: Border.all(color: medalColor.withOpacity(0.4)),
+                            border: Border.all(
+                                color: medalColor.withOpacity(0.4)),
                           ),
                           child: Row(
                             children: [
                               Text(
                                 "#${idx + 1}",
-                                style: TextStyle(color: medalColor, fontFamily: 'monospace', fontWeight: FontWeight.bold, fontSize: 10),
+                                style: TextStyle(
+                                    color: medalColor,
+                                    fontFamily: 'monospace',
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 10),
                               ),
                               const SizedBox(width: 4),
                               Expanded(
                                 child: Text(
                                   item.key.toString(),
-                                  style: const TextStyle(color: Colors.white, fontFamily: 'monospace', fontWeight: FontWeight.bold, fontSize: 10),
+                                  style: const TextStyle(
+                                      color: Colors.white,
+                                      fontFamily: 'monospace',
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 10),
                                   overflow: TextOverflow.ellipsis,
                                 ),
                               ),
                               Text(
                                 "${item.value} PV",
-                                style: TextStyle(color: medalColor, fontFamily: 'monospace', fontWeight: FontWeight.bold, fontSize: 10),
+                                style: TextStyle(
+                                    color: medalColor,
+                                    fontFamily: 'monospace',
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 10),
                               ),
                             ],
                           ),
@@ -1018,11 +1275,19 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
             children: [
               Text(
                 'REGISTRE DES ASSAUTS',
-                style: TextStyle(color: Color(0xFF00E5FF), fontFamily: 'monospace', fontSize: 13, fontWeight: FontWeight.bold),
+                style: TextStyle(
+                    color: Color(0xFF00E5FF),
+                    fontFamily: 'monospace',
+                    fontSize: 13,
+                    fontWeight: FontWeight.bold),
               ),
               Text(
                 'DERNIÈRE FRAPPE EN HAUT ↑',
-                style: TextStyle(color: Color(0xFF00FF66), fontFamily: 'monospace', fontSize: 9, fontWeight: FontWeight.bold),
+                style: TextStyle(
+                    color: Color(0xFF00FF66),
+                    fontFamily: 'monospace',
+                    fontSize: 9,
+                    fontWeight: FontWeight.bold),
               ),
             ],
           ),
@@ -1032,47 +1297,66 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
                 ? const Center(
                     child: Text(
                       'COMBAT COMMENCÉ : EN ATTENTE DU PREMIER ASSAUT',
-                      style: TextStyle(color: Colors.white38, fontFamily: 'monospace', fontSize: 11),
+                      style: TextStyle(
+                          color: Colors.white38,
+                          fontFamily: 'monospace',
+                          fontSize: 11),
                     ),
                   )
                 : ListView.builder(
                     itemCount: logList.length,
                     itemBuilder: (context, index) {
-                      final Map log = logList[index] is Map ? logList[index] : {};
-                      final String name = (log['name'] ?? 'Chasseur').toString();
-                      final String action = (log['action'] ?? 'Frappe').toString();
-                      final int damage = (log['damage'] as num?)?.toInt() ?? 0;
+                      final Map log =
+                          logList[index] is Map ? logList[index] : {};
+                      final String name =
+                          (log['name'] ?? 'Chasseur').toString();
+                      final String action =
+                          (log['action'] ?? 'Frappe').toString();
+                      final int damage =
+                          (log['damage'] as num?)?.toInt() ?? 0;
 
                       return Container(
                         margin: const EdgeInsets.symmetric(vertical: 2),
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 4),
                         decoration: BoxDecoration(
                           color: Colors.transparent,
-                          border: Border.all(color: Colors.white10, width: 0.8),
+                          border:
+                              Border.all(color: Colors.white10, width: 0.8),
                           borderRadius: BorderRadius.circular(4),
                         ),
                         child: Row(
                           children: [
-                            const Icon(Icons.flash_on, color: Color(0xFF00E5FF), size: 14),
+                            const Icon(Icons.flash_on,
+                                color: Color(0xFF00E5FF), size: 14),
                             const SizedBox(width: 6),
                             Expanded(
                               child: Row(
                                 children: [
                                   Text(
                                     name,
-                                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 11, fontFamily: 'monospace'),
+                                    style: const TextStyle(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 11,
+                                        fontFamily: 'monospace'),
                                   ),
                                   const SizedBox(width: 4),
                                   Text(
                                     ': $action',
-                                    style: const TextStyle(color: Colors.white70, fontSize: 10),
+                                    style: const TextStyle(
+                                        color: Colors.white70, fontSize: 10),
                                   ),
                                 ],
                               ),
                             ),
                             Text(
                               '-$damage PV',
-                              style: const TextStyle(color: Color(0xFFFF9100), fontWeight: FontWeight.bold, fontFamily: 'monospace', fontSize: 11),
+                              style: const TextStyle(
+                                  color: Color(0xFFFF9100),
+                                  fontWeight: FontWeight.bold,
+                                  fontFamily: 'monospace',
+                                  fontSize: 11),
                             ),
                           ],
                         ),
@@ -1094,8 +1378,10 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
 
     for (final rawH in hunters) {
       if (rawH is Map) {
-        final Map<String, dynamic> hunterMap = Map<String, dynamic>.from(rawH);
-        final String modeLabel = (hunterMap['mode_label'] ?? 'Entraînement du Monarque').toString();
+        final Map<String, dynamic> hunterMap =
+            Map<String, dynamic>.from(rawH);
+        final String modeLabel =
+            (hunterMap['mode_label'] ?? 'Entraînement du Monarque').toString();
 
         huntersByMode.putIfAbsent(modeLabel, () => []);
         huntersByMode[modeLabel]!.add(hunterMap);
@@ -1108,7 +1394,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
 
     final int grandTotalReps = globalSquats + globalPushups + globalAbs;
 
-    final List<String> allModes = [
+    final List allModes = [
       "Entraînement du Monarque (Squats, Pompes, Abdos)",
       "Voie des Jambes (Uniquement Squats)",
       "Voie du Haut (Uniquement Pompes)",
@@ -1134,10 +1420,17 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Center(
+          Center(
             child: Text(
-              "★ PANTHÉON DU DONJON : LES 7 VOIES D'ENTRAÎNEMENT ★",
-              style: TextStyle(color: Color(0xFFFFD700), fontFamily: 'monospace', fontSize: 15, fontWeight: FontWeight.bold, letterSpacing: 1.5),
+              _isQuotaExhausted
+                  ? "★ DONJON ÉPUISÉ — REVENIR DEMAIN (PODIUM ACTUEL) ★"
+                  : "★ PANTHÉON DU DONJON : LES 7 VOIES D'ENTRAÎNEMENT ★",
+              style: const TextStyle(
+                  color: Color(0xFFFFD700),
+                  fontFamily: 'monospace',
+                  fontSize: 15,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 1.5),
               textAlign: TextAlign.center,
             ),
           ),
@@ -1151,7 +1444,11 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
             ),
             child: Text(
               "TOTAL GLOBAL : $grandTotalReps REPS (Squats: $globalSquats | Pompes: $globalPushups | Abdos: $globalAbs)",
-              style: const TextStyle(color: Colors.white70, fontFamily: 'monospace', fontWeight: FontWeight.bold, fontSize: 10),
+              style: const TextStyle(
+                  color: Colors.white70,
+                  fontFamily: 'monospace',
+                  fontWeight: FontWeight.bold,
+                  fontSize: 10),
               textAlign: TextAlign.center,
             ),
           ),
@@ -1171,8 +1468,11 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
                   itemBuilder: (context, index) {
                     final entry = entries[index];
                     final String modeName = entry.key.toString();
-                    final List rawList = entry.value is List ? entry.value : [];
-                    final List modeHunters = rawList.map((e) => Map<String, dynamic>.from(e)).toList();
+                    final List rawList =
+                        entry.value is List ? entry.value : [];
+                    final List modeHunters = rawList
+                        .map((e) => Map<String, dynamic>.from(e))
+                        .toList();
 
                     modeHunters.sort((a, b) {
                       final dmgA = (a['total_damage'] as num?)?.toInt() ?? 0;
@@ -1184,7 +1484,9 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
                       padding: const EdgeInsets.all(6),
                       decoration: BoxDecoration(
                         color: Colors.black45,
-                        border: Border.all(color: const Color(0xFF00E5FF).withOpacity(0.5), width: 1),
+                        border: Border.all(
+                            color: const Color(0xFF00E5FF).withOpacity(0.5),
+                            width: 1),
                         borderRadius: BorderRadius.circular(4),
                       ),
                       child: Column(
@@ -1192,12 +1494,17 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
                         children: [
                           Row(
                             children: [
-                              const Icon(Icons.fitness_center, color: Color(0xFF00E5FF), size: 10),
+                              const Icon(Icons.fitness_center,
+                                  color: Color(0xFF00E5FF), size: 10),
                               const SizedBox(width: 4),
                               Expanded(
                                 child: Text(
                                   modeName.toUpperCase(),
-                                  style: const TextStyle(color: Color(0xFF00E5FF), fontFamily: 'monospace', fontWeight: FontWeight.bold, fontSize: 8),
+                                  style: const TextStyle(
+                                      color: Color(0xFF00E5FF),
+                                      fontFamily: 'monospace',
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 8),
                                   overflow: TextOverflow.ellipsis,
                                 ),
                               ),
@@ -1209,39 +1516,62 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
                                 ? const Center(
                                     child: Text(
                                       "Vide",
-                                      style: TextStyle(color: Colors.white30, fontStyle: FontStyle.italic, fontSize: 8, fontFamily: 'monospace'),
+                                      style: TextStyle(
+                                          color: Colors.white30,
+                                          fontStyle: FontStyle.italic,
+                                          fontSize: 8,
+                                          fontFamily: 'monospace'),
                                     ),
                                   )
                                 : ListView(
                                     padding: EdgeInsets.zero,
-                                    children: List.generate(modeHunters.length, (idx) {
+                                    children: List.generate(modeHunters.length,
+                                        (idx) {
                                       final h = modeHunters[idx];
-                                      final String name = (h['name'] ?? 'Chasseur').toString();
-                                      final int dmg = (h['total_damage'] as num?)?.toInt() ?? 0;
+                                      final String name =
+                                          (h['name'] ?? 'Chasseur').toString();
+                                      final int dmg =
+                                          (h['total_damage'] as num?)
+                                                  ?.toInt() ??
+                                              0;
 
                                       final Color rankColor = idx == 0
                                           ? const Color(0xFFFFD700)
-                                          : (idx == 1 ? const Color(0xFFC0C0C0) : const Color(0xFFCD7F32));
+                                          : (idx == 1
+                                              ? const Color(0xFFC0C0C0)
+                                              : const Color(0xFFCD7F32));
 
                                       return Padding(
-                                        padding: const EdgeInsets.symmetric(vertical: 1.0),
+                                        padding: const EdgeInsets.symmetric(
+                                            vertical: 1.0),
                                         child: Row(
                                           children: [
                                             Text(
                                               "#${idx + 1}",
-                                              style: TextStyle(color: rankColor, fontSize: 8, fontWeight: FontWeight.bold, fontFamily: 'monospace'),
+                                              style: TextStyle(
+                                                  color: rankColor,
+                                                  fontSize: 8,
+                                                  fontWeight: FontWeight.bold,
+                                                  fontFamily: 'monospace'),
                                             ),
                                             const SizedBox(width: 3),
                                             Expanded(
                                               child: Text(
                                                 name,
-                                                style: const TextStyle(color: Colors.white, fontFamily: 'monospace', fontSize: 8),
+                                                style: const TextStyle(
+                                                    color: Colors.white,
+                                                    fontFamily: 'monospace',
+                                                    fontSize: 8),
                                                 overflow: TextOverflow.ellipsis,
                                               ),
                                             ),
                                             Text(
                                               "$dmg",
-                                              style: TextStyle(color: rankColor, fontFamily: 'monospace', fontSize: 8, fontWeight: FontWeight.bold),
+                                              style: TextStyle(
+                                                  color: rankColor,
+                                                  fontFamily: 'monospace',
+                                                  fontSize: 8,
+                                                  fontWeight: FontWeight.bold),
                                             ),
                                           ],
                                         ),
@@ -1277,12 +1607,18 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
             children: [
               Text(
                 'PORTAIL ACTIF : SALLE [$_roomId]',
-                style: const TextStyle(color: Color(0xFF00E5FF), fontFamily: 'monospace', fontSize: 14, fontWeight: FontWeight.bold),
+                style: const TextStyle(
+                    color: Color(0xFF00E5FF),
+                    fontFamily: 'monospace',
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold),
               ),
               Text(
                 '${hunterList.length} / $kMaxHuntersPerRoom CHASSEURS',
                 style: TextStyle(
-                  color: hunterList.length >= kMaxHuntersPerRoom ? const Color(0xFFFF2E56) : const Color(0xFF00FF66),
+                  color: hunterList.length >= kMaxHuntersPerRoom
+                      ? const Color(0xFFFF2E56)
+                      : const Color(0xFF00FF66),
                   fontFamily: 'monospace',
                   fontSize: 11,
                   fontWeight: FontWeight.bold,
@@ -1297,39 +1633,58 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
                     child: Text(
                       'AUCUN CHASSEUR DÉTECTÉ\nEN ATTENTE DU SCAN...',
                       textAlign: TextAlign.center,
-                      style: TextStyle(color: Colors.white38, fontFamily: 'monospace', fontSize: 12, letterSpacing: 1.1),
+                      style: TextStyle(
+                          color: Colors.white38,
+                          fontFamily: 'monospace',
+                          fontSize: 12,
+                          letterSpacing: 1.1),
                     ),
                   )
                 : ListView.builder(
                     itemCount: hunterList.length,
                     itemBuilder: (context, index) {
-                      final Map h = hunterList[index] is Map ? hunterList[index] : {};
-                      final String name = (h['name'] ?? 'Chasseur').toString();
-                      final String mode = (h['mode_label'] ?? 'Arsenal').toString();
+                      final Map h =
+                          hunterList[index] is Map ? hunterList[index] : {};
+                      final String name =
+                          (h['name'] ?? 'Chasseur').toString();
+                      final String mode =
+                          (h['mode_label'] ?? 'Arsenal').toString();
 
                       return Container(
                         margin: const EdgeInsets.symmetric(vertical: 3),
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 6),
                         decoration: BoxDecoration(
                           color: Colors.white.withOpacity(0.03),
                           border: Border.all(color: Colors.white10),
                         ),
                         child: Row(
                           children: [
-                            const Icon(Icons.shield, color: Color(0xFF00E5FF), size: 16),
+                            const Icon(Icons.shield,
+                                color: Color(0xFF00E5FF), size: 16),
                             const SizedBox(width: 8),
                             Expanded(
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Text(name, style: const TextStyle(color: Colors.white, fontFamily: 'monospace', fontWeight: FontWeight.bold, fontSize: 11)),
-                                  Text(mode, style: const TextStyle(color: Colors.white54, fontSize: 9)),
+                                  Text(name,
+                                      style: const TextStyle(
+                                          color: Colors.white,
+                                          fontFamily: 'monospace',
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 11)),
+                                  Text(mode,
+                                      style: const TextStyle(
+                                          color: Colors.white54, fontSize: 9)),
                                 ],
                               ),
                             ),
                             const Text(
                               'PRÊT',
-                              style: TextStyle(color: Color(0xFF00E5FF), fontWeight: FontWeight.bold, fontSize: 10),
+                              style: TextStyle(
+                                  color: Color(0xFF00E5FF),
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 10),
                             ),
                           ],
                         ),
@@ -1342,15 +1697,19 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
     );
   }
 
-  Widget _buildDynamicMaximizedQrPanel(String raidStatus, {required bool isVictory}) {
-    final String rawJoinUrl = 'https://shadowburn-1d8f8.web.app/#/join?room=$_roomId&token=${_joinToken ?? ""}';
-    final String rawAdminAppUrl = 'shadowburn://admin?room=$_roomId&key=${_adminKey ?? ""}';
+  Widget _buildDynamicMaximizedQrPanel(String raidStatus,
+      {required bool isVictory}) {
+    final String rawJoinUrl =
+        'https://shadowburn-1d8f8.web.app/#/join?room=$_roomId&token=${_joinToken ?? ""}';
+    final String rawAdminAppUrl =
+        'shadowburn://admin?room=$_roomId&key=${_adminKey ?? ""}';
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
       decoration: BoxDecoration(
         color: const Color(0xFF04101E).withOpacity(0.9),
-        border: Border.all(color: const Color(0xFF00E5FF).withOpacity(0.6), width: 1.5),
+        border: Border.all(
+            color: const Color(0xFF00E5FF).withOpacity(0.6), width: 1.5),
       ),
       child: LayoutBuilder(
         builder: (context, constraints) {
@@ -1366,7 +1725,12 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
                   children: [
                     const Text(
                       'SCAN CHASSEUR',
-                      style: TextStyle(color: Color(0xFF00E5FF), fontFamily: 'monospace', fontWeight: FontWeight.bold, fontSize: 10, letterSpacing: 1.1),
+                      style: TextStyle(
+                          color: Color(0xFF00E5FF),
+                          fontFamily: 'monospace',
+                          fontWeight: FontWeight.bold,
+                          fontSize: 10,
+                          letterSpacing: 1.1),
                       textAlign: TextAlign.center,
                     ),
                     const SizedBox(height: 3),
@@ -1383,7 +1747,9 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
                             child: Image.network(
                               'https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=${Uri.encodeComponent(rawJoinUrl)}',
                               fit: BoxFit.contain,
-                              errorBuilder: (context, error, stackTrace) => const Icon(Icons.qr_code_2, size: 60, color: Colors.black),
+                              errorBuilder: (context, error, stackTrace) =>
+                                  const Icon(Icons.qr_code_2,
+                                      size: 60, color: Colors.black),
                             ),
                           ),
                         ),
@@ -1392,7 +1758,12 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
                     const SizedBox(height: 2),
                     Text(
                       raidStatus == 'waiting' ? '(En attente)' : '(Actif)',
-                      style: TextStyle(color: raidStatus == 'waiting' ? Colors.white54 : const Color(0xFF00FF66), fontSize: 9, fontFamily: 'monospace'),
+                      style: TextStyle(
+                          color: raidStatus == 'waiting'
+                              ? Colors.white54
+                              : const Color(0xFF00FF66),
+                          fontSize: 9,
+                          fontFamily: 'monospace'),
                       textAlign: TextAlign.center,
                     ),
                   ],
@@ -1409,7 +1780,12 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
                   children: [
                     const Text(
                       'TÉLÉCOMMANDE',
-                      style: TextStyle(color: Color(0xFFFF9100), fontFamily: 'monospace', fontWeight: FontWeight.bold, fontSize: 10, letterSpacing: 1.1),
+                      style: TextStyle(
+                          color: Color(0xFFFF9100),
+                          fontFamily: 'monospace',
+                          fontWeight: FontWeight.bold,
+                          fontSize: 10,
+                          letterSpacing: 1.1),
                       textAlign: TextAlign.center,
                     ),
                     const SizedBox(height: 3),
@@ -1426,7 +1802,9 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
                             child: Image.network(
                               'https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=${Uri.encodeComponent(rawAdminAppUrl)}',
                               fit: BoxFit.contain,
-                              errorBuilder: (context, error, stackTrace) => const Icon(Icons.admin_panel_settings, size: 60, color: Colors.black),
+                              errorBuilder: (context, error, stackTrace) =>
+                                  const Icon(Icons.admin_panel_settings,
+                                      size: 60, color: Colors.black),
                             ),
                           ),
                         ),
@@ -1435,7 +1813,11 @@ class _ArenaTvScreenState extends State<ArenaTvScreen> with WidgetsBindingObserv
                     const SizedBox(height: 2),
                     Text(
                       'Salle : $_roomId',
-                      style: const TextStyle(color: Color(0xFFFF9100), fontSize: 9, fontFamily: 'monospace', fontWeight: FontWeight.bold),
+                      style: const TextStyle(
+                          color: Color(0xFFFF9100),
+                          fontSize: 9,
+                          fontFamily: 'monospace',
+                          fontWeight: FontWeight.bold),
                       textAlign: TextAlign.center,
                     ),
                   ],

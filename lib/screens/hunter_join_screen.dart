@@ -49,6 +49,7 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
   bool _isTokenValid = false;
   bool _isWaitingQueue = false;
   bool _isNightLockActive = false;
+  bool _isQuotaExhausted = false;
   String _denialReason = "VÉRIFICATION DU PORTAIL EN COURS...";
 
   bool _isJoined = false;
@@ -146,7 +147,7 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
     _autoDetectDeviceName(randomInt);
 
     web_cleanup.registerTabCloseCleanup(
-      () => _isJoined && _hasStruckAtLeastOnce,
+      () => _isJoined && _hasStruckAtLeastOnce && !_isQuotaExhausted,
       () => _roomId,
       () => _hunterSessionId,
     );
@@ -156,6 +157,25 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
   void didChangeDependencies() {
     super.didChangeDependencies();
     _parseIncomingParameters();
+  }
+
+  void _triggerQuotaExhaustedPodium() {
+    _queueRetryTimer?.cancel();
+    _frenzyTimer?.cancel();
+    _antiCheatTimer?.cancel();
+    _batchFlushTimer?.cancel();
+    _batchFlushTimer = null;
+
+    if (!mounted) return;
+    setState(() {
+      _isQuotaExhausted = true;
+      _isCheckingToken = false;
+      _isWaitingQueue = false;
+      _isLoading = false;
+      _isJoined = true;
+      _isTokenValid = true;
+      _isRaidDataLoaded = true;
+    });
   }
 
   void _parseIncomingParameters() {
@@ -231,6 +251,11 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
       return;
     }
 
+    if (await QuotaGuardService.isReserveReached()) {
+      _triggerQuotaExhaustedPodium();
+      return;
+    }
+
     if (_roomId.isEmpty) {
       if (mounted) {
         setState(() {
@@ -257,7 +282,7 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
         }
         _queueRetryTimer?.cancel();
         _queueRetryTimer = Timer(const Duration(seconds: 10), () {
-          if (mounted) {
+          if (mounted && !_isQuotaExhausted) {
             setState(() {
               _isCheckingToken = true;
               _isWaitingQueue = false;
@@ -297,7 +322,7 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
         }
         _queueRetryTimer?.cancel();
         _queueRetryTimer = Timer(const Duration(seconds: 10), () {
-          if (mounted) {
+          if (mounted && !_isQuotaExhausted) {
             setState(() {
               _isCheckingToken = true;
               _isWaitingQueue = false;
@@ -321,14 +346,9 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
         });
       }
     } catch (e) {
-      if (e.toString().contains('resource-exhausted') ||
-          e.toString().contains('quota')) {
-        if (mounted) {
-          setState(() {
-            _isCheckingToken = false;
-            _isNightLockActive = true;
-          });
-        }
+      if (e.toString().toLowerCase().contains('resource-exhausted') ||
+          e.toString().toLowerCase().contains('quota')) {
+        _triggerQuotaExhaustedPodium();
         return;
       }
       if (mounted) {
@@ -349,7 +369,7 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
     _antiCheatTimer?.cancel();
     _batchFlushTimer?.cancel();
     _batchFlushTimer = null;
-    if (_pendingDamage > 0 && _hasStruckAtLeastOnce) {
+    if (_pendingDamage > 0 && _hasStruckAtLeastOnce && !_isQuotaExhausted) {
       _flushPendingDamage();
     }
     super.dispose();
@@ -390,10 +410,11 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
     _batchFlushTimer?.cancel();
     _batchFlushTimer = null;
 
-    if (!_hasStruckAtLeastOnce) {
+    if (!_hasStruckAtLeastOnce || _isQuotaExhausted) {
       if (mounted) {
         setState(() {
           _isJoined = false;
+          _isQuotaExhausted = false;
           _isLoading = false;
           _comboStep = 0;
           _frenzyRemainingSeconds = 0;
@@ -565,15 +586,16 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
       'timestamp': DateTime.now().millisecondsSinceEpoch,
     });
 
-    final num currentHp = (data['current_hp'] as num?) ?? 5000;
+    final num maxHp = (data['max_hp'] as num?) ?? 5000;
+    final num currentHp = (data['current_hp'] as num?) ?? maxHp;
     final double estimatedNewHp =
-        (currentHp - damage).clamp(0.0, 5000.0).toDouble();
+        (currentHp - damage).clamp(0.0, maxHp.toDouble()).toDouble();
     setState(() {
       _raidData['current_hp'] = estimatedNewHp;
       final dynamic rawLogs = _raidData['logs'];
       final List logsList = rawLogs is Iterable ? List.from(rawLogs) : [];
       logsList.insert(0, _pendingLogs.first);
-      if (logsList.length > 30) logsList.removeRange(30, logsList.length);
+      if (logsList.length > 15) logsList.removeRange(15, logsList.length);
       _raidData['logs'] = logsList;
     });
 
@@ -608,10 +630,16 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
       return;
     }
 
-    bool canWrite = await QuotaGuardService.checkAndIncrementWrite();
+    final Map<String, dynamic> data = _raidData;
+    final int maxHp = (data['max_hp'] as num?)?.toInt() ?? 5000;
+    final int currentHp = (data['current_hp'] as num?)?.toInt() ?? maxHp;
+    final bool isVictoryClosure = currentHp <= 0;
+
+    bool canWrite = await QuotaGuardService.checkAndIncrementWrite(
+      isCriticalClosure: isVictoryClosure,
+    );
     if (!canWrite) {
-      debugPrint(
-          "[QUOTA GUARD] Seuil de sécurité préventif atteint (19 900). Flush suspendu.");
+      _triggerQuotaExhaustedPodium();
       return;
     }
 
@@ -630,20 +658,15 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
     _pendingLogs.clear();
 
     try {
-      final Map<String, dynamic> data = _raidData;
       final String currentStatus = (data['status'] ?? 'waiting').toString();
       if (currentStatus != 'active') {
         _isFlushing = false;
         return;
       }
 
-      final int currentHp = (data['current_hp'] as num?)?.toInt() ?? 5000;
-      final int estimatedAfter = (currentHp - dmgToSend).clamp(0, 5000);
-
       final dynamic rawLogs = data['logs'];
       final List logs = rawLogs is Iterable ? List.from(rawLogs) : [];
-      logs.insertAll(0, logsToSend);
-      if (logs.length > 30) logs.removeRange(30, logs.length);
+      if (logs.length > 15) logs.removeRange(15, logs.length);
 
       final dynamic rawHunters = data['hunters'];
       final List hunterList = rawHunters is Iterable ? List.from(rawHunters) : [];
@@ -699,26 +722,31 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
         'hunters': hunterList,
       };
 
-      if (estimatedAfter <= 0) {
+      if (isVictoryClosure) {
         updates['status'] = 'victory';
         updates['current_hp'] = 0;
+        _raidData['status'] = 'victory';
       }
 
       await _raidRef!.update(updates).timeout(_kFirestoreTimeout);
     } catch (e) {
-      if (e.toString().contains('resource-exhausted') && mounted) {
-        setState(() => _isNightLockActive = true);
-        _isFlushing = false;
-        return;
-      }
       _pendingDamage += dmgToSend;
       _pendingSquatReps += sToSend;
       _pendingPushupReps += pToSend;
       _pendingAbsReps += aToSend;
       _pendingLogs.insertAll(0, logsToSend);
+
+      if (e.toString().toLowerCase().contains('resource-exhausted') ||
+          e.toString().toLowerCase().contains('quota')) {
+        _isFlushing = false;
+        _triggerQuotaExhaustedPodium();
+        return;
+      }
     } finally {
       _isFlushing = false;
-      if (_pendingDamage > 0 && _batchFlushTimer == null) {
+      if (_pendingDamage > 0 &&
+          _batchFlushTimer == null &&
+          !_isQuotaExhausted) {
         _batchFlushTimer =
             Timer(const Duration(seconds: kBatchIntervalSeconds), () {
           _batchFlushTimer = null;
@@ -903,7 +931,9 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
           backgroundColor: const Color(0xFF04101E),
           centerTitle: true,
           title: Text(
-            "SHADOWBURN : SALLE [$_roomId]",
+            _roomId.isEmpty
+                ? "SHADOWBURN : PORTAIL"
+                : "SHADOWBURN : SALLE [$_roomId]",
             style: const TextStyle(
                 color: kSystemBlue,
                 fontFamily: 'monospace',
@@ -1021,6 +1051,10 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
   }
 
   Widget _buildLiveControllerPad() {
+    if (_isQuotaExhausted) {
+      return _buildVictoryPodiumView(_raidData, isQuotaExhausted: true);
+    }
+
     if (!_isRaidDataLoaded) {
       return const Center(
           child: CircularProgressIndicator(color: Color(0xFF00E5FF)));
@@ -1062,8 +1096,8 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
 
     final Map<String, dynamic> data = _raidData;
     String raidStatus = (data['status'] ?? 'waiting').toString();
-    num currentHp = ((data['current_hp'] ?? 5000) as num).clamp(0, 5000);
     num maxHp = (data['max_hp'] as num?) ?? 5000;
+    num currentHp = ((data['current_hp'] ?? maxHp) as num).clamp(0, maxHp);
 
     if (raidStatus == 'victory' || currentHp <= 0) {
       return _buildVictoryPodiumView(data);
@@ -1216,13 +1250,47 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
     );
   }
 
-  Widget _buildVictoryPodiumView(Map<String, dynamic> data) {
+  Widget _buildVictoryPodiumView(Map<String, dynamic> data,
+      {bool isQuotaExhausted = false}) {
     final dynamic rawHunters = data['hunters'];
     final List hunters = [];
 
     if (rawHunters is Iterable) {
       for (final item in rawHunters) {
         if (item is Map) hunters.add(Map<String, dynamic>.from(item));
+      }
+    }
+
+    // Fusionne les dégâts/reps locaux non encore envoyés pour afficher le score exact sur le podium
+    if (_hasStruckAtLeastOnce || _pendingDamage > 0) {
+      bool foundLocal = false;
+      for (int i = 0; i < hunters.length; i++) {
+        if (hunters[i]['id'] == _hunterSessionId) {
+          hunters[i]['total_damage'] =
+              ((hunters[i]['total_damage'] as num?)?.toInt() ?? 0) +
+                  _pendingDamage;
+          hunters[i]['squat_reps'] =
+              ((hunters[i]['squat_reps'] as num?)?.toInt() ?? 0) +
+                  _pendingSquatReps;
+          hunters[i]['pushup_reps'] =
+              ((hunters[i]['pushup_reps'] as num?)?.toInt() ?? 0) +
+                  _pendingPushupReps;
+          hunters[i]['abs_reps'] =
+              ((hunters[i]['abs_reps'] as num?)?.toInt() ?? 0) +
+                  _pendingAbsReps;
+          foundLocal = true;
+          break;
+        }
+      }
+      if (!foundLocal && _confirmedHunterName.isNotEmpty) {
+        hunters.add({
+          'id': _hunterSessionId,
+          'name': _confirmedHunterName,
+          'total_damage': _pendingDamage,
+          'squat_reps': _pendingSquatReps,
+          'pushup_reps': _pendingPushupReps,
+          'abs_reps': _pendingAbsReps,
+        });
       }
     }
 
@@ -1239,11 +1307,18 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         color: const Color(0xFF04101E),
-        border: Border.all(color: const Color(0xFFFFD700), width: 2),
+        border: Border.all(
+            color: isQuotaExhausted
+                ? const Color(0xFFFF2E56)
+                : const Color(0xFFFFD700),
+            width: 2),
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
-              color: const Color(0xFFFFD700).withOpacity(0.15),
+              color: (isQuotaExhausted
+                      ? const Color(0xFFFF2E56)
+                      : const Color(0xFFFFD700))
+                  .withOpacity(0.15),
               blurRadius: 25,
               spreadRadius: 2)
         ],
@@ -1251,18 +1326,57 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Icon(Icons.emoji_events, color: Color(0xFFFFD700), size: 56),
+          if (isQuotaExhausted) ...[
+            Container(
+              width: double.infinity,
+              margin: const EdgeInsets.only(bottom: 16),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFF2E56).withOpacity(0.18),
+                border: Border.all(color: const Color(0xFFFF2E56), width: 1.5),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Column(
+                children: [
+                  Text(
+                    "DONJON ÉPUISÉ — REVENEZ DEMAIN",
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                        color: Color(0xFFFF2E56),
+                        fontFamily: 'monospace',
+                        fontSize: 15,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 1.5),
+                  ),
+                  SizedBox(height: 4),
+                  Text(
+                    "Le quota d'énergie journalier du Portail est épuisé. Voici le classement actuel :",
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                        color: Colors.white70,
+                        fontFamily: 'monospace',
+                        fontSize: 11),
+                  ),
+                ],
+              ),
+            ),
+          ],
+          Icon(isQuotaExhausted ? Icons.hourglass_disabled : Icons.emoji_events,
+              color: const Color(0xFFFFD700), size: 56),
           const SizedBox(height: 10),
-          const Text("DONJON CONQUIS !",
+          Text(isQuotaExhausted ? "PODIUM DU JOUR" : "DONJON CONQUIS !",
               textAlign: TextAlign.center,
-              style: TextStyle(
+              style: const TextStyle(
                   color: Color(0xFFFFD700),
                   fontFamily: 'monospace',
                   fontSize: 22,
                   fontWeight: FontWeight.bold,
                   letterSpacing: 3)),
           const SizedBox(height: 4),
-          Text("$bossName A ÉTÉ TERRASSÉ",
+          Text(
+              isQuotaExhausted
+                  ? "CLÔTURE AUTOMATIQUE DU RAID"
+                  : "$bossName A ÉTÉ TERRASSÉ",
               textAlign: TextAlign.center,
               style: const TextStyle(
                   color: kSystemBlue,
