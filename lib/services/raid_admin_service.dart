@@ -40,13 +40,13 @@ class RaidAdminService {
       final snap = await docRef.get().timeout(_kTimeout);
       if (!snap.exists) return "Salle [$roomId] introuvable.";
 
-      final List resetHunters = [];
-      final Map data = snap.data() ?? {};
+      final List> resetHunters = [];
+      final Map<String, dynamic> data = snap.data() ?? {};
       final dynamic rawHunters = data['hunters'];
       if (rawHunters is Iterable) {
         for (final h in rawHunters) {
           if (h is Map) {
-            final Map copy = Map.from(h);
+            final Map<String, dynamic> copy = Map<String, dynamic>.from(h);
             copy['total_damage'] = 0;
             copy['squat_reps'] = 0;
             copy['pushup_reps'] = 0;
@@ -89,7 +89,7 @@ class RaidAdminService {
       final snap = await docRef.get().timeout(_kTimeout);
       if (!snap.exists) return "Salle [$roomId] introuvable.";
 
-      final Map data = snap.data() ?? {};
+      final Map<String, dynamic> data = snap.data() ?? {};
       final int maxHp = (data['max_hp'] as num?)?.toInt() ?? 5000;
       final int currentHp = (data['current_hp'] as num?)?.toInt() ?? maxHp;
       final int nextHp = (currentHp - damage).clamp(0, maxHp);
@@ -121,15 +121,15 @@ class RaidAdminService {
       final snap = await docRef.get().timeout(_kTimeout);
       if (!snap.exists) return "Salle [$roomId] introuvable.";
 
-      final Map data = snap.data() ?? {};
+      final Map<String, dynamic> data = snap.data() ?? {};
       final int maxHp = (data['max_hp'] as num?)?.toInt() ?? 5000;
       final dynamic rawHunters = data['hunters'];
-      final List resetHunters = [];
+      final List> resetHunters = [];
 
       if (rawHunters is Iterable) {
         for (final h in rawHunters) {
           if (h is Map) {
-            final Map copy = Map.from(h);
+            final Map<String, dynamic> copy = Map<String, dynamic>.from(h);
             copy['total_damage'] = 0;
             copy['squat_reps'] = 0;
             copy['pushup_reps'] = 0;
@@ -198,7 +198,7 @@ class RaidAdminService {
       final snapshot = await docRef.get().timeout(_kTimeout);
       if (!snapshot.exists) return "Salle [$roomId] introuvable.";
 
-      final Map data = snapshot.data() ?? {};
+      final Map<String, dynamic> data = snapshot.data() ?? {};
       final int currentEndMs = (data['target_end_time'] as num?)?.toInt() ??
           DateTime.now().millisecondsSinceEpoch;
       DateTime baseTime = DateTime.fromMillisecondsSinceEpoch(currentEndMs);
@@ -232,7 +232,7 @@ class RaidAdminService {
       final snapshot = await docRef.get().timeout(_kTimeout);
       if (!snapshot.exists) return "Salle [$roomId] introuvable.";
 
-      final Map data = snapshot.data() ?? {};
+      final Map<String, dynamic> data = snapshot.data() ?? {};
       final int currentEndMs = (data['target_end_time'] as num?)?.toInt() ??
           DateTime.now().millisecondsSinceEpoch;
       final DateTime baseTime = DateTime.fromMillisecondsSinceEpoch(currentEndMs);
