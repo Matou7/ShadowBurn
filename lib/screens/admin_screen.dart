@@ -1,5 +1,6 @@
 // lib/screens/admin_screen.dart
 
+import 'dart:async';
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -22,6 +23,12 @@ class _AdminScreenState extends State<AdminScreen> {
   bool _isChecking = true;
   bool _isAuthorized = false;
   String _denialReason = "VÉRIFICATION DES DROITS DU MONARQUE...";
+
+  int _relaunchCooldownSeconds = 0;
+  Timer? _relaunchCooldownTimer;
+
+  static const int kAdminActionCooldownSeconds = 5;
+  static const Duration _kFirestoreTimeout = Duration(seconds: 6);
 
   static final String _adminSessionId =
       'admin_${DateTime.now().millisecondsSinceEpoch}_${Random().nextInt(9999)}';
@@ -47,7 +54,46 @@ class _AdminScreenState extends State<AdminScreen> {
     _verifyAdminAccess();
   }
 
+  @override
+  void dispose() {
+    _relaunchCooldownTimer?.cancel();
+    super.dispose();
+  }
+
+  void _startRelaunchCooldown() {
+    setState(() => _relaunchCooldownSeconds = kAdminActionCooldownSeconds);
+    _relaunchCooldownTimer?.cancel();
+    _relaunchCooldownTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      if (_relaunchCooldownSeconds > 1) {
+        setState(() {
+          _relaunchCooldownSeconds--;
+        });
+      } else {
+        timer.cancel();
+        setState(() {
+          _relaunchCooldownSeconds = 0;
+        });
+      }
+    });
+  }
+
   Future<void> _verifyAdminAccess() async {
+    if (await QuotaGuardService.isReserveReached()) {
+      if (mounted) {
+        setState(() {
+          _isChecking = false;
+          _isAuthorized = false;
+          _denialReason =
+              "DONJON ÉPUISÉ — REVENIR DEMAIN.\nLe quota de sécurité journalier (19 500 écritures) est atteint.";
+        });
+      }
+      return;
+    }
+
     if (_key.isEmpty) {
       if (mounted) {
         setState(() {
@@ -61,14 +107,16 @@ class _AdminScreenState extends State<AdminScreen> {
     }
 
     try {
-      final ref = FirebaseFirestore.instance.collection('current_raids').doc(_roomId);
-      final doc = await ref.get();
+      final ref =
+          FirebaseFirestore.instance.collection('current_raids').doc(_roomId);
+      final doc = await ref.get().timeout(_kFirestoreTimeout);
       if (!doc.exists) {
         if (mounted) {
           setState(() {
             _isChecking = false;
             _isAuthorized = false;
-            _denialReason = "SALLE INTROUVABLE : La salle [$_roomId] n'existe pas.";
+            _denialReason =
+                "SALLE INTROUVABLE : La salle [$_roomId] n'existe pas.";
           });
         }
         return;
@@ -91,12 +139,13 @@ class _AdminScreenState extends State<AdminScreen> {
       }
 
       final String? activeAdmin = data['active_admin_session']?.toString();
-      final int lastAdminHeartbeat = (data['admin_last_seen'] as num?)?.toInt() ?? 0;
+      final int lastAdminActivity =
+          (data['admin_last_seen'] as num?)?.toInt() ?? 0;
       final int now = DateTime.now().millisecondsSinceEpoch;
 
       if (activeAdmin != null &&
           activeAdmin != _adminSessionId &&
-          (now - lastAdminHeartbeat < 60000)) {
+          (now - lastAdminActivity < 600000)) {
         if (mounted) {
           setState(() {
             _isChecking = false;
@@ -121,10 +170,11 @@ class _AdminScreenState extends State<AdminScreen> {
         return;
       }
 
-      await ref.set({
+      await ref.update({
         'active_admin_session': _adminSessionId,
         'admin_last_seen': now,
-      }, SetOptions(merge: true));
+        'last_activity_ms': now,
+      }).timeout(_kFirestoreTimeout);
 
       if (mounted) {
         setState(() {
@@ -151,6 +201,9 @@ class _AdminScreenState extends State<AdminScreen> {
   }
 
   Future<void> _launchNativeApp() async {
+    if (_relaunchCooldownSeconds > 0) return;
+    _startRelaunchCooldown();
+
     final String customSchemeUrl =
         "shadowburn://admin?room=$_roomId&key=$_key";
 
@@ -230,6 +283,8 @@ class _AdminScreenState extends State<AdminScreen> {
       );
     }
 
+    final bool isCooldown = _relaunchCooldownSeconds > 0;
+
     return Scaffold(
       backgroundColor: const Color(0xFF02070D),
       body: Center(
@@ -246,7 +301,8 @@ class _AdminScreenState extends State<AdminScreen> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Icon(Icons.swap_calls, color: Color(0xFFFF9100), size: 44),
+                  const Icon(Icons.swap_calls,
+                      color: Color(0xFFFF9100), size: 44),
                   const SizedBox(height: 14),
                   const Text(
                     "PASSERELLE TÉLÉCOMMANDE",
@@ -282,25 +338,31 @@ class _AdminScreenState extends State<AdminScreen> {
                     height: 48,
                     child: ElevatedButton.icon(
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFFFF9100),
+                        backgroundColor: isCooldown
+                            ? Colors.white24
+                            : const Color(0xFFFF9100),
                         foregroundColor: Colors.black,
                         padding: const EdgeInsets.symmetric(horizontal: 12),
                         shape: const BeveledRectangleBorder(),
                       ),
-                      icon: const Icon(Icons.phone_android,
-                          color: Colors.black, size: 20),
-                      label: const FittedBox(
+                      icon: Icon(
+                          isCooldown ? Icons.timer : Icons.phone_android,
+                          color: Colors.black,
+                          size: 20),
+                      label: FittedBox(
                         fit: BoxFit.scaleDown,
                         child: Text(
-                          "OUVRIR DANS SHADOWBURN",
-                          style: TextStyle(
+                          isCooldown
+                              ? "PATIENTEZ (${_relaunchCooldownSeconds}S)..."
+                              : "OUVRIR DANS SHADOWBURN",
+                          style: const TextStyle(
                               fontFamily: 'monospace',
                               fontWeight: FontWeight.bold,
                               letterSpacing: 1.2,
                               fontSize: 12),
                         ),
                       ),
-                      onPressed: _launchNativeApp,
+                      onPressed: isCooldown ? null : _launchNativeApp,
                     ),
                   ),
                   const SizedBox(height: 14),

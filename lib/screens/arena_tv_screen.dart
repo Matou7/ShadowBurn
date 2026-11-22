@@ -380,7 +380,9 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
       });
 
       final String currentSt = (initialMap['status'] ?? 'waiting').toString();
-      if (currentSt == 'active' || currentSt == 'victory' || currentSt == 'failed') {
+      if (currentSt == 'active' ||
+          currentSt == 'victory' ||
+          currentSt == 'failed') {
         _startListeningToRaid();
       }
     } catch (_) {
@@ -523,7 +525,8 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
       final int lastActivity = (data['last_activity_ms'] as num?)?.toInt() ??
           (data['arena_last_seen'] as num?)?.toInt() ??
           0;
-      return lastActivity == 0 || (now - lastActivity > kRoomInactivityThresholdMs);
+      return lastActivity == 0 ||
+          (now - lastActivity > kRoomInactivityThresholdMs);
     }
 
     try {
@@ -847,7 +850,6 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
     _currentRaidStatus = status;
     _currentBossHp = currentHp;
 
-    // Écoute temps réel ouverte uniquement lorsque le raid est lancé ou terminé
     if (status == 'active' || status == 'victory' || status == 'failed') {
       _startListeningToRaid();
     }

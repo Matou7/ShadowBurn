@@ -62,12 +62,21 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
   Map<String, dynamic> _raidData = {};
   bool _isRaidDataLoaded = false;
 
+  /// 0 = prochain coup 25 PV
+  /// 1 = fenêtre 10s active pour taper 100 PV
+  /// 2 = fenêtre 10s active pour taper 200 PV
   int _comboStep = 0;
+
   int _frenzyRemainingSeconds = 0;
   Timer? _frenzyTimer;
+
   int _lastStrikeMs = 0;
   int _antiCheatCooldownSeconds = 0;
   Timer? _antiCheatTimer;
+
+  /// Gel de 10s déclenché après un coup critique à 200 PV
+  int _restCooldownSeconds = 0;
+  Timer? _restTimer;
 
   int _pendingDamage = 0;
   int _pendingSquatReps = 0;
@@ -80,6 +89,10 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
   static const int kMaxHuntersPerRoom = 10;
   static const int kBatchIntervalSeconds = 14;
   static const int kMaxLogsStored = 10;
+  static const int kMiniCooldownSeconds = 2;
+  static const int kMiniCooldownMs = 2000;
+  static const int kComboWindowSeconds = 10;
+  static const int kPostBurstRestSeconds = 10;
   static const Duration _kFirestoreTimeout = Duration(seconds: 6);
 
   static const List trainingModes = [
@@ -164,6 +177,7 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
     _queueRetryTimer?.cancel();
     _frenzyTimer?.cancel();
     _antiCheatTimer?.cancel();
+    _restTimer?.cancel();
     _batchFlushTimer?.cancel();
     _batchFlushTimer = null;
 
@@ -368,6 +382,7 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
     _queueRetryTimer?.cancel();
     _frenzyTimer?.cancel();
     _antiCheatTimer?.cancel();
+    _restTimer?.cancel();
     _batchFlushTimer?.cancel();
     _batchFlushTimer = null;
     if (_pendingDamage > 0 && _hasStruckAtLeastOnce && !_isQuotaExhausted) {
@@ -409,6 +424,7 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
   Future<void> _leaveRaid() async {
     _frenzyTimer?.cancel();
     _antiCheatTimer?.cancel();
+    _restTimer?.cancel();
     _batchFlushTimer?.cancel();
     _batchFlushTimer = null;
 
@@ -420,6 +436,8 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
           _isLoading = false;
           _comboStep = 0;
           _frenzyRemainingSeconds = 0;
+          _restCooldownSeconds = 0;
+          _antiCheatCooldownSeconds = 0;
           _pendingDamage = 0;
           _pendingSquatReps = 0;
           _pendingPushupReps = 0;
@@ -440,28 +458,97 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
         _isLoading = false;
         _comboStep = 0;
         _frenzyRemainingSeconds = 0;
+        _restCooldownSeconds = 0;
+        _antiCheatCooldownSeconds = 0;
       });
     }
   }
 
-  void _resetFrenzyState() {
+  void _expireComboWindow() {
     _frenzyTimer?.cancel();
     _frenzyTimer = null;
+    if (!mounted) return;
     setState(() {
       _comboStep = 0;
       _frenzyRemainingSeconds = 0;
     });
   }
 
-  void _handleExerciseTap(String category, String actionLabel) {
-    final now = DateTime.now().millisecondsSinceEpoch;
+  void _startComboWindowTimer() {
+    _frenzyTimer?.cancel();
+    _frenzyRemainingSeconds = kComboWindowSeconds;
+    _frenzyTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      if (_frenzyRemainingSeconds > 1) {
+        setState(() {
+          _frenzyRemainingSeconds--;
+        });
+      } else {
+        _expireComboWindow();
+      }
+    });
+  }
 
-    if (now - _lastStrikeMs < 2000) {
-      final waitMs = 2000 - (now - _lastStrikeMs);
+  void _startMiniCooldownTimer() {
+    setState(() => _antiCheatCooldownSeconds = kMiniCooldownSeconds);
+    _antiCheatTimer?.cancel();
+    _antiCheatTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      if (_antiCheatCooldownSeconds > 1) {
+        setState(() {
+          _antiCheatCooldownSeconds--;
+        });
+      } else {
+        timer.cancel();
+        setState(() {
+          _antiCheatCooldownSeconds = 0;
+        });
+      }
+    });
+  }
+
+  void _startPostBurstRestTimer() {
+    _frenzyTimer?.cancel();
+    _frenzyTimer = null;
+    _frenzyRemainingSeconds = 0;
+    _comboStep = 0;
+
+    setState(() => _restCooldownSeconds = kPostBurstRestSeconds);
+    _restTimer?.cancel();
+    _restTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      if (_restCooldownSeconds > 1) {
+        setState(() {
+          _restCooldownSeconds--;
+        });
+      } else {
+        timer.cancel();
+        setState(() {
+          _restCooldownSeconds = 0;
+        });
+      }
+    });
+  }
+
+  void _handleExerciseTap(String category, String actionLabel) {
+    if (_restCooldownSeconds > 0) return;
+
+    final now = DateTime.now().millisecondsSinceEpoch;
+    if (now - _lastStrikeMs < kMiniCooldownMs) {
+      final waitMs = kMiniCooldownMs - (now - _lastStrikeMs);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            "CADENCE TROP RAPIDE ! Patientez ${(waitMs / 1000).toStringAsFixed(1)}s (Respectez le tempo 2-2-2).",
+            "CHRONO 2S ACTIF ! Patientez ${(waitMs / 1000).toStringAsFixed(1)}s.",
             style: const TextStyle(fontFamily: 'monospace', fontSize: 11),
           ),
           backgroundColor: const Color(0xFFFF2E56),
@@ -473,72 +560,35 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
 
     _lastStrikeMs = now;
     _hasStruckAtLeastOnce = true;
-
-    setState(() => _antiCheatCooldownSeconds = 2);
-    _antiCheatTimer?.cancel();
-    _antiCheatTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (!mounted) return;
-      setState(() {
-        if (_antiCheatCooldownSeconds <= 1) {
-          _antiCheatCooldownSeconds = 0;
-          timer.cancel();
-        } else {
-          _antiCheatCooldownSeconds--;
-        }
-      });
-    });
+    _startMiniCooldownTimer();
 
     int damage = 25;
     bool triggeredGlow = false;
     String feedback = "";
 
     if (_comboStep == 0) {
-      _comboStep = 1;
       damage = 25;
       triggeredGlow = false;
-      _frenzyRemainingSeconds = 10;
-      feedback = "FRÉNÉSIE AMORCÉE ! Enchaînez dans les 10s (+150 PV) !";
-
-      _frenzyTimer?.cancel();
-      _frenzyTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-        if (!mounted) return;
-        setState(() {
-          if (_frenzyRemainingSeconds > 1) {
-            _frenzyRemainingSeconds--;
-          } else {
-            _resetFrenzyState();
-          }
-        });
-      });
-    } else if (_comboStep == 1) {
-      _frenzyTimer?.cancel();
-      _comboStep = 2;
-      damage = 150;
+      _comboStep = 1;
+      _startComboWindowTimer();
+      feedback = "25 PV ! 10s pour frapper à 100 PV (sinon retour 25 PV).";
+    } else if (_comboStep == 1 && _frenzyRemainingSeconds > 0) {
+      damage = 100;
       triggeredGlow = true;
-      _frenzyRemainingSeconds = 10;
-      feedback =
-          "★ SURBRILLANCE 150 PV ! Dernier palier dans les 10s (+200 PV) !";
-
-      _frenzyTimer?.cancel();
-      _frenzyTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-        if (!mounted) return;
-        setState(() {
-          if (_frenzyRemainingSeconds > 1) {
-            _frenzyRemainingSeconds--;
-          } else {
-            _resetFrenzyState();
-          }
-        });
-      });
-    } else if (_comboStep == 2) {
-      _frenzyTimer?.cancel();
+      _comboStep = 2;
+      _startComboWindowTimer();
+      feedback = "100 PV ! 10s pour frapper à 200 PV (sinon retour 25 PV).";
+    } else if (_comboStep == 2 && _frenzyRemainingSeconds > 0) {
       damage = 200;
       triggeredGlow = true;
-      feedback = "★★ SURPASSEMENT CRITIQUE TOTAL : 200 PV INFLIGÉS !";
-
-      _frenzyTimer = null;
-      _frenzyRemainingSeconds = 0;
-      _comboStep = 0;
+      _startPostBurstRestTimer();
+      feedback = "200 PV CRITIQUE ! Repos de 10s avant reprise à 25 PV.";
+    } else {
+      damage = 25;
+      triggeredGlow = false;
+      _comboStep = 1;
+      _startComboWindowTimer();
+      feedback = "Délai dépassé : retour à 25 PV (+10s pour 100 PV).";
     }
 
     setState(() {});
@@ -1130,9 +1180,11 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
           decoration: BoxDecoration(
             color: const Color(0xFF04101E),
             border: Border.all(
-                color: isCombatActive
-                    ? const Color(0xFF00FF66)
-                    : const Color(0xFFFF9100),
+                color: _restCooldownSeconds > 0
+                    ? const Color(0xFFFF2E56)
+                    : (isCombatActive
+                        ? const Color(0xFF00FF66)
+                        : const Color(0xFFFF9100)),
                 width: 1.5),
           ),
           child: Column(
@@ -1175,7 +1227,29 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
                       letterSpacing: 1.2),
                 ),
               ),
-              if (_frenzyRemainingSeconds > 0) ...[
+              if (_restCooldownSeconds > 0) ...[
+                const SizedBox(height: 10),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFF2E56).withOpacity(0.22),
+                    border: Border.all(
+                        color: const Color(0xFFFF2E56), width: 1.5),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Text(
+                    "REPOS FORCÉ (200 PV) : $_restCooldownSeconds s avant reprise à 25 PV",
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                        color: Color(0xFFFFD700),
+                        fontFamily: 'monospace',
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 1.1),
+                  ),
+                ),
+              ] else if (_frenzyRemainingSeconds > 0 && _comboStep > 0) ...[
                 const SizedBox(height: 10),
                 Container(
                   padding:
@@ -1193,8 +1267,8 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
                   ),
                   child: Text(
                     _comboStep == 2
-                        ? "BURST 200 PV DISPONIBLE : $_frenzyRemainingSeconds s !"
-                        : "FRÉNÉSIE 150 PV DISPONIBLE : $_frenzyRemainingSeconds s !",
+                        ? "FENÊTRE 200 PV : $_frenzyRemainingSeconds s restantes"
+                        : "FENÊTRE 100 PV : $_frenzyRemainingSeconds s restantes",
                     style: TextStyle(
                         color: _comboStep == 2
                             ? const Color(0xFFFFD700)
@@ -1244,7 +1318,7 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
         const SizedBox(height: 6),
         const Center(
           child: Text(
-              "Protection Anti-Triche : 2s min entre chaque frappe. Envoi groupé toutes les 14s.",
+              "Chrono 2s par frappe • Fenêtre combo 10s (25 > 100 > 200 PV) • Repos 10s après 200 PV.",
               textAlign: TextAlign.center,
               style: TextStyle(
                   color: Colors.white30, fontSize: 9, fontFamily: 'monospace')),
@@ -1581,25 +1655,27 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
       required String category,
       required Color color,
       required bool isEnabled}) {
-    final bool isAntiCheatLocked = (_antiCheatCooldownSeconds > 0);
-    final bool canPress = isEnabled && !isAntiCheatLocked;
+    final bool isResting = _restCooldownSeconds > 0;
+    final bool isMiniLocked = !isResting && (_antiCheatCooldownSeconds > 0);
+    final bool canPress = isEnabled && !isResting && !isMiniLocked;
 
-    final bool isTargetFor150 = (_comboStep == 1);
-    final bool isTargetFor200 = (_comboStep == 2);
-    final bool hasButtonGlow = (isTargetFor150 || isTargetFor200) && canPress;
+    final bool isTargetFor100 = (_comboStep == 1 && _frenzyRemainingSeconds > 0);
+    final bool isTargetFor200 = (_comboStep == 2 && _frenzyRemainingSeconds > 0);
+    final bool hasButtonGlow = (isTargetFor100 || isTargetFor200) && canPress;
 
     String gainText = "+25 PV";
-    if (isTargetFor150) {
-      gainText = "ENCHAÎNEZ ! (+150 PV FRÉNÉSIE)";
+    if (isResting) {
+      gainText = "REPOS FORCÉ (${_restCooldownSeconds}s)";
+    } else if (isMiniLocked) {
+      gainText = "VERROU 2S (${_antiCheatCooldownSeconds}s)";
+    } else if (isTargetFor100) {
+      gainText = "PROCHAIN COUP : +100 PV (${_frenzyRemainingSeconds}s)";
     } else if (isTargetFor200) {
-      gainText = "BURST ULTIME ! (+200 PV CRITIQUE)";
-    }
-    if (isAntiCheatLocked) {
-      gainText = "COOLDOWN ANTI-SPAM (${_antiCheatCooldownSeconds}s)";
+      gainText = "PROCHAIN COUP : +200 PV (${_frenzyRemainingSeconds}s)";
     }
 
     final Color glowColor =
-        isTargetFor200 ? const Color(0xFFFFD700) : const Color(0xFFFF2E56);
+        isTargetFor200 ? const Color(0xFFFFD700) : const Color(0xFFFF9100);
 
     return SizedBox(
       width: double.infinity,
@@ -1609,7 +1685,9 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
           side: BorderSide(
               color: canPress
                   ? (hasButtonGlow ? glowColor : color)
-                  : Colors.white12,
+                  : (isResting
+                      ? const Color(0xFFFF2E56).withOpacity(0.7)
+                      : Colors.white12),
               width: hasButtonGlow ? 2.5 : 1.5),
           backgroundColor: hasButtonGlow
               ? glowColor.withOpacity(0.25)
@@ -1632,16 +1710,23 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
                     style: TextStyle(
                         color: canPress
                             ? (hasButtonGlow ? glowColor : color)
-                            : Colors.white24,
+                            : (isResting
+                                ? const Color(0xFFFF2E56)
+                                : Colors.white24),
                         fontFamily: 'monospace',
                         fontWeight: FontWeight.bold,
                         fontSize: 10)),
               ],
             ),
-            Icon(hasButtonGlow ? Icons.whatshot : Icons.fitness_center,
+            Icon(
+                isResting
+                    ? Icons.hourglass_bottom
+                    : (hasButtonGlow ? Icons.whatshot : Icons.fitness_center),
                 color: canPress
                     ? (hasButtonGlow ? glowColor : color)
-                    : Colors.white24,
+                    : (isResting
+                        ? const Color(0xFFFF2E56)
+                        : Colors.white24),
                 size: 20),
           ],
         ),
