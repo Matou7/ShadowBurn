@@ -18,6 +18,7 @@ import '../providers/urgent_quest_provider.dart';
 import '../widgets/system_dialog.dart';
 import '../utils/admin_utils.dart';
 import '../services/raid_admin_service.dart';
+import '../services/quota_guard_service.dart';
 
 class ProfileScreen extends StatefulWidget {
   final String? initialRoomId;
@@ -34,7 +35,8 @@ class _ProfileScreenState extends State<ProfileScreen>
   static const MethodChannel _intentChannel =
       MethodChannel('com.shadowburn.app/lock');
 
-  static const int _kAdminLeaseDurationMs = 45000;
+  static const int _kAdminLeaseDurationMs = 600000; // 10 minutes
+  static const int _kAdminCommandCooldownMs = 5000; // 5 secondes anti-spam
   static const Duration _kFirestoreTimeout = Duration(seconds: 6);
 
   final ScrollController _scrollController = ScrollController();
@@ -45,6 +47,9 @@ class _ProfileScreenState extends State<ProfileScreen>
   int _selectedHpPreset = 5000;
   bool _isCheckingIntent = false;
   bool _isBindingInProgress = false;
+
+  /// Garde anti-spam locale (5s par action)
+  final Map<String, int> _lastAdminActionMs = {};
 
   static String? _deviceAdminToken;
   static String? _hardwareFingerprint;
@@ -264,15 +269,20 @@ class _ProfileScreenState extends State<ProfileScreen>
         'hardware_fingerprint': _hardwareFingerprint,
         'admin_last_seen_ms': nowMs,
         'lease_expires_at': nowMs + _kAdminLeaseDurationMs,
+        'last_activity_ms': nowMs,
       }, SetOptions(merge: true)).timeout(_kFirestoreTimeout);
 
       await game.pairAdminRoom(cleanRoomId, adminKey: cleanKey);
+
+      final int rawMaxHp = ((data['max_hp'] ?? 5000) as num).toInt();
+      final bool presetExists =
+          RaidAdminService.raidPresets.any((p) => p['hp'] == rawMaxHp);
 
       if (!mounted) return;
       setState(() {
         _activeRoom = cleanRoomId;
         _verifiedKey = cleanKey;
-        _selectedHpPreset = ((data['max_hp'] ?? 5000) as num).toInt();
+        _selectedHpPreset = presetExists ? rawMaxHp : 5000;
       });
 
       _scrollToRemoteConsole();
@@ -302,10 +312,103 @@ class _ProfileScreenState extends State<ProfileScreen>
     }
   }
 
+  /// Exécute une commande admin avec anti-spam local 5s et retour visuel immédiat.
+  Future<void> _runGuardedAdminCommand({
+    required String actionKey,
+    required String successLabel,
+    required Future<String?> Function() command,
+  }) async {
+    final int now = DateTime.now().millisecondsSinceEpoch;
+    final int prev = _lastAdminActionMs[actionKey] ?? 0;
+    if (now - prev < _kAdminCommandCooldownMs) {
+      final int remSec = ((_kAdminCommandCooldownMs - (now - prev)) / 1000).ceil();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text("Anti-spam actif : patientez ${remSec}s."),
+            backgroundColor: const Color(0xFFFF9100),
+            duration: const Duration(milliseconds: 900),
+          ),
+        );
+      }
+      return;
+    }
+
+    _lastAdminActionMs[actionKey] = now;
+    final String? error = await command();
+    if (!mounted) return;
+
+    if (error != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(error),
+          backgroundColor: const Color(0xFFFF2E56),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(successLabel),
+          backgroundColor: const Color(0xFF00FF66),
+          duration: const Duration(milliseconds: 900),
+        ),
+      );
+    }
+  }
+
+  /// Double confirmation locale sur les actions destructives (Reset à 0, Reset Boss, Suppression).
+  void _confirmDestructiveAdminAction({
+    required String title,
+    required String message,
+    required String confirmLabel,
+    required VoidCallback onConfirmed,
+  }) {
+    SystemDialog.show(
+      context,
+      title: title,
+      color: const Color(0xFFFF2E56),
+      content: Text(
+        message,
+        style: const TextStyle(color: Colors.white70, fontSize: 13),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text("ANNULER", style: TextStyle(color: Colors.white54)),
+        ),
+        ElevatedButton(
+          style: ElevatedButton.styleFrom(
+            backgroundColor: const Color(0xFFFF2E56),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+          ),
+          onPressed: () {
+            Navigator.pop(context);
+            onConfirmed();
+          },
+          child: Text(
+            confirmLabel,
+            style: const TextStyle(
+                color: Colors.white, fontWeight: FontWeight.bold),
+          ),
+        ),
+      ],
+    );
+  }
+
   Future<void> _deleteActiveRoom() async {
     final roomToDelete = _activeRoom ??
         Provider.of<GameProvider>(context, listen: false).pairedAdminRoom;
     if (roomToDelete == null || roomToDelete.isEmpty) return;
+
+    bool canWrite =
+        await QuotaGuardService.checkAndIncrementWrite(isCriticalClosure: true);
+    if (!canWrite) {
+      _rejectIntrusionAttempt("Quota journalier atteint.");
+      return;
+    }
+
     try {
       await FirebaseFirestore.instance
           .collection('current_raids')
@@ -315,6 +418,7 @@ class _ProfileScreenState extends State<ProfileScreen>
       _unbindFromRoom("Salle [$roomToDelete] supprimée définitivement.");
     } catch (e) {
       debugPrint("Erreur suppression: $e");
+      _rejectIntrusionAttempt("Erreur suppression : $e");
     }
   }
 
@@ -1023,7 +1127,7 @@ class _ProfileScreenState extends State<ProfileScreen>
             Align(
               alignment: Alignment.centerLeft,
               child: Text(
-                "NOMBRE DE CHASSEURS :",
+                "CONFIGURATION DU BOSS :",
                 style: GoogleFonts.orbitron(color: Colors.white70, fontSize: 10),
               ),
             ),
@@ -1051,7 +1155,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                     return DropdownMenuItem<int>(
                       value: hp,
                       child: Text(
-                        "$label  ($hp PV)",
+                        label,
                         style: const TextStyle(color: Color(0xFFFF9100)),
                       ),
                     );
@@ -1060,10 +1164,18 @@ class _ProfileScreenState extends State<ProfileScreen>
                     if (newHp != null) {
                       final selected = RaidAdminService.raidPresets
                           .firstWhere((p) => p['hp'] == newHp);
-                      await RaidAdminService.applyPreset(
-                          newHp, selected['label'] as String,
-                          roomId: effectiveRoom);
-                      setState(() => _selectedHpPreset = newHp);
+                      await _runGuardedAdminCommand(
+                        actionKey: 'preset',
+                        successLabel: "Boss configuré : ${selected['label']}",
+                        command: () => RaidAdminService.applyPreset(
+                          newHp,
+                          selected['label'] as String,
+                          roomId: effectiveRoom,
+                        ),
+                      );
+                      if (mounted) {
+                        setState(() => _selectedHpPreset = newHp);
+                      }
                     }
                   },
                 ),
@@ -1081,31 +1193,46 @@ class _ProfileScreenState extends State<ProfileScreen>
             Row(
               children: [
                 Expanded(
-                  child: _compactButton("+1 MIN", const Color(0xFF00E5FF),
-                      () async {
-                    await RaidAdminService.extendRaidMinutes(1,
-                        roomId: effectiveRoom);
+                  child: _compactButton("+1 MIN", const Color(0xFF00E5FF), () {
+                    _runGuardedAdminCommand(
+                      actionKey: 'extend_time',
+                      successLabel: "+1 minute ajoutée.",
+                      command: () => RaidAdminService.extendRaidMinutes(1,
+                          roomId: effectiveRoom),
+                    );
                   }),
                 ),
                 const SizedBox(width: 4),
                 Expanded(
-                  child: _compactButton("+15 MIN", systemBlue, () async {
-                    await RaidAdminService.extendRaidMinutes(15,
-                        roomId: effectiveRoom);
+                  child: _compactButton("+15 MIN", systemBlue, () {
+                    _runGuardedAdminCommand(
+                      actionKey: 'extend_time',
+                      successLabel: "+15 minutes ajoutées.",
+                      command: () => RaidAdminService.extendRaidMinutes(15,
+                          roomId: effectiveRoom),
+                    );
                   }),
                 ),
                 const SizedBox(width: 4),
                 Expanded(
-                  child: _compactButton("+30 MIN", systemBlue, () async {
-                    await RaidAdminService.extendRaidMinutes(30,
-                        roomId: effectiveRoom);
+                  child: _compactButton("+30 MIN", systemBlue, () {
+                    _runGuardedAdminCommand(
+                      actionKey: 'extend_time',
+                      successLabel: "+30 minutes ajoutées.",
+                      command: () => RaidAdminService.extendRaidMinutes(30,
+                          roomId: effectiveRoom),
+                    );
                   }),
                 ),
                 const SizedBox(width: 4),
                 Expanded(
-                  child: _compactButton("RESET 24H", Colors.amber, () async {
-                    await RaidAdminService.resetToMidnight(
-                        roomId: effectiveRoom);
+                  child: _compactButton("RESET 24H", Colors.amber, () {
+                    _runGuardedAdminCommand(
+                      actionKey: 'reset_midnight',
+                      successLabel: "Chrono réinitialisé à 23h58.",
+                      command: () =>
+                          RaidAdminService.resetToMidnight(roomId: effectiveRoom),
+                    );
                   }),
                 ),
               ],
@@ -1114,34 +1241,54 @@ class _ProfileScreenState extends State<ProfileScreen>
             Row(
               children: [
                 Expanded(
-                  child: _compactButton("-1 MIN", const Color(0xFFFFAB91),
-                      () async {
-                    await RaidAdminService.reduceRaidMinutes(1,
-                        roomId: effectiveRoom);
+                  child: _compactButton("-1 MIN", const Color(0xFFFFAB91), () {
+                    _runGuardedAdminCommand(
+                      actionKey: 'reduce_time',
+                      successLabel: "-1 minute retirée.",
+                      command: () => RaidAdminService.reduceRaidMinutes(1,
+                          roomId: effectiveRoom),
+                    );
                   }),
                 ),
                 const SizedBox(width: 4),
                 Expanded(
-                  child: _compactButton("-15 MIN", const Color(0xFFFF7043),
-                      () async {
-                    await RaidAdminService.reduceRaidMinutes(15,
-                        roomId: effectiveRoom);
+                  child: _compactButton("-15 MIN", const Color(0xFFFF7043), () {
+                    _runGuardedAdminCommand(
+                      actionKey: 'reduce_time',
+                      successLabel: "-15 minutes retirées.",
+                      command: () => RaidAdminService.reduceRaidMinutes(15,
+                          roomId: effectiveRoom),
+                    );
                   }),
                 ),
                 const SizedBox(width: 4),
                 Expanded(
-                  child: _compactButton("-30 MIN", const Color(0xFFFF7043),
-                      () async {
-                    await RaidAdminService.reduceRaidMinutes(30,
-                        roomId: effectiveRoom);
+                  child: _compactButton("-30 MIN", const Color(0xFFFF7043), () {
+                    _runGuardedAdminCommand(
+                      actionKey: 'reduce_time',
+                      successLabel: "-30 minutes retirées.",
+                      command: () => RaidAdminService.reduceRaidMinutes(30,
+                          roomId: effectiveRoom),
+                    );
                   }),
                 ),
                 const SizedBox(width: 4),
                 Expanded(
-                  child: _compactButton("RESET À 0", const Color(0xFFFF2E56),
-                      () async {
-                    await RaidAdminService.expireRaidNow(
-                        roomId: effectiveRoom);
+                  child: _compactButton("RESET À 0", const Color(0xFFFF2E56), () {
+                    _confirmDestructiveAdminAction(
+                      title: "CONFIRMER RESET À 0",
+                      message:
+                          "Mettre fin immédiatement au chronomètre de [$effectiveRoom] ?",
+                      confirmLabel: "CLÔTURER MAINTENANT",
+                      onConfirmed: () {
+                        _runGuardedAdminCommand(
+                          actionKey: 'expire_now',
+                          successLabel: "Raid clôturé (chrono à 0).",
+                          command: () => RaidAdminService.expireRaidNow(
+                              roomId: effectiveRoom),
+                        );
+                      },
+                    );
                   }),
                 ),
               ],
@@ -1158,25 +1305,43 @@ class _ProfileScreenState extends State<ProfileScreen>
             Row(
               children: [
                 Expanded(
-                  child: _compactButton("LANCER", const Color(0xFF00FF66),
-                      () async {
-                    await RaidAdminService.setRaidStatus('active',
-                        roomId: effectiveRoom);
+                  child: _compactButton("LANCER", const Color(0xFF00FF66), () {
+                    _runGuardedAdminCommand(
+                      actionKey: 'launch_raid',
+                      successLabel: "Raid lancé sur [$effectiveRoom] !",
+                      command: () => RaidAdminService.setRaidStatus('active',
+                          roomId: effectiveRoom),
+                    );
                   }),
                 ),
                 const SizedBox(width: 6),
                 Expanded(
-                  child: _compactButton("-200 PV", const Color(0xFFFF9100),
-                      () async {
-                    await RaidAdminService.strikeBoss(200,
-                        roomId: effectiveRoom);
+                  child: _compactButton("-200 PV", const Color(0xFFFF9100), () {
+                    _runGuardedAdminCommand(
+                      actionKey: 'strike_boss',
+                      successLabel: "-200 PV infligés au Boss.",
+                      command: () => RaidAdminService.strikeBoss(200,
+                          roomId: effectiveRoom),
+                    );
                   }),
                 ),
                 const SizedBox(width: 6),
                 Expanded(
-                  child: _compactButton("RESET BOSS", const Color(0xFFFF2E56),
-                      () async {
-                    await RaidAdminService.resetBoss(roomId: effectiveRoom);
+                  child: _compactButton("RESET BOSS", const Color(0xFFFF2E56), () {
+                    _confirmDestructiveAdminAction(
+                      title: "CONFIRMER RESET BOSS",
+                      message:
+                          "Remettre les PV du Boss au maximum et les scores à zéro sur [$effectiveRoom] ?",
+                      confirmLabel: "RÉINITIALISER",
+                      onConfirmed: () {
+                        _runGuardedAdminCommand(
+                          actionKey: 'reset_boss',
+                          successLabel: "Boss et scores réinitialisés.",
+                          command: () =>
+                              RaidAdminService.resetBoss(roomId: effectiveRoom),
+                        );
+                      },
+                    );
                   }),
                 ),
               ],
@@ -1195,7 +1360,15 @@ class _ProfileScreenState extends State<ProfileScreen>
                   ),
                 ),
                 TextButton.icon(
-                  onPressed: _deleteActiveRoom,
+                  onPressed: () {
+                    _confirmDestructiveAdminAction(
+                      title: "SUPPRIMER LA SALLE",
+                      message:
+                          "Supprimer définitivement le document [$effectiveRoom] dans Firestore ?",
+                      confirmLabel: "SUPPRIMER",
+                      onConfirmed: _deleteActiveRoom,
+                    );
+                  },
                   icon: const Icon(Icons.delete_forever,
                       color: Color(0xFFFF2E56), size: 14),
                   label: const Text(

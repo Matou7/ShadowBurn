@@ -107,7 +107,6 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
     _lastRoomActivityMs = DateTime.now().millisecondsSinceEpoch;
   }
 
-  /// Passe la salle en mode dormant sans .delete() (économie d'opérations de suppression).
   void _markDormantAndStopAllTimers() {
     _queueRetryTimer?.cancel();
     _raidSubscription?.cancel();
@@ -350,53 +349,21 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
     final ref =
         FirebaseFirestore.instance.collection('current_raids').doc(chosenRoom);
 
-    try {
-      final snap = await ref.get().timeout(_kFirestoreTimeout);
-      final Map<String, dynamic> initialMap = snap.exists
-          ? Map<String, dynamic>.from(snap.data() as Map? ?? {})
-          : {
-              'roomId': chosenRoom,
-              'status': 'waiting',
-              'preset_label': 'RAID STANDARD (5 000 PV)',
-              'current_hp': 5000,
-              'max_hp': 5000,
-              'hunters': [],
-              'logs': [],
-            };
+    if (!mounted || _isQuotaExhausted) return;
 
-      if (!mounted || _isQuotaExhausted) return;
+    setState(() {
+      _roomId = chosenRoom;
+      _instanceToken = myInstanceToken;
+      _adminKey = keyToUse;
+      _joinToken = tokenToUse;
+      _raidRef = ref;
+      _isAllocating = false;
+      _isWorldSaturated = false;
+      _isDespawnedForInactivity = false;
+    });
 
-      setState(() {
-        _roomId = chosenRoom;
-        _instanceToken = myInstanceToken;
-        _adminKey = keyToUse;
-        _joinToken = tokenToUse;
-        _raidRef = ref;
-        _raidData = initialMap;
-        _isRaidDataLoaded = true;
-        _isAllocating = false;
-        _isWorldSaturated = false;
-        _isDespawnedForInactivity = false;
-      });
-
-      final String currentSt = (initialMap['status'] ?? 'waiting').toString();
-      if (currentSt == 'active' ||
-          currentSt == 'victory' ||
-          currentSt == 'failed') {
-        _startListeningToRaid();
-      }
-    } catch (_) {
-      if (!mounted) return;
-      setState(() {
-        _roomId = chosenRoom;
-        _instanceToken = myInstanceToken;
-        _adminKey = keyToUse;
-        _joinToken = tokenToUse;
-        _raidRef = ref;
-        _isRaidDataLoaded = true;
-        _isAllocating = false;
-      });
-    }
+    // Écoute directe de la salle allouée pour recevoir immédiatement le clic LANCER de l'admin
+    _startListeningToRaid();
   }
 
   void _startListeningToRaid() {
@@ -481,8 +448,6 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
     });
   }
 
-  /// Sondage ciblé sur 6 salles aléatoires puis repli jusqu'à 100 salles max.
-  /// Aucune suppression (.delete()) : écrasement direct par .set().
   Future<String?> _claimNextAvailableRoomSlot(
     String instanceToken,
     String joinToken,
@@ -849,10 +814,6 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
 
     _currentRaidStatus = status;
     _currentBossHp = currentHp;
-
-    if (status == 'active' || status == 'victory' || status == 'failed') {
-      _startListeningToRaid();
-    }
 
     if (data.containsKey('target_end_time')) {
       _syncTargetTime(data['target_end_time']);
