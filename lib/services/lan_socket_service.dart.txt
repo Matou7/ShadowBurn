@@ -1,0 +1,91 @@
+// lib/services/lan_socket_service.dart
+
+import 'dart:async';
+import 'dart:convert';
+import 'package:flutter/foundation.dart';
+
+import 'lan_socket_stub.dart'
+    if (dart.library.html) 'lan_socket_web.dart'
+    if (dart.library.io) 'lan_socket_io.dart';
+
+class LanSocketService {
+  final _messagesController = StreamController>.broadcast();
+  final _statusController = StreamController<bool>.broadcast();
+  LanSocketTransport? _transport;
+  StreamSubscription<String>? _rawSub;
+  bool _isConnected = false;
+
+  Stream> get messages => _messagesController.stream;
+  Stream<bool> get connectionChanges => _statusController.stream;
+  bool get isConnected => _isConnected;
+
+  Future<bool> connect(String wsUrl) async {
+    await disconnect();
+    try {
+      final transport = createLanTransport(wsUrl);
+      await transport.connect();
+      _transport = transport;
+      _isConnected = true;
+      _statusController.add(true);
+
+      _rawSub = transport.incomingText.listen(
+        (raw) {
+          try {
+            final decoded = jsonDecode(raw);
+            if (decoded is Map<String, dynamic>) {
+              _messagesController.add(decoded);
+            } else if (decoded is Map) {
+              _messagesController.add(Map<String, dynamic>.from(decoded));
+            }
+          } catch (e) {
+            debugPrint("[LAN WS] JSON invalide reçu : $e");
+          }
+        },
+        onDone: () {
+          _isConnected = false;
+          _statusController.add(false);
+        },
+        onError: (_) {
+          _isConnected = false;
+          _statusController.add(false);
+        },
+      );
+      return true;
+    } catch (e) {
+      debugPrint("[LAN WS] Erreur connexion ($wsUrl) :$e");
+      _isConnected = false;
+      _statusController.add(false);
+      return false;
+    }
+  }
+
+  void sendJson(Map<String, dynamic> payload) {
+    final t = _transport;
+    if (t == null || !_isConnected) return;
+    try {
+      t.sendText(jsonEncode(payload));
+    } catch (e) {
+      debugPrint("[LAN WS] Erreur envoi : $e");
+    }
+  }
+
+  Future<void> disconnect() async {
+    await _rawSub?.cancel();
+    _rawSub = null;
+    final t = _transport;
+    _transport = null;
+    if (t != null) {
+      await t.close();
+    }
+    if (_isConnected) {
+      _isConnected = false;
+      _statusController.add(false);
+    }
+  }
+
+  void dispose() {
+    disconnect();
+    _messagesController.close();
+    _statusController.close();
+  }
+}

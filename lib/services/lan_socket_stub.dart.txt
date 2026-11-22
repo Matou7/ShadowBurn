@@ -1,0 +1,12 @@
+// lib/services/lan_socket_stub.dart
+
+abstract class LanSocketTransport {
+  Stream<String> get incomingText;
+  Future<void> connect();
+  void sendText(String data);
+  Future<void> close();
+}
+
+LanSocketTransport createLanTransport(String url) {
+  throw UnsupportedError("Transport WebSocket non supporté sur cette plateforme : $url");
+}

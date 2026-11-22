@@ -8,6 +8,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../services/audio_service.dart';
 import '../services/quota_guard_service.dart';
+import '../services/lan_socket_service.dart';
 import 'arena_web_helper_stub.dart' if (dart.library.html) 'arena_web_helper_web.dart';
 
 class ArenaTvScreen extends StatefulWidget {
@@ -26,6 +27,11 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
   DocumentReference? _raidRef;
   StreamSubscription? _raidSubscription;
 
+  bool _isLanMode = false;
+  String _lanWsUrl = 'ws://192.168.1.8:8765';
+  final LanSocketService _lanSocket = LanSocketService();
+  StreamSubscription>? _lanSub;
+
   Timer? _localTickTimer;
   Timer? _queueRetryTimer;
 
@@ -40,7 +46,6 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
   bool _isQuotaExhausted = false;
   bool _isDespawnedForInactivity = false;
   bool _isRadioPlaying = false;
-  bool _isSoloLocalMode = false;
 
   String _currentRaidStatus = 'waiting';
   double _currentBossHp = 5000.0;
@@ -55,17 +60,31 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
   static const int kRoomInactivityThresholdMs = 600000; // 10 minutes
   static const Duration _kFirestoreTimeout = Duration(seconds: 6);
 
-  bool _detectSoloUrl() {
-    final full = Uri.base.toString().toLowerCase();
-    final frag = Uri.base.fragment.toLowerCase();
-    return full.contains('solo=1') ||
-        full.contains('local=1') ||
-        full.contains('solo_local') ||
-        full.contains('/solo') ||
-        frag.contains('solo=1') ||
-        frag.contains('local=1') ||
-        frag.contains('solo_local') ||
-        frag.contains('/solo');
+  Map<String, String> _readUrlParams() {
+    String raw = Uri.base.toString();
+    try {
+      raw = Uri.decodeFull(raw);
+    } catch (_) {}
+
+    final Map<String, String> out = Map<String, String>.from(Uri.base.queryParameters);
+    if (raw.contains('#') && raw.split('#').last.contains('?')) {
+      try {
+        final fragQuery = raw.split('#').last.split('?').last;
+        out.addAll(Uri.splitQueryString(fragQuery));
+      } catch (_) {}
+    }
+
+    final lower = raw.toLowerCase();
+    if ((lower.contains('mode=lan') || lower.contains('ws=')) && !out.containsKey('mode')) {
+      out['mode'] = 'lan';
+    }
+    if (!out.containsKey('ws')) {
+      final wsMatch = RegExp(r'(?:^|[?&#])ws=([^&#]+)').firstMatch(lower);
+      if (wsMatch != null) {
+        out['ws'] = Uri.decodeComponent(wsMatch.group(1)!);
+      }
+    }
+    return out;
   }
 
   @override
@@ -83,7 +102,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
     _localTickTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (!mounted) return;
 
-      if (_isSoloLocalMode) {
+      if (_isLanMode) {
         if (_targetEndTimeMs > 0 &&
             _currentRaidStatus == 'active' &&
             _currentBossHp > 0) {
@@ -135,29 +154,24 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
     });
   }
 
-  void _initSoloLocalArena() {
+  Future<void> _connectLanTv(String roomId, String wsUrl) async {
     final nowMs = DateTime.now().millisecondsSinceEpoch;
-    final endMs = nowMs + 1800000; // 30 minutes par défaut en local
-
     setState(() {
-      _isSoloLocalMode = true;
-      _roomId = 'SOLO_LOCAL';
-      _adminKey = 'LOCAL';
-      _joinToken = 'LOCAL';
-      _targetEndTimeMs = endMs;
+      _isLanMode = true;
+      _lanWsUrl = wsUrl;
+      _roomId = roomId;
+      _targetEndTimeMs = nowMs + 1800000;
       _remainingSeconds = 1800;
-      _currentRaidStatus = 'active';
-      _currentBossHp = 5000.0;
       _raidData = {
-        'roomId': 'SOLO_LOCAL',
-        'status': 'active',
-        'preset_label': 'RAID SOLO LOCAL (5 000 PV)',
+        'roomId': roomId,
+        'status': 'waiting',
+        'preset_label': 'RAID LAN (5 000 PV)',
         'current_hp': 5000,
         'max_hp': 5000,
         'audio_playing': false,
         'hunters': [],
         'logs': [],
-        'target_end_time': endMs,
+        'target_end_time': nowMs + 1800000,
       };
       _isRaidDataLoaded = true;
       _isAllocating = false;
@@ -165,6 +179,33 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
       _isNightLockActive = false;
       _isQuotaExhausted = false;
     });
+
+    await _lanSub?.cancel();
+    _lanSub = _lanSocket.messages.listen((msg) {
+      if (!mounted) return;
+      if (msg['type'] == 'state') {
+        final endMs = (msg['target_end_time_ms'] as num?)?.toInt() ?? 0;
+        setState(() {
+          if (endMs > 0) {
+            _targetEndTimeMs = endMs;
+            final diff = (endMs - DateTime.now().millisecondsSinceEpoch) ~/ 1000;
+            _remainingSeconds = diff > 0 ? diff : 0;
+          }
+          _raidData = Map<String, dynamic>.from(msg);
+          _isRaidDataLoaded = true;
+        });
+      }
+    });
+
+    final ok = await _lanSocket.connect(wsUrl);
+    if (ok) {
+      _lanSocket.sendJson({
+        'type': 'join',
+        'roomId': roomId,
+        'hunterId': 'tv_${Random().nextInt(999999)}',
+        'name': 'Arena_TV',
+      });
+    }
   }
 
   void _recordActivity() {
@@ -181,7 +222,10 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
       AudioService.stopNrjStream();
     }
 
-    if (_isSoloLocalMode) return;
+    if (_isLanMode) {
+      _lanSocket.disconnect();
+      return;
+    }
 
     if (_raidRef != null && _lastKnownHunterCount > 0 && !_isQuotaExhausted) {
       _raidRef!.update({
@@ -214,7 +258,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
       _isRadioPlaying = false;
       AudioService.stopNrjStream();
     }
-    if (_isSoloLocalMode) return;
+    if (_isLanMode) return;
     if (_raidRef != null) {
       bool canWrite =
           await QuotaGuardService.checkAndIncrementWrite(isCriticalClosure: true);
@@ -240,9 +284,16 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    if (_detectSoloUrl()) {
-      if (!_isSoloLocalMode) {
-        _initSoloLocalArena();
+    final params = _readUrlParams();
+    final isLan = (params['mode']?.toLowerCase() == 'lan') ||
+        (params['ws'] != null && params['ws']!.isNotEmpty);
+
+    if (isLan) {
+      if (!_isLanMode) {
+        final room = (params['room'] ?? 'LAN_1').trim();
+        final wsUrl = (params['ws'] ?? 'ws://192.168.1.8:8765').trim();
+        _connectLanTv(room.isEmpty ? 'LAN_1' : room,
+            wsUrl.isEmpty ? 'ws://192.168.1.8:8765' : wsUrl);
       }
       return;
     }
@@ -274,11 +325,6 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
   }
 
   Future _resolveRoomAllocation() async {
-    if (_detectSoloUrl()) {
-      _initSoloLocalArena();
-      return;
-    }
-
     final now = DateTime.now();
     bool isNightClosed =
         (now.hour >= 0 && now.hour < 6) || (now.hour == 23 && now.minute >= 58);
@@ -445,10 +491,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
   }
 
   void _startListeningToRaid() {
-    if (_isSoloLocalMode ||
-        _raidSubscription != null ||
-        _raidRef == null ||
-        _isQuotaExhausted) {
+    if (_isLanMode || _raidSubscription != null || _raidRef == null || _isQuotaExhausted) {
       return;
     }
 
@@ -674,13 +717,15 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _localTickTimer?.cancel();
+    _lanSub?.cancel();
+    _lanSocket.dispose();
     _markDormantAndStopAllTimers();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_isNightLockActive && !_isSoloLocalMode) {
+    if (_isNightLockActive && !_isLanMode) {
       return Scaffold(
         backgroundColor: const Color(0xFF02070D),
         body: Center(
@@ -723,7 +768,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
       );
     }
 
-    if (_isQuotaExhausted && !_isSoloLocalMode) {
+    if (_isQuotaExhausted && !_isLanMode) {
       final Map data = _raidData;
       final double maxHp = ((data['max_hp'] ?? 5000) as num).toDouble();
       final double safeMax = maxHp > 0 ? maxHp : 5000.0;
@@ -774,7 +819,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
       );
     }
 
-    if (_isWorldSaturated && !_isSoloLocalMode) {
+    if (_isWorldSaturated && !_isLanMode) {
       return Scaffold(
         backgroundColor: const Color(0xFF02070D),
         body: Center(
@@ -817,7 +862,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
       );
     }
 
-    if (_isAllocating || (!_isSoloLocalMode && _raidRef == null) || !_isRaidDataLoaded) {
+    if (_isAllocating || (!_isLanMode && _raidRef == null) || !_isRaidDataLoaded) {
       return const Scaffold(
         backgroundColor: Color(0xFF02070D),
         body: Center(
@@ -896,7 +941,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
     _currentRaidStatus = status;
     _currentBossHp = currentHp;
 
-    if (data.containsKey('target_end_time')) {
+    if (!_isLanMode && data.containsKey('target_end_time')) {
       _syncTargetTime(data['target_end_time']);
     }
 
@@ -983,9 +1028,11 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
     final double hpRatio = (currentHp / safeMax).clamp(0.0, 1.0);
 
     Color themeColor = const Color(0xFF00E5FF);
-    String titleText = 'DONJON QUOTIDIEN [SALLE : ${_roomId ?? "HORS-LIGNE"}]';
+    String titleText = _isLanMode
+        ? 'DONJON LAN [SALLE : ${_roomId ?? "LAN_1"}] • ${_lanSocket.isConnected ? "WS OK" : "WS HORS-LIGNE"}'
+        : 'DONJON QUOTIDIEN [SALLE : ${_roomId ?? "HORS-LIGNE"}]';
 
-    if (_isQuotaExhausted) {
+    if (_isQuotaExhausted && !_isLanMode) {
       themeColor = const Color(0xFFFFD700);
       titleText = 'DONJON ÉPUISÉ — CLASSEMENT FINAL';
     } else if (isVictory) {
@@ -1051,10 +1098,10 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
                             borderRadius: BorderRadius.circular(4)),
                         padding: const EdgeInsets.symmetric(horizontal: 10),
                       ),
-                      onPressed: _isQuotaExhausted
+                      onPressed: (_isQuotaExhausted && !_isLanMode)
                           ? null
                           : () async {
-                              if (!_isSoloLocalMode) {
+                              if (!_isLanMode) {
                                 bool canWrite = await QuotaGuardService
                                     .checkAndIncrementWrite();
                                 if (!canWrite) {
@@ -1067,7 +1114,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
                               _isRadioPlaying = nextState;
                               bool playing = await AudioService.setNrjStreamState(
                                   nextState);
-                              if (!_isSoloLocalMode && _raidRef != null) {
+                              if (!_isLanMode && _raidRef != null) {
                                 await _raidRef!.update({
                                   'audio_playing': nextState,
                                   'last_activity_ms':
@@ -1399,13 +1446,10 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
           const SizedBox(height: 6),
           Expanded(
             child: logList.isEmpty
-                ? Center(
+                ? const Center(
                     child: Text(
-                      _isSoloLocalMode
-                          ? 'MODE SOLO LOCAL ACTIF : UTILISEZ LE PAD CHASSEUR LOCAL'
-                          : 'COMBAT COMMENCÉ : EN ATTENTE DU PREMIER ASSAUT',
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
+                      'COMBAT COMMENCÉ : EN ATTENTE DU PREMIER ASSAUT',
+                      style: TextStyle(
                           color: Colors.white38,
                           fontFamily: 'monospace',
                           fontSize: 11),
@@ -1807,8 +1851,8 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
 
   Widget _buildDynamicMaximizedQrPanel(String raidStatus,
       {required bool isVictory}) {
-    final String rawJoinUrl = _isSoloLocalMode
-        ? 'https://shadowburn-1d8f8.web.app/#/solo?room=SOLO_LOCAL&local=1&role=hunter'
+    final String rawJoinUrl = _isLanMode
+        ? 'http://192.168.1.8:8080/?mode=lan&role=hunter&room=$_roomId&ws=${Uri.encodeComponent(_lanWsUrl)}'
         : 'https://shadowburn-1d8f8.web.app/#/join?room=$_roomId&token=${_joinToken ?? ""}';
     final String rawAdminAppUrl =
         'shadowburn://admin?room=$_roomId&key=${_adminKey ?? ""}';
@@ -1833,7 +1877,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     Text(
-                      _isSoloLocalMode ? 'CHASSEUR SOLO' : 'SCAN CHASSEUR',
+                      _isLanMode ? 'SCAN CHASSEUR LAN' : 'SCAN CHASSEUR',
                       style: const TextStyle(
                           color: Color(0xFF00E5FF),
                           fontFamily: 'monospace',
@@ -1866,8 +1910,8 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      _isSoloLocalMode
-                          ? '(100 % Local)'
+                      _isLanMode
+                          ? '($_lanWsUrl)'
                           : (raidStatus == 'waiting'
                               ? '(En attente)'
                               : '(Actif)'),
@@ -1875,9 +1919,10 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
                           color: raidStatus == 'waiting'
                               ? Colors.white54
                               : const Color(0xFF00FF66),
-                          fontSize: 9,
+                          fontSize: 8,
                           fontFamily: 'monospace'),
                       textAlign: TextAlign.center,
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ],
                 ),

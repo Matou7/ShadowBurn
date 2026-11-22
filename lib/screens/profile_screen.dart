@@ -18,9 +18,11 @@ import '../providers/urgent_quest_provider.dart';
 import '../widgets/system_dialog.dart';
 import '../utils/admin_utils.dart';
 import '../services/raid_admin_service.dart';
+import '../services/lan_socket_service.dart';
 
-const String kSoloLocalTvUrl =
-    'https://shadowburn-1d8f8.web.app/#/solo?room=SOLO_LOCAL&local=1';
+const String kDefaultLanWsUrl = 'ws://192.168.1.8:8765';
+const String kDefaultLanTvBaseUrl = 'http://192.168.1.8:8080';
+const String kDefaultLanRoomId = 'LAN_1';
 
 class ProfileScreen extends StatefulWidget {
   final String? initialRoomId;
@@ -50,13 +52,17 @@ class _ProfileScreenState extends State<ProfileScreen>
   bool _isCheckingIntent = false;
   bool _isBindingInProgress = false;
 
-  /// Mode Solo 100 % local (0 appel Firestore)
-  bool _isLocalSoloMode = false;
-  int _localMaxHp = 5000;
-  int _localCurrentHp = 5000;
-  String _localRaidStatus = 'waiting';
-  int _localRemainingSeconds = 1800;
-  Timer? _localSoloTimer;
+  /// Mode LAN WebSocket (0 appel Firestore)
+  bool _isLanMode = false;
+  String _lanWsUrl = kDefaultLanWsUrl;
+  String _lanTvUrl =
+      '$kDefaultLanTvBaseUrl/?mode=lan&room=$kDefaultLanRoomId&ws=${Uri.encodeComponent(kDefaultLanWsUrl)}';
+  final LanSocketService _lanSocket = LanSocketService();
+  StreamSubscription>? _lanSub;
+  int _lanCurrentHp = 5000;
+  int _lanMaxHp = 5000;
+  String _lanStatus = 'waiting';
+  int _lanRemainingSeconds = 1800;
 
   /// Garde anti-spam locale (5s par action)
   final Map<String, int> _lastAdminActionMs = {};
@@ -69,6 +75,19 @@ class _ProfileScreenState extends State<ProfileScreen>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _initDeviceAdminSecurity();
+
+    _lanSub = _lanSocket.messages.listen((msg) {
+      if (!mounted) return;
+      if (msg['type'] == 'state') {
+        setState(() {
+          _lanMaxHp = ((msg['max_hp'] ?? _lanMaxHp) as num).toInt();
+          _lanCurrentHp = ((msg['current_hp'] ?? _lanCurrentHp) as num).toInt();
+          _lanStatus = (msg['status'] ?? _lanStatus).toString();
+          _lanRemainingSeconds =
+              ((msg['remaining_seconds'] ?? _lanRemainingSeconds) as num).toInt();
+        });
+      }
+    });
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) return;
@@ -89,47 +108,48 @@ class _ProfileScreenState extends State<ProfileScreen>
     });
   }
 
-  void _activateLocalSoloMode() {
-    _localSoloTimer?.cancel();
-    Clipboard.setData(const ClipboardData(text: kSoloLocalTvUrl));
-    setState(() {
-      _isLocalSoloMode = true;
-      _activeRoom = 'SOLO_LOCAL';
-      _verifiedKey = 'LOCAL';
-      _selectedHpPreset = 5000;
-      _localMaxHp = 5000;
-      _localCurrentHp = 5000;
-      _localRaidStatus = 'waiting';
-      _localRemainingSeconds = 1800;
-    });
+  Future<void> _activateLanMode() async {
+    final String tvUrl =
+        '$kDefaultLanTvBaseUrl/?mode=lan&room=$kDefaultLanRoomId&ws=${Uri.encodeComponent(_lanWsUrl)}';
+    await Clipboard.setData(ClipboardData(text: tvUrl));
 
-    _localSoloTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (!mounted) {
-        timer.cancel();
-        return;
-      }
-      if (_localRaidStatus == 'active' && _localRemainingSeconds > 0) {
-        setState(() {
-          _localRemainingSeconds--;
-          if (_localRemainingSeconds == 0 && _localCurrentHp > 0) {
-            _localRaidStatus = 'failed';
-          }
-        });
-      }
+    final bool connected = await _lanSocket.connect(_lanWsUrl);
+    if (connected) {
+      _lanSocket.sendJson({
+        'type': 'join',
+        'roomId': kDefaultLanRoomId,
+        'hunterId': _deviceAdminToken ?? 'admin_lan',
+        'name': 'Admin_LAN',
+      });
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _isLanMode = true;
+      _activeRoom = kDefaultLanRoomId;
+      _verifiedKey = 'LAN';
+      _lanTvUrl = tvUrl;
+      _lanMaxHp = 5000;
+      _lanCurrentHp = 5000;
+      _lanStatus = 'waiting';
+      _lanRemainingSeconds = 1800;
     });
 
     _scrollToRemoteConsole();
+
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text(
-            "SOLO MODE actif (0 réseau) ! URL TV copiée : $kSoloLocalTvUrl"),
-        backgroundColor: Color(0xFF00FF66),
-        duration: Duration(seconds: 3),
+      SnackBar(
+        content: Text(connected
+            ? "LAN connecté ($_lanWsUrl). Ouvrez sur la TV : $tvUrl"
+            : "Mode LAN prêt (serveur WS non joint). Ouvrez sur la TV : $tvUrl"),
+        backgroundColor:
+            connected ? const Color(0xFF00FF66) : const Color(0xFFFF9100),
+        duration: const Duration(seconds: 4),
       ),
     );
   }
 
-  String _formatLocalClock(int seconds) {
+  String _formatLanClock(int seconds) {
     final int m = (seconds ~/ 60).clamp(0, 999);
     final int s = (seconds % 60).clamp(0, 59);
     return "${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}";
@@ -156,12 +176,7 @@ class _ProfileScreenState extends State<ProfileScreen>
   }
 
   Future<void> _releaseAdminLease(String? roomId) async {
-    if (roomId == null ||
-        roomId.isEmpty ||
-        roomId == 'SOLO_LOCAL' ||
-        _deviceAdminToken == null) {
-      return;
-    }
+    if (roomId == null || roomId.isEmpty || _deviceAdminToken == null) return;
     try {
       final docRef =
           FirebaseFirestore.instance.collection('current_raids').doc(roomId);
@@ -180,7 +195,7 @@ class _ProfileScreenState extends State<ProfileScreen>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) {
+    if (state == AppLifecycleState.resumed && !_isLanMode) {
       _checkIncomingDeeplink();
     }
   }
@@ -340,8 +355,9 @@ class _ProfileScreenState extends State<ProfileScreen>
           RaidAdminService.raidPresets.any((p) => p['hp'] == rawMaxHp);
 
       if (!mounted) return;
+      await _lanSocket.disconnect();
       setState(() {
-        _isLocalSoloMode = false;
+        _isLanMode = false;
         _activeRoom = cleanRoomId;
         _verifiedKey = cleanKey;
         _selectedHpPreset = presetExists ? rawMaxHp : 5000;
@@ -377,7 +393,8 @@ class _ProfileScreenState extends State<ProfileScreen>
   Future<void> _runGuardedAdminCommand({
     required String actionKey,
     required String successLabel,
-    required void Function() localAction,
+    required Map<String, dynamic> lanPayload,
+    required void Function() lanOptimisticUpdate,
     required Future<String?> Function() remoteCommand,
   }) async {
     final int now = DateTime.now().millisecondsSinceEpoch;
@@ -399,8 +416,13 @@ class _ProfileScreenState extends State<ProfileScreen>
 
     _lastAdminActionMs[actionKey] = now;
 
-    if (_isLocalSoloMode) {
-      localAction();
+    if (_isLanMode) {
+      lanOptimisticUpdate();
+      _lanSocket.sendJson({
+        'roomId': _activeRoom ?? kDefaultLanRoomId,
+        'actorId': _deviceAdminToken ?? 'admin_lan',
+        ...lanPayload,
+      });
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -475,18 +497,21 @@ class _ProfileScreenState extends State<ProfileScreen>
   }
 
   void _unbindFromRoom(String reason) {
-    _localSoloTimer?.cancel();
+    final wasLan = _isLanMode;
     final roomToRelease = _activeRoom;
-    if (roomToRelease != null) {
+    if (!wasLan && roomToRelease != null) {
       _releaseAdminLease(roomToRelease);
+    }
+    if (wasLan) {
+      _lanSocket.disconnect();
     }
     if (!mounted) return;
     Provider.of<GameProvider>(context, listen: false).unpairAdminRoom();
     setState(() {
-      _isLocalSoloMode = false;
+      _isLanMode = false;
       _activeRoom = null;
       _verifiedKey = null;
-      _localRaidStatus = 'waiting';
+      _lanStatus = 'waiting';
     });
 
     ScaffoldMessenger.of(context).showSnackBar(
@@ -501,7 +526,8 @@ class _ProfileScreenState extends State<ProfileScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _localSoloTimer?.cancel();
+    _lanSub?.cancel();
+    _lanSocket.dispose();
     _scrollController.dispose();
     super.dispose();
   }
@@ -762,7 +788,7 @@ class _ProfileScreenState extends State<ProfileScreen>
     final Color borderBlue = systemBlue.withOpacity(0.5);
     final Color rankColor = game.isGodMode ? Colors.redAccent : Colors.white;
 
-    if (!_isLocalSoloMode &&
+    if (!_isLanMode &&
         game.isPro &&
         game.pairedAdminRoom != null &&
         game.pairedAdminRoom!.isNotEmpty &&
@@ -770,7 +796,7 @@ class _ProfileScreenState extends State<ProfileScreen>
         !_isBindingInProgress) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted &&
-            !_isLocalSoloMode &&
+            !_isLanMode &&
             _activeRoom != game.pairedAdminRoom &&
             !_isBindingInProgress) {
           _attemptSecureBinding(
@@ -1068,7 +1094,7 @@ class _ProfileScreenState extends State<ProfileScreen>
     }
 
     final String? effectiveRoom =
-        _isLocalSoloMode ? 'SOLO_LOCAL' : (_activeRoom ?? game.pairedAdminRoom);
+        _isLanMode ? (_activeRoom ?? kDefaultLanRoomId) : (_activeRoom ?? game.pairedAdminRoom);
     final bool hasActiveLink =
         effectiveRoom != null && effectiveRoom.trim().isNotEmpty;
 
@@ -1147,7 +1173,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                   ConstrainedBox(
                     constraints: const BoxConstraints(maxWidth: 320),
                     child: const Text(
-                      "Scannez le QR Code « TÉLÉCOMMANDE » sur l'écran TV ou lancez un entraînement local en Solo Mode.",
+                      "Choisissez LAN (serveur WebSocket Wi-Fi local) ou MULTI (scan QR Code & Firestore).",
                       textAlign: TextAlign.center,
                       style: TextStyle(
                         color: Colors.white54,
@@ -1157,56 +1183,58 @@ class _ProfileScreenState extends State<ProfileScreen>
                     ),
                   ),
                   const SizedBox(height: 14),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    alignment: WrapAlignment.center,
+                  Row(
                     children: [
-                      OutlinedButton.icon(
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: const Color(0xFFFF9100),
-                          backgroundColor:
-                              const Color(0xFFFF9100).withOpacity(0.08),
-                          side: const BorderSide(
-                              color: Color(0xFFFF9100), width: 1.2),
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 12, vertical: 8),
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(4)),
-                        ),
-                        icon: const Icon(Icons.sync, size: 15),
-                        label: Text(
-                          "ACTUALISER LE SCAN",
-                          style: GoogleFonts.orbitron(
-                            fontSize: 10,
-                            fontWeight: FontWeight.bold,
-                            letterSpacing: 0.8,
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: const Color(0xFF00FF66),
+                            backgroundColor:
+                                const Color(0xFF00FF66).withOpacity(0.08),
+                            side: const BorderSide(
+                                color: Color(0xFF00FF66), width: 1.2),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 10, vertical: 10),
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(4)),
                           ),
+                          icon: const Icon(Icons.wifi_tethering, size: 15),
+                          label: Text(
+                            "LAN",
+                            style: GoogleFonts.orbitron(
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                              letterSpacing: 1.1,
+                            ),
+                          ),
+                          onPressed: _activateLanMode,
                         ),
-                        onPressed: _checkIncomingDeeplink,
                       ),
-                      OutlinedButton.icon(
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: const Color(0xFF00FF66),
-                          backgroundColor:
-                              const Color(0xFF00FF66).withOpacity(0.08),
-                          side: const BorderSide(
-                              color: Color(0xFF00FF66), width: 1.2),
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 12, vertical: 8),
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(4)),
-                        ),
-                        icon: const Icon(Icons.person_outline, size: 15),
-                        label: Text(
-                          "SOLO MODE",
-                          style: GoogleFonts.orbitron(
-                            fontSize: 10,
-                            fontWeight: FontWeight.bold,
-                            letterSpacing: 0.8,
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: const Color(0xFFFF9100),
+                            backgroundColor:
+                                const Color(0xFFFF9100).withOpacity(0.08),
+                            side: const BorderSide(
+                                color: Color(0xFFFF9100), width: 1.2),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 10, vertical: 10),
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(4)),
                           ),
+                          icon: const Icon(Icons.qr_code_scanner, size: 15),
+                          label: Text(
+                            "MULTI",
+                            style: GoogleFonts.orbitron(
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                              letterSpacing: 1.1,
+                            ),
+                          ),
+                          onPressed: _checkIncomingDeeplink,
                         ),
-                        onPressed: _activateLocalSoloMode,
                       ),
                     ],
                   ),
@@ -1214,7 +1242,7 @@ class _ProfileScreenState extends State<ProfileScreen>
               ),
             ),
           ] else ...[
-            if (_isLocalSoloMode)
+            if (_isLanMode)
               Container(
                 width: double.infinity,
                 margin: const EdgeInsets.only(bottom: 10),
@@ -1227,7 +1255,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                 child: Column(
                   children: [
                     Text(
-                      "SOLO LOCAL • STATUT: ${_localRaidStatus.toUpperCase()} • BOSS: $_localCurrentHp / $_localMaxHp PV • ${_formatLocalClock(_localRemainingSeconds)}",
+                      "LAN WS • ${_lanSocket.isConnected ? 'CONNECTÉ' : 'HORS-LIGNE'} • STATUT: ${_lanStatus.toUpperCase()} • BOSS: $_lanCurrentHp / $_lanMaxHp PV • ${_formatLanClock(_lanRemainingSeconds)}",
                       textAlign: TextAlign.center,
                       style: const TextStyle(
                         color: Color(0xFF00FF66),
@@ -1239,19 +1267,18 @@ class _ProfileScreenState extends State<ProfileScreen>
                     const SizedBox(height: 6),
                     InkWell(
                       onTap: () {
-                        Clipboard.setData(
-                            const ClipboardData(text: kSoloLocalTvUrl));
+                        Clipboard.setData(ClipboardData(text: _lanTvUrl));
                         ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(
-                            content: Text("URL Solo TV copiée !"),
+                            content: Text("URL TV LAN copiée !"),
                             duration: Duration(seconds: 1),
                           ),
                         );
                       },
-                      child: const Text(
-                        "URL TV : $kSoloLocalTvUrl (toucher pour copier)",
+                      child: Text(
+                        "Ouvrir sur la TV : $_lanTvUrl\n(Toucher pour copier l'adresse TV)",
                         textAlign: TextAlign.center,
-                        style: TextStyle(
+                        style: const TextStyle(
                           color: Color(0xFF00E5FF),
                           fontFamily: 'monospace',
                           fontSize: 9,
@@ -1305,11 +1332,17 @@ class _ProfileScreenState extends State<ProfileScreen>
                       await _runGuardedAdminCommand(
                         actionKey: 'preset',
                         successLabel: "Boss configuré : ${selected['label']}",
-                        localAction: () {
+                        lanPayload: {
+                          'type': 'admin',
+                          'command': 'set_preset',
+                          'maxHp': newHp,
+                          'label': selected['label'].toString(),
+                        },
+                        lanOptimisticUpdate: () {
                           setState(() {
                             _selectedHpPreset = newHp;
-                            _localMaxHp = newHp;
-                            _localCurrentHp = newHp;
+                            _lanMaxHp = newHp;
+                            _lanCurrentHp = newHp;
                           });
                         },
                         remoteCommand: () => RaidAdminService.applyPreset(
@@ -1342,8 +1375,13 @@ class _ProfileScreenState extends State<ProfileScreen>
                     _runGuardedAdminCommand(
                       actionKey: 'extend_time',
                       successLabel: "+1 minute ajoutée.",
-                      localAction: () =>
-                          setState(() => _localRemainingSeconds += 60),
+                      lanPayload: {
+                        'type': 'admin',
+                        'command': 'add_minutes',
+                        'minutes': 1,
+                      },
+                      lanOptimisticUpdate: () =>
+                          setState(() => _lanRemainingSeconds += 60),
                       remoteCommand: () => RaidAdminService.extendRaidMinutes(1,
                           roomId: effectiveRoom),
                     );
@@ -1355,8 +1393,13 @@ class _ProfileScreenState extends State<ProfileScreen>
                     _runGuardedAdminCommand(
                       actionKey: 'extend_time',
                       successLabel: "+15 minutes ajoutées.",
-                      localAction: () =>
-                          setState(() => _localRemainingSeconds += 900),
+                      lanPayload: {
+                        'type': 'admin',
+                        'command': 'add_minutes',
+                        'minutes': 15,
+                      },
+                      lanOptimisticUpdate: () =>
+                          setState(() => _lanRemainingSeconds += 900),
                       remoteCommand: () => RaidAdminService.extendRaidMinutes(15,
                           roomId: effectiveRoom),
                     );
@@ -1368,8 +1411,13 @@ class _ProfileScreenState extends State<ProfileScreen>
                     _runGuardedAdminCommand(
                       actionKey: 'extend_time',
                       successLabel: "+30 minutes ajoutées.",
-                      localAction: () =>
-                          setState(() => _localRemainingSeconds += 1800),
+                      lanPayload: {
+                        'type': 'admin',
+                        'command': 'add_minutes',
+                        'minutes': 30,
+                      },
+                      lanOptimisticUpdate: () =>
+                          setState(() => _lanRemainingSeconds += 1800),
                       remoteCommand: () => RaidAdminService.extendRaidMinutes(30,
                           roomId: effectiveRoom),
                     );
@@ -1385,9 +1433,14 @@ class _ProfileScreenState extends State<ProfileScreen>
                     _runGuardedAdminCommand(
                       actionKey: 'reduce_time',
                       successLabel: "-1 minute retirée.",
-                      localAction: () => setState(() =>
-                          _localRemainingSeconds =
-                              (_localRemainingSeconds - 60).clamp(0, 999999)),
+                      lanPayload: {
+                        'type': 'admin',
+                        'command': 'add_minutes',
+                        'minutes': -1,
+                      },
+                      lanOptimisticUpdate: () => setState(() =>
+                          _lanRemainingSeconds =
+                              (_lanRemainingSeconds - 60).clamp(0, 999999)),
                       remoteCommand: () => RaidAdminService.reduceRaidMinutes(1,
                           roomId: effectiveRoom),
                     );
@@ -1399,9 +1452,14 @@ class _ProfileScreenState extends State<ProfileScreen>
                     _runGuardedAdminCommand(
                       actionKey: 'reduce_time',
                       successLabel: "-15 minutes retirées.",
-                      localAction: () => setState(() =>
-                          _localRemainingSeconds =
-                              (_localRemainingSeconds - 900).clamp(0, 999999)),
+                      lanPayload: {
+                        'type': 'admin',
+                        'command': 'add_minutes',
+                        'minutes': -15,
+                      },
+                      lanOptimisticUpdate: () => setState(() =>
+                          _lanRemainingSeconds =
+                              (_lanRemainingSeconds - 900).clamp(0, 999999)),
                       remoteCommand: () => RaidAdminService.reduceRaidMinutes(15,
                           roomId: effectiveRoom),
                     );
@@ -1413,9 +1471,14 @@ class _ProfileScreenState extends State<ProfileScreen>
                     _runGuardedAdminCommand(
                       actionKey: 'reduce_time',
                       successLabel: "-30 minutes retirées.",
-                      localAction: () => setState(() =>
-                          _localRemainingSeconds =
-                              (_localRemainingSeconds - 1800).clamp(0, 999999)),
+                      lanPayload: {
+                        'type': 'admin',
+                        'command': 'add_minutes',
+                        'minutes': -30,
+                      },
+                      lanOptimisticUpdate: () => setState(() =>
+                          _lanRemainingSeconds =
+                              (_lanRemainingSeconds - 1800).clamp(0, 999999)),
                       remoteCommand: () => RaidAdminService.reduceRaidMinutes(30,
                           roomId: effectiveRoom),
                     );
@@ -1436,9 +1499,13 @@ class _ProfileScreenState extends State<ProfileScreen>
                     _runGuardedAdminCommand(
                       actionKey: 'expire_now',
                       successLabel: "Raid clôturé (chrono à 0).",
-                      localAction: () => setState(() {
-                        _localRemainingSeconds = 0;
-                        _localRaidStatus = 'failed';
+                      lanPayload: {
+                        'type': 'admin',
+                        'command': 'expire_now',
+                      },
+                      lanOptimisticUpdate: () => setState(() {
+                        _lanRemainingSeconds = 0;
+                        _lanStatus = 'failed';
                       }),
                       remoteCommand: () =>
                           RaidAdminService.expireRaidNow(roomId: effectiveRoom),
@@ -1463,8 +1530,12 @@ class _ProfileScreenState extends State<ProfileScreen>
                     _runGuardedAdminCommand(
                       actionKey: 'launch_raid',
                       successLabel: "Raid lancé sur [$effectiveRoom] !",
-                      localAction: () =>
-                          setState(() => _localRaidStatus = 'active'),
+                      lanPayload: {
+                        'type': 'admin',
+                        'command': 'start',
+                      },
+                      lanOptimisticUpdate: () =>
+                          setState(() => _lanStatus = 'active'),
                       remoteCommand: () => RaidAdminService.setRaidStatus(
                           'active',
                           roomId: effectiveRoom),
@@ -1477,11 +1548,16 @@ class _ProfileScreenState extends State<ProfileScreen>
                     _runGuardedAdminCommand(
                       actionKey: 'strike_boss',
                       successLabel: "-200 PV infligés au Boss.",
-                      localAction: () => setState(() {
-                        _localCurrentHp =
-                            (_localCurrentHp - 200).clamp(0, _localMaxHp);
-                        if (_localCurrentHp <= 0) {
-                          _localRaidStatus = 'victory';
+                      lanPayload: {
+                        'type': 'admin',
+                        'command': 'strike_boss',
+                        'damage': 200,
+                      },
+                      lanOptimisticUpdate: () => setState(() {
+                        _lanCurrentHp =
+                            (_lanCurrentHp - 200).clamp(0, _lanMaxHp);
+                        if (_lanCurrentHp <= 0) {
+                          _lanStatus = 'victory';
                         }
                       }),
                       remoteCommand: () => RaidAdminService.strikeBoss(200,
@@ -1501,9 +1577,13 @@ class _ProfileScreenState extends State<ProfileScreen>
                         _runGuardedAdminCommand(
                           actionKey: 'reset_boss',
                           successLabel: "Boss et scores réinitialisés.",
-                          localAction: () => setState(() {
-                            _localCurrentHp = _localMaxHp;
-                            _localRaidStatus = 'active';
+                          lanPayload: {
+                            'type': 'admin',
+                            'command': 'reset_boss',
+                          },
+                          lanOptimisticUpdate: () => setState(() {
+                            _lanCurrentHp = _lanMaxHp;
+                            _lanStatus = 'active';
                           }),
                           remoteCommand: () =>
                               RaidAdminService.resetBoss(roomId: effectiveRoom),
