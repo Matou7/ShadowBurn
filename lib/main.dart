@@ -33,9 +33,9 @@ import 'widgets/penalty_overlay.dart';
 import 'widgets/dungeon_result_overlay.dart';
 
 const bool kForceDungeonOnBoot = false;
-const bool kForceDungeonRed    = false;
+const bool kForceDungeonRed = false;
 const bool kForcePenaltyOnBoot = false;
-const bool kForceIntroOnBoot   = false;
+const bool kForceIntroOnBoot = false;
 
 final GlobalKey<NavigatorState> rootNavigatorKey = GlobalKey<NavigatorState>();
 
@@ -108,8 +108,7 @@ void main() async {
   }
 
   final prefs = await SharedPreferences.getInstance();
-  final bool introAlreadyDone =
-      prefs.getBool('has_completed_intro') ?? false;
+  final bool introAlreadyDone = prefs.getBool('has_completed_intro') ?? false;
 
   final Map<String, dynamic>? godSave = await SandboxManager.loadSandbox();
   final bool isPersistentGod =

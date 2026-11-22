@@ -23,14 +23,13 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
   String? _roomId;
   String? _adminKey;
   String? _joinToken;
-  String? _instanceToken;
   DocumentReference? _raidRef;
   StreamSubscription? _raidSubscription;
 
   bool _isLanMode = false;
   String _lanWsUrl = 'ws://192.168.1.8:8765';
   final LanSocketService _lanSocket = LanSocketService();
-  StreamSubscription>? _lanSub;
+  StreamSubscription? _lanSub;
 
   Timer? _localTickTimer;
   Timer? _queueRetryTimer;
@@ -57,7 +56,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
 
   static const int kMaxGlobalRooms = 100;
   static const int kMaxHuntersPerRoom = 10;
-  static const int kRoomInactivityThresholdMs = 600000; // 10 minutes
+  static const int kRoomInactivityThresholdMs = 600000;
   static const Duration _kFirestoreTimeout = Duration(seconds: 6);
 
   Map<String, String> _readUrlParams() {
@@ -66,7 +65,8 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
       raw = Uri.decodeFull(raw);
     } catch (_) {}
 
-    final Map<String, String> out = Map<String, String>.from(Uri.base.queryParameters);
+    final Map<String, String> out =
+        Map<String, String>.from(Uri.base.queryParameters);
     if (raw.contains('#') && raw.split('#').last.contains('?')) {
       try {
         final fragQuery = raw.split('#').last.split('?').last;
@@ -75,7 +75,8 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
     }
 
     final lower = raw.toLowerCase();
-    if ((lower.contains('mode=lan') || lower.contains('ws=')) && !out.containsKey('mode')) {
+    if ((lower.contains('mode=lan') || lower.contains('ws=')) &&
+        !out.containsKey('mode')) {
       out['mode'] = 'lan';
     }
     if (!out.containsKey('ws')) {
@@ -188,7 +189,8 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
         setState(() {
           if (endMs > 0) {
             _targetEndTimeMs = endMs;
-            final diff = (endMs - DateTime.now().millisecondsSinceEpoch) ~/ 1000;
+            final diff =
+                (endMs - DateTime.now().millisecondsSinceEpoch) ~/ 1000;
             _remainingSeconds = diff > 0 ? diff : 0;
           }
           _raidData = Map<String, dynamic>.from(msg);
@@ -478,7 +480,6 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
 
     setState(() {
       _roomId = chosenRoom;
-      _instanceToken = myInstanceToken;
       _adminKey = keyToUse;
       _joinToken = tokenToUse;
       _raidRef = ref;
@@ -491,7 +492,10 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
   }
 
   void _startListeningToRaid() {
-    if (_isLanMode || _raidSubscription != null || _raidRef == null || _isQuotaExhausted) {
+    if (_isLanMode ||
+        _raidSubscription != null ||
+        _raidRef == null ||
+        _isQuotaExhausted) {
       return;
     }
 
@@ -772,8 +776,9 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
       final Map data = _raidData;
       final double maxHp = ((data['max_hp'] ?? 5000) as num).toDouble();
       final double safeMax = maxHp > 0 ? maxHp : 5000.0;
-      final double currentHp =
-          ((data['current_hp'] ?? safeMax) as num).toDouble().clamp(0.0, safeMax);
+      final double currentHp = ((data['current_hp'] ?? safeMax) as num)
+          .toDouble()
+          .clamp(0.0, safeMax);
       final String presetLabel =
           (data['preset_label'] ?? 'RAID STANDARD (5 000 PV)').toString();
       final dynamic rawHunters = data['hunters'];
@@ -1112,8 +1117,9 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
 
                               final bool nextState = !_isRadioPlaying;
                               _isRadioPlaying = nextState;
-                              bool playing = await AudioService.setNrjStreamState(
-                                  nextState);
+                              bool playing =
+                                  await AudioService.setNrjStreamState(
+                                      nextState);
                               if (!_isLanMode && _raidRef != null) {
                                 await _raidRef!.update({
                                   'audio_playing': nextState,

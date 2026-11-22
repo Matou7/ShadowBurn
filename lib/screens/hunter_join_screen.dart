@@ -49,7 +49,7 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
   bool _isLanMode = false;
   String _lanWsUrl = 'ws://192.168.1.8:8765';
   final LanSocketService _lanSocket = LanSocketService();
-  StreamSubscription>? _lanSub;
+  StreamSubscription? _lanSub;
 
   bool _isCheckingToken = true;
   bool _isTokenValid = false;
@@ -847,7 +847,8 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
       });
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(feedback.isNotEmpty ? feedback : "-$damage PV envoyés en LAN !"),
+          content: Text(
+              feedback.isNotEmpty ? feedback : "-$damage PV envoyés en LAN !"),
           backgroundColor:
               glowEffect ? const Color(0xFFFF2E56) : const Color(0xFF00FF66),
           duration: const Duration(milliseconds: 900),

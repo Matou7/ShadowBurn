@@ -39,8 +39,8 @@ class _ProfileScreenState extends State<ProfileScreen>
   static const MethodChannel _intentChannel =
       MethodChannel('com.shadowburn.app/lock');
 
-  static const int _kAdminLeaseDurationMs = 600000; // 10 minutes
-  static const int _kAdminCommandCooldownMs = 5000; // 5 secondes anti-spam
+  static const int _kAdminLeaseDurationMs = 600000;
+  static const int _kAdminCommandCooldownMs = 5000;
   static const Duration _kFirestoreTimeout = Duration(seconds: 6);
 
   final ScrollController _scrollController = ScrollController();
@@ -52,19 +52,17 @@ class _ProfileScreenState extends State<ProfileScreen>
   bool _isCheckingIntent = false;
   bool _isBindingInProgress = false;
 
-  /// Mode LAN WebSocket (0 appel Firestore)
   bool _isLanMode = false;
-  String _lanWsUrl = kDefaultLanWsUrl;
+  final String _lanWsUrl = kDefaultLanWsUrl;
   String _lanTvUrl =
       '$kDefaultLanTvBaseUrl/?mode=lan&room=$kDefaultLanRoomId&ws=${Uri.encodeComponent(kDefaultLanWsUrl)}';
   final LanSocketService _lanSocket = LanSocketService();
-  StreamSubscription>? _lanSub;
+  StreamSubscription? _lanSub;
   int _lanCurrentHp = 5000;
   int _lanMaxHp = 5000;
   String _lanStatus = 'waiting';
   int _lanRemainingSeconds = 1800;
 
-  /// Garde anti-spam locale (5s par action)
   final Map<String, int> _lastAdminActionMs = {};
 
   static String? _deviceAdminToken;
@@ -1093,8 +1091,9 @@ class _ProfileScreenState extends State<ProfileScreen>
       );
     }
 
-    final String? effectiveRoom =
-        _isLanMode ? (_activeRoom ?? kDefaultLanRoomId) : (_activeRoom ?? game.pairedAdminRoom);
+    final String? effectiveRoom = _isLanMode
+        ? (_activeRoom ?? kDefaultLanRoomId)
+        : (_activeRoom ?? game.pairedAdminRoom);
     final bool hasActiveLink =
         effectiveRoom != null && effectiveRoom.trim().isNotEmpty;
 
