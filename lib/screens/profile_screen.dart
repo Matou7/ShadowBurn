@@ -19,6 +19,9 @@ import '../widgets/system_dialog.dart';
 import '../utils/admin_utils.dart';
 import '../services/raid_admin_service.dart';
 
+const String kSoloLocalTvUrl =
+    'https://shadowburn-1d8f8.web.app/#/solo?room=SOLO_LOCAL&local=1';
+
 class ProfileScreen extends StatefulWidget {
   final String? initialRoomId;
   final String? initialKey;
@@ -46,6 +49,14 @@ class _ProfileScreenState extends State<ProfileScreen>
   int _selectedHpPreset = 5000;
   bool _isCheckingIntent = false;
   bool _isBindingInProgress = false;
+
+  /// Mode Solo 100 % local (0 appel Firestore)
+  bool _isLocalSoloMode = false;
+  int _localMaxHp = 5000;
+  int _localCurrentHp = 5000;
+  String _localRaidStatus = 'waiting';
+  int _localRemainingSeconds = 1800;
+  Timer? _localSoloTimer;
 
   /// Garde anti-spam locale (5s par action)
   final Map<String, int> _lastAdminActionMs = {};
@@ -78,6 +89,52 @@ class _ProfileScreenState extends State<ProfileScreen>
     });
   }
 
+  void _activateLocalSoloMode() {
+    _localSoloTimer?.cancel();
+    Clipboard.setData(const ClipboardData(text: kSoloLocalTvUrl));
+    setState(() {
+      _isLocalSoloMode = true;
+      _activeRoom = 'SOLO_LOCAL';
+      _verifiedKey = 'LOCAL';
+      _selectedHpPreset = 5000;
+      _localMaxHp = 5000;
+      _localCurrentHp = 5000;
+      _localRaidStatus = 'waiting';
+      _localRemainingSeconds = 1800;
+    });
+
+    _localSoloTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      if (_localRaidStatus == 'active' && _localRemainingSeconds > 0) {
+        setState(() {
+          _localRemainingSeconds--;
+          if (_localRemainingSeconds == 0 && _localCurrentHp > 0) {
+            _localRaidStatus = 'failed';
+          }
+        });
+      }
+    });
+
+    _scrollToRemoteConsole();
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+            "SOLO MODE actif (0 réseau) ! URL TV copiée : $kSoloLocalTvUrl"),
+        backgroundColor: Color(0xFF00FF66),
+        duration: Duration(seconds: 3),
+      ),
+    );
+  }
+
+  String _formatLocalClock(int seconds) {
+    final int m = (seconds ~/ 60).clamp(0, 999);
+    final int s = (seconds % 60).clamp(0, 59);
+    return "${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}";
+  }
+
   Future<void> _initDeviceAdminSecurity() async {
     final prefs = await SharedPreferences.getInstance();
 
@@ -99,7 +156,12 @@ class _ProfileScreenState extends State<ProfileScreen>
   }
 
   Future<void> _releaseAdminLease(String? roomId) async {
-    if (roomId == null || roomId.isEmpty || _deviceAdminToken == null) return;
+    if (roomId == null ||
+        roomId.isEmpty ||
+        roomId == 'SOLO_LOCAL' ||
+        _deviceAdminToken == null) {
+      return;
+    }
     try {
       final docRef =
           FirebaseFirestore.instance.collection('current_raids').doc(roomId);
@@ -279,6 +341,7 @@ class _ProfileScreenState extends State<ProfileScreen>
 
       if (!mounted) return;
       setState(() {
+        _isLocalSoloMode = false;
         _activeRoom = cleanRoomId;
         _verifiedKey = cleanKey;
         _selectedHpPreset = presetExists ? rawMaxHp : 5000;
@@ -311,11 +374,11 @@ class _ProfileScreenState extends State<ProfileScreen>
     }
   }
 
-  /// Exécute une commande admin avec anti-spam local 5s et retour visuel immédiat.
   Future<void> _runGuardedAdminCommand({
     required String actionKey,
     required String successLabel,
-    required Future<String?> Function() command,
+    required void Function() localAction,
+    required Future<String?> Function() remoteCommand,
   }) async {
     final int now = DateTime.now().millisecondsSinceEpoch;
     final int prev = _lastAdminActionMs[actionKey] ?? 0;
@@ -335,7 +398,22 @@ class _ProfileScreenState extends State<ProfileScreen>
     }
 
     _lastAdminActionMs[actionKey] = now;
-    final String? error = await command();
+
+    if (_isLocalSoloMode) {
+      localAction();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(successLabel),
+            backgroundColor: const Color(0xFF00FF66),
+            duration: const Duration(milliseconds: 900),
+          ),
+        );
+      }
+      return;
+    }
+
+    final String? error = await remoteCommand();
     if (!mounted) return;
 
     if (error != null) {
@@ -357,7 +435,6 @@ class _ProfileScreenState extends State<ProfileScreen>
     }
   }
 
-  /// Double confirmation locale sur les actions destructives (Reset à 0, Reset Boss).
   void _confirmDestructiveAdminAction({
     required String title,
     required String message,
@@ -398,6 +475,7 @@ class _ProfileScreenState extends State<ProfileScreen>
   }
 
   void _unbindFromRoom(String reason) {
+    _localSoloTimer?.cancel();
     final roomToRelease = _activeRoom;
     if (roomToRelease != null) {
       _releaseAdminLease(roomToRelease);
@@ -405,8 +483,10 @@ class _ProfileScreenState extends State<ProfileScreen>
     if (!mounted) return;
     Provider.of<GameProvider>(context, listen: false).unpairAdminRoom();
     setState(() {
+      _isLocalSoloMode = false;
       _activeRoom = null;
       _verifiedKey = null;
+      _localRaidStatus = 'waiting';
     });
 
     ScaffoldMessenger.of(context).showSnackBar(
@@ -421,6 +501,7 @@ class _ProfileScreenState extends State<ProfileScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _localSoloTimer?.cancel();
     _scrollController.dispose();
     super.dispose();
   }
@@ -681,13 +762,15 @@ class _ProfileScreenState extends State<ProfileScreen>
     final Color borderBlue = systemBlue.withOpacity(0.5);
     final Color rankColor = game.isGodMode ? Colors.redAccent : Colors.white;
 
-    if (game.isPro &&
+    if (!_isLocalSoloMode &&
+        game.isPro &&
         game.pairedAdminRoom != null &&
         game.pairedAdminRoom!.isNotEmpty &&
         _activeRoom != game.pairedAdminRoom &&
         !_isBindingInProgress) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted &&
+            !_isLocalSoloMode &&
             _activeRoom != game.pairedAdminRoom &&
             !_isBindingInProgress) {
           _attemptSecureBinding(
@@ -984,7 +1067,8 @@ class _ProfileScreenState extends State<ProfileScreen>
       );
     }
 
-    final String? effectiveRoom = _activeRoom ?? game.pairedAdminRoom;
+    final String? effectiveRoom =
+        _isLocalSoloMode ? 'SOLO_LOCAL' : (_activeRoom ?? game.pairedAdminRoom);
     final bool hasActiveLink =
         effectiveRoom != null && effectiveRoom.trim().isNotEmpty;
 
@@ -1063,7 +1147,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                   ConstrainedBox(
                     constraints: const BoxConstraints(maxWidth: 320),
                     child: const Text(
-                      "Scannez le QR Code « TÉLÉCOMMANDE » sur l'écran TV pour ouvrir directement l'application et activer la salle.",
+                      "Scannez le QR Code « TÉLÉCOMMANDE » sur l'écran TV ou lancez un entraînement local en Solo Mode.",
                       textAlign: TextAlign.center,
                       style: TextStyle(
                         color: Colors.white54,
@@ -1073,32 +1157,111 @@ class _ProfileScreenState extends State<ProfileScreen>
                     ),
                   ),
                   const SizedBox(height: 14),
-                  OutlinedButton.icon(
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: const Color(0xFFFF9100),
-                      backgroundColor: const Color(0xFFFF9100).withOpacity(0.08),
-                      side:
-                          const BorderSide(color: Color(0xFFFF9100), width: 1.2),
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 16, vertical: 8),
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(4)),
-                    ),
-                    icon: const Icon(Icons.sync, size: 16),
-                    label: Text(
-                      "ACTUALISER LE SCAN",
-                      style: GoogleFonts.orbitron(
-                        fontSize: 11,
-                        fontWeight: FontWeight.bold,
-                        letterSpacing: 1.1,
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    alignment: WrapAlignment.center,
+                    children: [
+                      OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: const Color(0xFFFF9100),
+                          backgroundColor:
+                              const Color(0xFFFF9100).withOpacity(0.08),
+                          side: const BorderSide(
+                              color: Color(0xFFFF9100), width: 1.2),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 8),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(4)),
+                        ),
+                        icon: const Icon(Icons.sync, size: 15),
+                        label: Text(
+                          "ACTUALISER LE SCAN",
+                          style: GoogleFonts.orbitron(
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                            letterSpacing: 0.8,
+                          ),
+                        ),
+                        onPressed: _checkIncomingDeeplink,
                       ),
-                    ),
-                    onPressed: _checkIncomingDeeplink,
+                      OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: const Color(0xFF00FF66),
+                          backgroundColor:
+                              const Color(0xFF00FF66).withOpacity(0.08),
+                          side: const BorderSide(
+                              color: Color(0xFF00FF66), width: 1.2),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 8),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(4)),
+                        ),
+                        icon: const Icon(Icons.person_outline, size: 15),
+                        label: Text(
+                          "SOLO MODE",
+                          style: GoogleFonts.orbitron(
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                            letterSpacing: 0.8,
+                          ),
+                        ),
+                        onPressed: _activateLocalSoloMode,
+                      ),
+                    ],
                   ),
                 ],
               ),
             ),
           ] else ...[
+            if (_isLocalSoloMode)
+              Container(
+                width: double.infinity,
+                margin: const EdgeInsets.only(bottom: 10),
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF00FF66).withOpacity(0.08),
+                  border: Border.all(color: const Color(0xFF00FF66)),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Column(
+                  children: [
+                    Text(
+                      "SOLO LOCAL • STATUT: ${_localRaidStatus.toUpperCase()} • BOSS: $_localCurrentHp / $_localMaxHp PV • ${_formatLocalClock(_localRemainingSeconds)}",
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        color: Color(0xFF00FF66),
+                        fontFamily: 'monospace',
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    InkWell(
+                      onTap: () {
+                        Clipboard.setData(
+                            const ClipboardData(text: kSoloLocalTvUrl));
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text("URL Solo TV copiée !"),
+                            duration: Duration(seconds: 1),
+                          ),
+                        );
+                      },
+                      child: const Text(
+                        "URL TV : $kSoloLocalTvUrl (toucher pour copier)",
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: Color(0xFF00E5FF),
+                          fontFamily: 'monospace',
+                          fontSize: 9,
+                          decoration: TextDecoration.underline,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             Align(
               alignment: Alignment.centerLeft,
               child: Text(
@@ -1142,7 +1305,14 @@ class _ProfileScreenState extends State<ProfileScreen>
                       await _runGuardedAdminCommand(
                         actionKey: 'preset',
                         successLabel: "Boss configuré : ${selected['label']}",
-                        command: () => RaidAdminService.applyPreset(
+                        localAction: () {
+                          setState(() {
+                            _selectedHpPreset = newHp;
+                            _localMaxHp = newHp;
+                            _localCurrentHp = newHp;
+                          });
+                        },
+                        remoteCommand: () => RaidAdminService.applyPreset(
                           newHp,
                           selected['label'] as String,
                           roomId: effectiveRoom,
@@ -1172,7 +1342,9 @@ class _ProfileScreenState extends State<ProfileScreen>
                     _runGuardedAdminCommand(
                       actionKey: 'extend_time',
                       successLabel: "+1 minute ajoutée.",
-                      command: () => RaidAdminService.extendRaidMinutes(1,
+                      localAction: () =>
+                          setState(() => _localRemainingSeconds += 60),
+                      remoteCommand: () => RaidAdminService.extendRaidMinutes(1,
                           roomId: effectiveRoom),
                     );
                   }),
@@ -1183,7 +1355,9 @@ class _ProfileScreenState extends State<ProfileScreen>
                     _runGuardedAdminCommand(
                       actionKey: 'extend_time',
                       successLabel: "+15 minutes ajoutées.",
-                      command: () => RaidAdminService.extendRaidMinutes(15,
+                      localAction: () =>
+                          setState(() => _localRemainingSeconds += 900),
+                      remoteCommand: () => RaidAdminService.extendRaidMinutes(15,
                           roomId: effectiveRoom),
                     );
                   }),
@@ -1194,7 +1368,9 @@ class _ProfileScreenState extends State<ProfileScreen>
                     _runGuardedAdminCommand(
                       actionKey: 'extend_time',
                       successLabel: "+30 minutes ajoutées.",
-                      command: () => RaidAdminService.extendRaidMinutes(30,
+                      localAction: () =>
+                          setState(() => _localRemainingSeconds += 1800),
+                      remoteCommand: () => RaidAdminService.extendRaidMinutes(30,
                           roomId: effectiveRoom),
                     );
                   }),
@@ -1209,7 +1385,10 @@ class _ProfileScreenState extends State<ProfileScreen>
                     _runGuardedAdminCommand(
                       actionKey: 'reduce_time',
                       successLabel: "-1 minute retirée.",
-                      command: () => RaidAdminService.reduceRaidMinutes(1,
+                      localAction: () => setState(() =>
+                          _localRemainingSeconds =
+                              (_localRemainingSeconds - 60).clamp(0, 999999)),
+                      remoteCommand: () => RaidAdminService.reduceRaidMinutes(1,
                           roomId: effectiveRoom),
                     );
                   }),
@@ -1220,7 +1399,10 @@ class _ProfileScreenState extends State<ProfileScreen>
                     _runGuardedAdminCommand(
                       actionKey: 'reduce_time',
                       successLabel: "-15 minutes retirées.",
-                      command: () => RaidAdminService.reduceRaidMinutes(15,
+                      localAction: () => setState(() =>
+                          _localRemainingSeconds =
+                              (_localRemainingSeconds - 900).clamp(0, 999999)),
+                      remoteCommand: () => RaidAdminService.reduceRaidMinutes(15,
                           roomId: effectiveRoom),
                     );
                   }),
@@ -1231,7 +1413,10 @@ class _ProfileScreenState extends State<ProfileScreen>
                     _runGuardedAdminCommand(
                       actionKey: 'reduce_time',
                       successLabel: "-30 minutes retirées.",
-                      command: () => RaidAdminService.reduceRaidMinutes(30,
+                      localAction: () => setState(() =>
+                          _localRemainingSeconds =
+                              (_localRemainingSeconds - 1800).clamp(0, 999999)),
+                      remoteCommand: () => RaidAdminService.reduceRaidMinutes(30,
                           roomId: effectiveRoom),
                     );
                   }),
@@ -1251,7 +1436,11 @@ class _ProfileScreenState extends State<ProfileScreen>
                     _runGuardedAdminCommand(
                       actionKey: 'expire_now',
                       successLabel: "Raid clôturé (chrono à 0).",
-                      command: () =>
+                      localAction: () => setState(() {
+                        _localRemainingSeconds = 0;
+                        _localRaidStatus = 'failed';
+                      }),
+                      remoteCommand: () =>
                           RaidAdminService.expireRaidNow(roomId: effectiveRoom),
                     );
                   },
@@ -1274,7 +1463,10 @@ class _ProfileScreenState extends State<ProfileScreen>
                     _runGuardedAdminCommand(
                       actionKey: 'launch_raid',
                       successLabel: "Raid lancé sur [$effectiveRoom] !",
-                      command: () => RaidAdminService.setRaidStatus('active',
+                      localAction: () =>
+                          setState(() => _localRaidStatus = 'active'),
+                      remoteCommand: () => RaidAdminService.setRaidStatus(
+                          'active',
                           roomId: effectiveRoom),
                     );
                   }),
@@ -1285,7 +1477,14 @@ class _ProfileScreenState extends State<ProfileScreen>
                     _runGuardedAdminCommand(
                       actionKey: 'strike_boss',
                       successLabel: "-200 PV infligés au Boss.",
-                      command: () => RaidAdminService.strikeBoss(200,
+                      localAction: () => setState(() {
+                        _localCurrentHp =
+                            (_localCurrentHp - 200).clamp(0, _localMaxHp);
+                        if (_localCurrentHp <= 0) {
+                          _localRaidStatus = 'victory';
+                        }
+                      }),
+                      remoteCommand: () => RaidAdminService.strikeBoss(200,
                           roomId: effectiveRoom),
                     );
                   }),
@@ -1302,7 +1501,11 @@ class _ProfileScreenState extends State<ProfileScreen>
                         _runGuardedAdminCommand(
                           actionKey: 'reset_boss',
                           successLabel: "Boss et scores réinitialisés.",
-                          command: () =>
+                          localAction: () => setState(() {
+                            _localCurrentHp = _localMaxHp;
+                            _localRaidStatus = 'active';
+                          }),
+                          remoteCommand: () =>
                               RaidAdminService.resetBoss(roomId: effectiveRoom),
                         );
                       },

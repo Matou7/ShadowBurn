@@ -40,6 +40,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
   bool _isQuotaExhausted = false;
   bool _isDespawnedForInactivity = false;
   bool _isRadioPlaying = false;
+  bool _isSoloLocalMode = false;
 
   String _currentRaidStatus = 'waiting';
   double _currentBossHp = 5000.0;
@@ -53,6 +54,19 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
   static const int kMaxHuntersPerRoom = 10;
   static const int kRoomInactivityThresholdMs = 600000; // 10 minutes
   static const Duration _kFirestoreTimeout = Duration(seconds: 6);
+
+  bool _detectSoloUrl() {
+    final full = Uri.base.toString().toLowerCase();
+    final frag = Uri.base.fragment.toLowerCase();
+    return full.contains('solo=1') ||
+        full.contains('local=1') ||
+        full.contains('solo_local') ||
+        full.contains('/solo') ||
+        frag.contains('solo=1') ||
+        frag.contains('local=1') ||
+        frag.contains('solo_local') ||
+        frag.contains('/solo');
+  }
 
   @override
   void initState() {
@@ -68,6 +82,24 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
 
     _localTickTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (!mounted) return;
+
+      if (_isSoloLocalMode) {
+        if (_targetEndTimeMs > 0 &&
+            _currentRaidStatus == 'active' &&
+            _currentBossHp > 0) {
+          final nowMs = DateTime.now().millisecondsSinceEpoch;
+          final diff = (_targetEndTimeMs - nowMs) ~/ 1000;
+          final remaining = diff > 0 ? diff : 0;
+          setState(() {
+            _remainingSeconds = remaining;
+            if (remaining == 0) {
+              _currentRaidStatus = 'failed';
+              _raidData['status'] = 'failed';
+            }
+          });
+        }
+        return;
+      }
 
       final now = DateTime.now();
       bool isNightClosed =
@@ -103,6 +135,38 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
     });
   }
 
+  void _initSoloLocalArena() {
+    final nowMs = DateTime.now().millisecondsSinceEpoch;
+    final endMs = nowMs + 1800000; // 30 minutes par défaut en local
+
+    setState(() {
+      _isSoloLocalMode = true;
+      _roomId = 'SOLO_LOCAL';
+      _adminKey = 'LOCAL';
+      _joinToken = 'LOCAL';
+      _targetEndTimeMs = endMs;
+      _remainingSeconds = 1800;
+      _currentRaidStatus = 'active';
+      _currentBossHp = 5000.0;
+      _raidData = {
+        'roomId': 'SOLO_LOCAL',
+        'status': 'active',
+        'preset_label': 'RAID SOLO LOCAL (5 000 PV)',
+        'current_hp': 5000,
+        'max_hp': 5000,
+        'audio_playing': false,
+        'hunters': [],
+        'logs': [],
+        'target_end_time': endMs,
+      };
+      _isRaidDataLoaded = true;
+      _isAllocating = false;
+      _isWorldSaturated = false;
+      _isNightLockActive = false;
+      _isQuotaExhausted = false;
+    });
+  }
+
   void _recordActivity() {
     _lastRoomActivityMs = DateTime.now().millisecondsSinceEpoch;
   }
@@ -116,6 +180,8 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
       _isRadioPlaying = false;
       AudioService.stopNrjStream();
     }
+
+    if (_isSoloLocalMode) return;
 
     if (_raidRef != null && _lastKnownHunterCount > 0 && !_isQuotaExhausted) {
       _raidRef!.update({
@@ -148,6 +214,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
       _isRadioPlaying = false;
       AudioService.stopNrjStream();
     }
+    if (_isSoloLocalMode) return;
     if (_raidRef != null) {
       bool canWrite =
           await QuotaGuardService.checkAndIncrementWrite(isCriticalClosure: true);
@@ -173,6 +240,13 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    if (_detectSoloUrl()) {
+      if (!_isSoloLocalMode) {
+        _initSoloLocalArena();
+      }
+      return;
+    }
+
     final now = DateTime.now();
     bool isNightClosed =
         (now.hour >= 0 && now.hour < 6) || (now.hour == 23 && now.minute >= 58);
@@ -200,6 +274,11 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
   }
 
   Future _resolveRoomAllocation() async {
+    if (_detectSoloUrl()) {
+      _initSoloLocalArena();
+      return;
+    }
+
     final now = DateTime.now();
     bool isNightClosed =
         (now.hour >= 0 && now.hour < 6) || (now.hour == 23 && now.minute >= 58);
@@ -362,12 +441,14 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
       _isDespawnedForInactivity = false;
     });
 
-    // Écoute directe de la salle allouée pour recevoir immédiatement le clic LANCER de l'admin
     _startListeningToRaid();
   }
 
   void _startListeningToRaid() {
-    if (_raidSubscription != null || _raidRef == null || _isQuotaExhausted) {
+    if (_isSoloLocalMode ||
+        _raidSubscription != null ||
+        _raidRef == null ||
+        _isQuotaExhausted) {
       return;
     }
 
@@ -599,7 +680,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
 
   @override
   Widget build(BuildContext context) {
-    if (_isNightLockActive) {
+    if (_isNightLockActive && !_isSoloLocalMode) {
       return Scaffold(
         backgroundColor: const Color(0xFF02070D),
         body: Center(
@@ -642,7 +723,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
       );
     }
 
-    if (_isQuotaExhausted) {
+    if (_isQuotaExhausted && !_isSoloLocalMode) {
       final Map data = _raidData;
       final double maxHp = ((data['max_hp'] ?? 5000) as num).toDouble();
       final double safeMax = maxHp > 0 ? maxHp : 5000.0;
@@ -693,7 +774,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
       );
     }
 
-    if (_isWorldSaturated) {
+    if (_isWorldSaturated && !_isSoloLocalMode) {
       return Scaffold(
         backgroundColor: const Color(0xFF02070D),
         body: Center(
@@ -736,7 +817,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
       );
     }
 
-    if (_isAllocating || _raidRef == null || !_isRaidDataLoaded) {
+    if (_isAllocating || (!_isSoloLocalMode && _raidRef == null) || !_isRaidDataLoaded) {
       return const Scaffold(
         backgroundColor: Color(0xFF02070D),
         body: Center(
@@ -973,18 +1054,20 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
                       onPressed: _isQuotaExhausted
                           ? null
                           : () async {
-                              bool canWrite =
-                                  await QuotaGuardService.checkAndIncrementWrite();
-                              if (!canWrite) {
-                                _triggerQuotaExhaustedPodium();
-                                return;
+                              if (!_isSoloLocalMode) {
+                                bool canWrite = await QuotaGuardService
+                                    .checkAndIncrementWrite();
+                                if (!canWrite) {
+                                  _triggerQuotaExhaustedPodium();
+                                  return;
+                                }
                               }
 
                               final bool nextState = !_isRadioPlaying;
                               _isRadioPlaying = nextState;
                               bool playing = await AudioService.setNrjStreamState(
                                   nextState);
-                              if (_raidRef != null) {
+                              if (!_isSoloLocalMode && _raidRef != null) {
                                 await _raidRef!.update({
                                   'audio_playing': nextState,
                                   'last_activity_ms':
@@ -1316,10 +1399,13 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
           const SizedBox(height: 6),
           Expanded(
             child: logList.isEmpty
-                ? const Center(
+                ? Center(
                     child: Text(
-                      'COMBAT COMMENCÉ : EN ATTENTE DU PREMIER ASSAUT',
-                      style: TextStyle(
+                      _isSoloLocalMode
+                          ? 'MODE SOLO LOCAL ACTIF : UTILISEZ LE PAD CHASSEUR LOCAL'
+                          : 'COMBAT COMMENCÉ : EN ATTENTE DU PREMIER ASSAUT',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
                           color: Colors.white38,
                           fontFamily: 'monospace',
                           fontSize: 11),
@@ -1721,8 +1807,9 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
 
   Widget _buildDynamicMaximizedQrPanel(String raidStatus,
       {required bool isVictory}) {
-    final String rawJoinUrl =
-        'https://shadowburn-1d8f8.web.app/#/join?room=$_roomId&token=${_joinToken ?? ""}';
+    final String rawJoinUrl = _isSoloLocalMode
+        ? 'https://shadowburn-1d8f8.web.app/#/solo?room=SOLO_LOCAL&local=1&role=hunter'
+        : 'https://shadowburn-1d8f8.web.app/#/join?room=$_roomId&token=${_joinToken ?? ""}';
     final String rawAdminAppUrl =
         'shadowburn://admin?room=$_roomId&key=${_adminKey ?? ""}';
 
@@ -1745,9 +1832,9 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    const Text(
-                      'SCAN CHASSEUR',
-                      style: TextStyle(
+                    Text(
+                      _isSoloLocalMode ? 'CHASSEUR SOLO' : 'SCAN CHASSEUR',
+                      style: const TextStyle(
                           color: Color(0xFF00E5FF),
                           fontFamily: 'monospace',
                           fontWeight: FontWeight.bold,
@@ -1779,7 +1866,11 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      raidStatus == 'waiting' ? '(En attente)' : '(Actif)',
+                      _isSoloLocalMode
+                          ? '(100 % Local)'
+                          : (raidStatus == 'waiting'
+                              ? '(En attente)'
+                              : '(Actif)'),
                       style: TextStyle(
                           color: raidStatus == 'waiting'
                               ? Colors.white54

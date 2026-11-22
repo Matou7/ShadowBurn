@@ -48,6 +48,17 @@ const FirebaseOptions _shadowBurnFirebaseOptions = FirebaseOptions(
   appId: "1:1045603092576:web:7a4707409f3976d4b9db05",
 );
 
+bool _isSoloLocalUrl(String urlLower, String fragLower) {
+  return urlLower.contains('solo=1') ||
+      urlLower.contains('local=1') ||
+      urlLower.contains('solo_local') ||
+      urlLower.contains('/solo') ||
+      fragLower.contains('solo=1') ||
+      fragLower.contains('local=1') ||
+      fragLower.contains('solo_local') ||
+      fragLower.contains('/solo');
+}
+
 Future<void> _ensureSilentFirebaseAuth() async {
   try {
     if (FirebaseAuth.instance.currentUser == null) {
@@ -64,13 +75,19 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   if (kIsWeb) {
-    try {
-      await Firebase.initializeApp(
-        options: _shadowBurnFirebaseOptions,
-      );
-      await _ensureSilentFirebaseAuth();
-    } catch (e) {
-      debugPrint("Erreur initialisation Firebase Web: $e");
+    final String fullUrl = Uri.base.toString().toLowerCase();
+    final String frag = Uri.base.fragment.toLowerCase();
+    final bool isSoloWeb = _isSoloLocalUrl(fullUrl, frag);
+
+    if (!isSoloWeb) {
+      try {
+        await Firebase.initializeApp(
+          options: _shadowBurnFirebaseOptions,
+        );
+        await _ensureSilentFirebaseAuth();
+      } catch (e) {
+        debugPrint("Erreur initialisation Firebase Web: $e");
+      }
     }
 
     runApp(const ShadowBurnTvApp());
@@ -207,7 +224,15 @@ class ShadowBurnTvApp extends StatelessWidget {
     final String frag = Uri.base.fragment.toLowerCase();
 
     String initial = '/';
-    if (fullUrl.contains('admin') || frag.contains('admin')) {
+    if (_isSoloLocalUrl(fullUrl, frag) &&
+        (fullUrl.contains('role=hunter') ||
+            frag.contains('role=hunter') ||
+            fullUrl.contains('join') ||
+            frag.contains('join'))) {
+      initial = '/join';
+    } else if (_isSoloLocalUrl(fullUrl, frag)) {
+      initial = '/solo';
+    } else if (fullUrl.contains('admin') || frag.contains('admin')) {
       initial = '/admin';
     } else if (fullUrl.contains('join') || frag.contains('join')) {
       initial = '/join';
@@ -231,16 +256,23 @@ class ShadowBurnTvApp extends StatelessWidget {
         final String currentUrl = Uri.base.toString().toLowerCase();
         final String fragment = Uri.base.fragment.toLowerCase();
 
+        if (settings.name == '/join' ||
+            currentUrl.contains('join') ||
+            fragment.contains('join') ||
+            (_isSoloLocalUrl(currentUrl, fragment) &&
+                (currentUrl.contains('role=hunter') ||
+                    fragment.contains('role=hunter')))) {
+          return MaterialPageRoute(builder: (_) => const HunterJoinScreen());
+        }
+
+        if (settings.name == '/solo' || _isSoloLocalUrl(currentUrl, fragment)) {
+          return MaterialPageRoute(builder: (_) => const ArenaTvScreen());
+        }
+
         if (settings.name == '/admin' ||
             currentUrl.contains('admin') ||
             fragment.contains('admin')) {
           return MaterialPageRoute(builder: (_) => const AdminScreen());
-        }
-
-        if (settings.name == '/join' ||
-            currentUrl.contains('join') ||
-            fragment.contains('join')) {
-          return MaterialPageRoute(builder: (_) => const HunterJoinScreen());
         }
 
         return MaterialPageRoute(builder: (_) => const ArenaTvScreen());

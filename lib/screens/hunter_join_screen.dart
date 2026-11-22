@@ -45,6 +45,7 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
   String _token = '';
   DocumentReference? _raidRef;
 
+  bool _isSoloLocalMode = false;
   bool _isCheckingToken = true;
   bool _isTokenValid = false;
   bool _isWaitingQueue = false;
@@ -67,11 +68,7 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
   Map<String, dynamic> _raidData = {};
   bool _isRaidDataLoaded = false;
 
-  /// 0 = prochain coup 25 PV
-  /// 1 = fenêtre 10s active pour taper 100 PV
-  /// 2 = fenêtre 10s active pour taper 200 PV
   int _comboStep = 0;
-
   int _frenzyRemainingSeconds = 0;
   Timer? _frenzyTimer;
 
@@ -79,7 +76,6 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
   int _antiCheatCooldownSeconds = 0;
   Timer? _antiCheatTimer;
 
-  /// Gel de 10s déclenché après un coup critique à 200 PV
   int _restCooldownSeconds = 0;
   Timer? _restTimer;
 
@@ -168,7 +164,11 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
     _autoDetectDeviceName(randomInt);
 
     web_cleanup.registerTabCloseCleanup(
-      () => _isJoined && _hasStruckAtLeastOnce && !_isQuotaExhausted,
+      () =>
+          !_isSoloLocalMode &&
+          _isJoined &&
+          _hasStruckAtLeastOnce &&
+          !_isQuotaExhausted,
       () => _roomId,
       () => _hunterSessionId,
     );
@@ -178,6 +178,30 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
   void didChangeDependencies() {
     super.didChangeDependencies();
     _parseIncomingParameters();
+  }
+
+  void _initSoloLocalHunter() {
+    setState(() {
+      _isSoloLocalMode = true;
+      _roomId = 'SOLO_LOCAL';
+      _token = 'LOCAL';
+      _raidRef = null;
+      _raidData = {
+        'roomId': 'SOLO_LOCAL',
+        'status': 'active',
+        'boss_name': 'RAID SOLO LOCAL',
+        'max_hp': 5000,
+        'current_hp': 5000,
+        'hunters': [],
+        'logs': [],
+      };
+      _isRaidDataLoaded = true;
+      _isCheckingToken = false;
+      _isTokenValid = true;
+      _isWaitingQueue = false;
+      _isNightLockActive = false;
+      _isQuotaExhausted = false;
+    });
   }
 
   void _triggerQuotaExhaustedPodium() {
@@ -223,11 +247,26 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
     });
   }
 
-  /// Lecture ponctuelle (1 .get()) protégée par un cooldown local de 15s contre le spam.
   Future<void> _refreshRoomStateOnce({
     bool silentIfActive = false,
     bool bypassCooldown = false,
   }) async {
+    if (_isSoloLocalMode) {
+      setState(() {
+        _raidData['status'] = 'active';
+      });
+      if (!silentIfActive && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("MODE SOLO LOCAL : Frappes actives sans réseau."),
+            backgroundColor: Color(0xFF00FF66),
+            duration: Duration(seconds: 1),
+          ),
+        );
+      }
+      return;
+    }
+
     if (_raidRef == null || _isRefreshingRoomState || _isQuotaExhausted) return;
 
     final nowMs = DateTime.now().millisecondsSinceEpoch;
@@ -308,6 +347,20 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
   }
 
   void _parseIncomingParameters() {
+    String rawUrl = Uri.base.toString();
+    try {
+      rawUrl = Uri.decodeFull(rawUrl);
+    } catch (_) {}
+
+    final lower = rawUrl.toLowerCase();
+    if (lower.contains('solo=1') ||
+        lower.contains('local=1') ||
+        lower.contains('solo_local') ||
+        lower.contains('/solo')) {
+      _initSoloLocalHunter();
+      return;
+    }
+
     final now = DateTime.now();
     bool isNightClosed =
         (now.hour >= 0 && now.hour < 6) || (now.hour == 23 && now.minute >= 58);
@@ -320,11 +373,6 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
       }
       return;
     }
-
-    String rawUrl = Uri.base.toString();
-    try {
-      rawUrl = Uri.decodeFull(rawUrl);
-    } catch (_) {}
 
     String? foundRoom;
     String? foundToken;
@@ -367,6 +415,8 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
   }
 
   Future<void> _verifyPortalSecurity() async {
+    if (_isSoloLocalMode) return;
+
     final now = DateTime.now();
     bool isNightClosed =
         (now.hour >= 0 && now.hour < 6) || (now.hour == 23 && now.minute >= 58);
@@ -500,7 +550,10 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
     _refreshCooldownTimer?.cancel();
     _batchFlushTimer?.cancel();
     _batchFlushTimer = null;
-    if (_pendingDamage > 0 && _hasStruckAtLeastOnce && !_isQuotaExhausted) {
+    if (!_isSoloLocalMode &&
+        _pendingDamage > 0 &&
+        _hasStruckAtLeastOnce &&
+        !_isQuotaExhausted) {
       _flushPendingDamage();
     }
     super.dispose();
@@ -523,10 +576,10 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
     _nameController.text = detected;
   }
 
-  /// Entrée 100 % locale (0 écriture Firestore) + 1 lecture initiale sans démarrer le cooldown de 15s.
   void _joinRaid() {
     final name = _nameController.text.trim();
-    if (name.isEmpty || _raidRef == null) return;
+    if (name.isEmpty) return;
+    if (!_isSoloLocalMode && _raidRef == null) return;
 
     setState(() {
       _isJoined = true;
@@ -534,6 +587,25 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
       _confirmedHunterName = name;
       _isLoading = false;
     });
+
+    if (_isSoloLocalMode) {
+      final TrainingMode selectedMode = trainingModes.firstWhere(
+        (m) => (m as TrainingMode).id == _selectedModeId,
+      ) as TrainingMode;
+      _raidData['hunters'] = [
+        {
+          'id': _hunterSessionId,
+          'name': name,
+          'mode_id': _selectedModeId,
+          'mode_label': selectedMode.label,
+          'total_damage': 0,
+          'squat_reps': 0,
+          'pushup_reps': 0,
+          'abs_reps': 0,
+        }
+      ];
+      return;
+    }
 
     _refreshRoomStateOnce(silentIfActive: true, bypassCooldown: true);
   }
@@ -546,7 +618,7 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
     _batchFlushTimer?.cancel();
     _batchFlushTimer = null;
 
-    if (!_hasStruckAtLeastOnce || _isQuotaExhausted) {
+    if (_isSoloLocalMode || !_hasStruckAtLeastOnce || _isQuotaExhausted) {
       if (mounted) {
         setState(() {
           _isJoined = false;
@@ -723,7 +795,7 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
     bool glowEffect,
     String feedback,
   ) {
-    if (_raidRef == null) return;
+    if (!_isSoloLocalMode && _raidRef == null) return;
 
     final Map<String, dynamic> data = _raidData;
     final String raidStatus = (data['status'] ?? 'waiting').toString();
@@ -733,6 +805,46 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
           content: Text(
               "RAID EN ATTENTE : Appuyez sur RAFRAÎCHIR si l'admin a lancé."),
           backgroundColor: Color(0xFFFF9100),
+        ),
+      );
+      return;
+    }
+
+    final num maxHp = (data['max_hp'] as num?) ?? 5000;
+    final num currentHp = (data['current_hp'] as num?) ?? maxHp;
+    final double estimatedNewHp =
+        (currentHp - damage).clamp(0.0, maxHp.toDouble()).toDouble();
+
+    if (_isSoloLocalMode) {
+      final dynamic rawHunters = _raidData['hunters'];
+      final List hunterList = rawHunters is Iterable ? List.from(rawHunters) : [];
+      if (hunterList.isNotEmpty && hunterList[0] is Map) {
+        final h = Map<String, dynamic>.from(hunterList[0]);
+        h['total_damage'] = ((h['total_damage'] as num?)?.toInt() ?? 0) + damage;
+        if (exerciseCategory == 'squat') {
+          h['squat_reps'] = ((h['squat_reps'] as num?)?.toInt() ?? 0) + repsCount;
+        } else if (exerciseCategory == 'pushup') {
+          h['pushup_reps'] = ((h['pushup_reps'] as num?)?.toInt() ?? 0) + repsCount;
+        } else if (exerciseCategory == 'abs') {
+          h['abs_reps'] = ((h['abs_reps'] as num?)?.toInt() ?? 0) + repsCount;
+        }
+        hunterList[0] = h;
+      }
+
+      setState(() {
+        _raidData['current_hp'] = estimatedNewHp;
+        _raidData['hunters'] = hunterList;
+        if (estimatedNewHp <= 0) {
+          _raidData['status'] = 'victory';
+        }
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(feedback.isNotEmpty ? feedback : "-$damage PV infligés !"),
+          backgroundColor:
+              glowEffect ? const Color(0xFFFF2E56) : const Color(0xFF00FF66),
+          duration: const Duration(seconds: 1),
         ),
       );
       return;
@@ -762,10 +874,6 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
       _pendingLogs.removeRange(kMaxLogsStored, _pendingLogs.length);
     }
 
-    final num maxHp = (data['max_hp'] as num?) ?? 5000;
-    final num currentHp = (data['current_hp'] as num?) ?? maxHp;
-    final double estimatedNewHp =
-        (currentHp - damage).clamp(0.0, maxHp.toDouble()).toDouble();
     setState(() {
       _raidData['current_hp'] = estimatedNewHp;
       final dynamic rawLogs = _raidData['logs'];
@@ -801,7 +909,8 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
   }
 
   Future<void> _flushPendingDamage() async {
-    if (_pendingDamage == 0 ||
+    if (_isSoloLocalMode ||
+        _pendingDamage == 0 ||
         _raidRef == null ||
         _isFlushing ||
         !_hasStruckAtLeastOnce ||
@@ -942,7 +1051,7 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
 
   @override
   Widget build(BuildContext context) {
-    if (_isNightLockActive) {
+    if (_isNightLockActive && !_isSoloLocalMode) {
       return Scaffold(
         backgroundColor: const Color(0xFF02070D),
         body: Center(
@@ -985,7 +1094,7 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
       );
     }
 
-    if (_isWaitingQueue) {
+    if (_isWaitingQueue && !_isSoloLocalMode) {
       return Scaffold(
         backgroundColor: const Color(0xFF02070D),
         body: Center(
@@ -1167,7 +1276,10 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
                 letterSpacing: 2),
           ),
           const SizedBox(height: 6),
-          Text("Connexion certifiée par QR Code : $_roomId",
+          Text(
+              _isSoloLocalMode
+                  ? "Mode Solo Local (0 requête réseau)"
+                  : "Connexion certifiée par QR Code : $_roomId",
               textAlign: TextAlign.center,
               style: const TextStyle(color: Colors.white60, fontSize: 11)),
           const SizedBox(height: 16),
@@ -1235,7 +1347,7 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
   }
 
   Widget _buildLiveControllerPad() {
-    if (_isQuotaExhausted) {
+    if (_isQuotaExhausted && !_isSoloLocalMode) {
       return _buildVictoryPodiumView(_raidData, isQuotaExhausted: true);
     }
 
@@ -1350,54 +1462,56 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
                       letterSpacing: 1.1),
                 ),
               ),
-              const SizedBox(height: 10),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton.icon(
-                  style: ElevatedButton.styleFrom(
-                    foregroundColor: Colors.black,
-                    backgroundColor: isRefreshBlocked
-                        ? Colors.white38
-                        : const Color(0xFF00FF66),
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 14, vertical: 10),
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(4)),
-                  ),
-                  onPressed:
-                      isRefreshBlocked ? null : () => _refreshRoomStateOnce(),
-                  icon: _isRefreshingRoomState
-                      ? const SizedBox(
-                          width: 14,
-                          height: 14,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
+              if (!_isSoloLocalMode) ...[
+                const SizedBox(height: 10),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      foregroundColor: Colors.black,
+                      backgroundColor: isRefreshBlocked
+                          ? Colors.white38
+                          : const Color(0xFF00FF66),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 14, vertical: 10),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(4)),
+                    ),
+                    onPressed:
+                        isRefreshBlocked ? null : () => _refreshRoomStateOnce(),
+                    icon: _isRefreshingRoomState
+                        ? const SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.black,
+                            ),
+                          )
+                        : Icon(
+                            _refreshCooldownSeconds > 0
+                                ? Icons.timer
+                                : Icons.refresh,
+                            size: 16,
                             color: Colors.black,
                           ),
-                        )
-                      : Icon(
-                          _refreshCooldownSeconds > 0
-                              ? Icons.timer
-                              : Icons.refresh,
-                          size: 16,
-                          color: Colors.black,
-                        ),
-                  label: Text(
-                    _isRefreshingRoomState
-                        ? "VÉRIFICATION..."
-                        : (_refreshCooldownSeconds > 0
-                            ? "PATIENTEZ (${_refreshCooldownSeconds}S)..."
-                            : "RAFRAÎCHIR"),
-                    style: const TextStyle(
-                      fontFamily: 'monospace',
-                      fontSize: 11,
-                      fontWeight: FontWeight.bold,
-                      letterSpacing: 1.2,
-                      color: Colors.black,
+                    label: Text(
+                      _isRefreshingRoomState
+                          ? "VÉRIFICATION..."
+                          : (_refreshCooldownSeconds > 0
+                              ? "PATIENTEZ (${_refreshCooldownSeconds}S)..."
+                              : "RAFRAÎCHIR"),
+                      style: const TextStyle(
+                        fontFamily: 'monospace',
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 1.2,
+                        color: Colors.black,
+                      ),
                     ),
                   ),
                 ),
-              ),
+              ],
               if (_restCooldownSeconds > 0) ...[
                 const SizedBox(height: 10),
                 Container(
