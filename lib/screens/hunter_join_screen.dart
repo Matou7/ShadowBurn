@@ -50,6 +50,7 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
   bool _isWaitingQueue = false;
   bool _isNightLockActive = false;
   bool _isQuotaExhausted = false;
+  bool _isRefreshingRoomState = false;
   String _denialReason = "VÉRIFICATION DU PORTAIL EN COURS...";
 
   bool _isJoined = false;
@@ -191,6 +192,60 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
       _isTokenValid = true;
       _isRaidDataLoaded = true;
     });
+  }
+
+  /// Lecture ponctuelle (1 .get()) pour vérifier si l'admin a lancé le raid ou modifié le boss.
+  Future<void> _refreshRoomStateOnce({bool silentIfActive = false}) async {
+    if (_raidRef == null || _isRefreshingRoomState || _isQuotaExhausted) return;
+    _isRefreshingRoomState = true;
+    if (mounted) setState(() {});
+
+    try {
+      final doc = await _raidRef!.get().timeout(_kFirestoreTimeout);
+      if (!mounted) return;
+
+      if (!doc.exists) {
+        setState(() {
+          _raidData = {};
+          _isRaidDataLoaded = true;
+        });
+        return;
+      }
+
+      final Map<String, dynamic> freshData =
+          Map<String, dynamic>.from(doc.data() as Map? ?? {});
+      final String freshStatus = (freshData['status'] ?? 'waiting').toString();
+
+      setState(() {
+        _raidData = freshData;
+        _isRaidDataLoaded = true;
+      });
+
+      if (!silentIfActive && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              freshStatus == 'active'
+                  ? "Raid ACTIF ! Frappes déverrouillées."
+                  : "Statut actuel : ${freshStatus.toUpperCase()} (en attente de LANCER).",
+              style: const TextStyle(fontFamily: 'monospace', fontSize: 11),
+            ),
+            backgroundColor: freshStatus == 'active'
+                ? const Color(0xFF00FF66)
+                : const Color(0xFFFF9100),
+            duration: const Duration(seconds: 1),
+          ),
+        );
+      }
+    } catch (e) {
+      if (e.toString().toLowerCase().contains('resource-exhausted') ||
+          e.toString().toLowerCase().contains('quota')) {
+        _triggerQuotaExhaustedPodium();
+      }
+    } finally {
+      _isRefreshingRoomState = false;
+      if (mounted) setState(() {});
+    }
   }
 
   void _parseIncomingParameters() {
@@ -408,7 +463,7 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
     _nameController.text = detected;
   }
 
-  /// Entrée 100 % locale (0 écriture Firestore).
+  /// Entrée 100 % locale (0 écriture Firestore) + rafraîchit 1 fois l'état de la salle.
   void _joinRaid() {
     final name = _nameController.text.trim();
     if (name.isEmpty || _raidRef == null) return;
@@ -419,6 +474,8 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
       _confirmedHunterName = name;
       _isLoading = false;
     });
+
+    _refreshRoomStateOnce(silentIfActive: true);
   }
 
   Future<void> _leaveRaid() async {
@@ -610,7 +667,8 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
     if (raidStatus != 'active') {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text("CONNECTEZ-VOUS : EN ATTENTE DU LANCEMENT DE L'ADMIN."),
+          content: Text(
+              "RAID EN ATTENTE : Appuyez sur RAFRAÎCHIR si l'admin a lancé."),
           backgroundColor: Color(0xFFFF9100),
         ),
       );
@@ -1215,7 +1273,7 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
                 child: Text(
                   isCombatActive
                       ? "COMBAT EN COURS (BOSS: ${currentHp.toInt()} / $maxHp PV)"
-                      : "CONNECTEZ-VOUS — EN ATTENTE DU LANCEMENT DE L'ADMIN...",
+                      : "EN ATTENTE DE L'ADMIN — APPUYEZ SUR RAFRAÎCHIR APRÈS LANCER",
                   textAlign: TextAlign.center,
                   style: TextStyle(
                       color: isCombatActive
@@ -1224,9 +1282,44 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
                       fontFamily: 'monospace',
                       fontWeight: FontWeight.bold,
                       fontSize: 10,
-                      letterSpacing: 1.2),
+                      letterSpacing: 1.1),
                 ),
               ),
+              if (!isCombatActive) ...[
+                const SizedBox(height: 10),
+                OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: const Color(0xFF00FF66),
+                    side: const BorderSide(color: Color(0xFF00FF66)),
+                    backgroundColor: const Color(0xFF00FF66).withOpacity(0.08),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                  ),
+                  onPressed: _isRefreshingRoomState
+                      ? null
+                      : () => _refreshRoomStateOnce(),
+                  icon: _isRefreshingRoomState
+                      ? const SizedBox(
+                          width: 14,
+                          height: 14,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Color(0xFF00FF66),
+                          ),
+                        )
+                      : const Icon(Icons.refresh, size: 16),
+                  label: Text(
+                    _isRefreshingRoomState
+                        ? "VÉRIFICATION..."
+                        : "RAFRAÎCHIR (DÉBLOQUER FRAPPES)",
+                    style: const TextStyle(
+                      fontFamily: 'monospace',
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ],
               if (_restCooldownSeconds > 0) ...[
                 const SizedBox(height: 10),
                 Container(
