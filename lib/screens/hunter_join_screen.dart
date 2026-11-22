@@ -53,6 +53,10 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
   bool _isRefreshingRoomState = false;
   String _denialReason = "VÉRIFICATION DU PORTAIL EN COURS...";
 
+  int _lastRefreshMs = 0;
+  int _refreshCooldownSeconds = 0;
+  Timer? _refreshCooldownTimer;
+
   bool _isJoined = false;
   bool _isLoading = false;
   bool _hasStruckAtLeastOnce = false;
@@ -94,6 +98,8 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
   static const int kMiniCooldownMs = 2000;
   static const int kComboWindowSeconds = 10;
   static const int kPostBurstRestSeconds = 10;
+  static const int kRefreshCooldownSeconds = 15;
+  static const int kRefreshCooldownMs = 15000;
   static const Duration _kFirestoreTimeout = Duration(seconds: 6);
 
   static const List trainingModes = [
@@ -179,6 +185,7 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
     _frenzyTimer?.cancel();
     _antiCheatTimer?.cancel();
     _restTimer?.cancel();
+    _refreshCooldownTimer?.cancel();
     _batchFlushTimer?.cancel();
     _batchFlushTimer = null;
 
@@ -194,9 +201,61 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
     });
   }
 
-  /// Lecture ponctuelle (1 .get()) pour vérifier si l'admin a lancé le raid ou modifié le boss.
-  Future<void> _refreshRoomStateOnce({bool silentIfActive = false}) async {
+  void _startRefreshCooldownTimer() {
+    setState(() => _refreshCooldownSeconds = kRefreshCooldownSeconds);
+    _refreshCooldownTimer?.cancel();
+    _refreshCooldownTimer =
+        Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      if (_refreshCooldownSeconds > 1) {
+        setState(() {
+          _refreshCooldownSeconds--;
+        });
+      } else {
+        timer.cancel();
+        setState(() {
+          _refreshCooldownSeconds = 0;
+        });
+      }
+    });
+  }
+
+  /// Lecture ponctuelle (1 .get()) protégée par un cooldown local de 15s contre le spam.
+  Future<void> _refreshRoomStateOnce({
+    bool silentIfActive = false,
+    bool bypassCooldown = false,
+  }) async {
     if (_raidRef == null || _isRefreshingRoomState || _isQuotaExhausted) return;
+
+    final nowMs = DateTime.now().millisecondsSinceEpoch;
+    if (!bypassCooldown &&
+        _lastRefreshMs > 0 &&
+        (nowMs - _lastRefreshMs) < kRefreshCooldownMs) {
+      final remMs = kRefreshCooldownMs - (nowMs - _lastRefreshMs);
+      final remSec = (remMs / 1000).ceil();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              "ANTI-SPAM : Patientez ${remSec}s avant de rafraîchir à nouveau.",
+              style: const TextStyle(fontFamily: 'monospace', fontSize: 11),
+            ),
+            backgroundColor: const Color(0xFFFF9100),
+            duration: const Duration(milliseconds: 900),
+          ),
+        );
+      }
+      return;
+    }
+
+    if (!bypassCooldown) {
+      _lastRefreshMs = nowMs;
+      _startRefreshCooldownTimer();
+    }
+
     _isRefreshingRoomState = true;
     if (mounted) setState(() {});
 
@@ -438,6 +497,7 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
     _frenzyTimer?.cancel();
     _antiCheatTimer?.cancel();
     _restTimer?.cancel();
+    _refreshCooldownTimer?.cancel();
     _batchFlushTimer?.cancel();
     _batchFlushTimer = null;
     if (_pendingDamage > 0 && _hasStruckAtLeastOnce && !_isQuotaExhausted) {
@@ -463,7 +523,7 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
     _nameController.text = detected;
   }
 
-  /// Entrée 100 % locale (0 écriture Firestore) + rafraîchit 1 fois l'état de la salle.
+  /// Entrée 100 % locale (0 écriture Firestore) + 1 lecture initiale sans démarrer le cooldown de 15s.
   void _joinRaid() {
     final name = _nameController.text.trim();
     if (name.isEmpty || _raidRef == null) return;
@@ -475,13 +535,14 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
       _isLoading = false;
     });
 
-    _refreshRoomStateOnce(silentIfActive: true);
+    _refreshRoomStateOnce(silentIfActive: true, bypassCooldown: true);
   }
 
   Future<void> _leaveRaid() async {
     _frenzyTimer?.cancel();
     _antiCheatTimer?.cancel();
     _restTimer?.cancel();
+    _refreshCooldownTimer?.cancel();
     _batchFlushTimer?.cancel();
     _batchFlushTimer = null;
 
@@ -495,6 +556,7 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
           _frenzyRemainingSeconds = 0;
           _restCooldownSeconds = 0;
           _antiCheatCooldownSeconds = 0;
+          _refreshCooldownSeconds = 0;
           _pendingDamage = 0;
           _pendingSquatReps = 0;
           _pendingPushupReps = 0;
@@ -517,6 +579,7 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
         _frenzyRemainingSeconds = 0;
         _restCooldownSeconds = 0;
         _antiCheatCooldownSeconds = 0;
+        _refreshCooldownSeconds = 0;
       });
     }
   }
@@ -1228,6 +1291,8 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
       (m) => (m as TrainingMode).id == _selectedModeId,
     ) as TrainingMode;
     final bool isCombatActive = (raidStatus == 'active');
+    final bool isRefreshBlocked =
+        _isRefreshingRoomState || _refreshCooldownSeconds > 0;
 
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -1285,41 +1350,54 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
                       letterSpacing: 1.1),
                 ),
               ),
-              if (!isCombatActive) ...[
-                const SizedBox(height: 10),
-                OutlinedButton.icon(
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: const Color(0xFF00FF66),
-                    side: const BorderSide(color: Color(0xFF00FF66)),
-                    backgroundColor: const Color(0xFF00FF66).withOpacity(0.08),
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+              const SizedBox(height: 10),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    foregroundColor: Colors.black,
+                    backgroundColor: isRefreshBlocked
+                        ? Colors.white38
+                        : const Color(0xFF00FF66),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 14, vertical: 10),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(4)),
                   ),
-                  onPressed: _isRefreshingRoomState
-                      ? null
-                      : () => _refreshRoomStateOnce(),
+                  onPressed:
+                      isRefreshBlocked ? null : () => _refreshRoomStateOnce(),
                   icon: _isRefreshingRoomState
                       ? const SizedBox(
                           width: 14,
                           height: 14,
                           child: CircularProgressIndicator(
                             strokeWidth: 2,
-                            color: Color(0xFF00FF66),
+                            color: Colors.black,
                           ),
                         )
-                      : const Icon(Icons.refresh, size: 16),
+                      : Icon(
+                          _refreshCooldownSeconds > 0
+                              ? Icons.timer
+                              : Icons.refresh,
+                          size: 16,
+                          color: Colors.black,
+                        ),
                   label: Text(
                     _isRefreshingRoomState
                         ? "VÉRIFICATION..."
-                        : "RAFRAÎCHIR (DÉBLOQUER FRAPPES)",
+                        : (_refreshCooldownSeconds > 0
+                            ? "PATIENTEZ (${_refreshCooldownSeconds}S)..."
+                            : "RAFRAÎCHIR"),
                     style: const TextStyle(
                       fontFamily: 'monospace',
-                      fontSize: 10,
+                      fontSize: 11,
                       fontWeight: FontWeight.bold,
+                      letterSpacing: 1.2,
+                      color: Colors.black,
                     ),
                   ),
                 ),
-              ],
+              ),
               if (_restCooldownSeconds > 0) ...[
                 const SizedBox(height: 10),
                 Container(
@@ -1411,7 +1489,7 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
         const SizedBox(height: 6),
         const Center(
           child: Text(
-              "Chrono 2s par frappe • Fenêtre combo 10s (25 > 100 > 200 PV) • Repos 10s après 200 PV.",
+              "Refresh 15s • Chrono 2s par frappe • Combo 10s (25 > 100 > 200 PV) • Repos 10s après 200 PV.",
               textAlign: TextAlign.center,
               style: TextStyle(
                   color: Colors.white30, fontSize: 9, fontFamily: 'monospace')),

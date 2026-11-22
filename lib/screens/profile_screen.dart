@@ -18,7 +18,6 @@ import '../providers/urgent_quest_provider.dart';
 import '../widgets/system_dialog.dart';
 import '../utils/admin_utils.dart';
 import '../services/raid_admin_service.dart';
-import '../services/quota_guard_service.dart';
 
 class ProfileScreen extends StatefulWidget {
   final String? initialRoomId;
@@ -321,7 +320,8 @@ class _ProfileScreenState extends State<ProfileScreen>
     final int now = DateTime.now().millisecondsSinceEpoch;
     final int prev = _lastAdminActionMs[actionKey] ?? 0;
     if (now - prev < _kAdminCommandCooldownMs) {
-      final int remSec = ((_kAdminCommandCooldownMs - (now - prev)) / 1000).ceil();
+      final int remSec =
+          ((_kAdminCommandCooldownMs - (now - prev)) / 1000).ceil();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -357,7 +357,7 @@ class _ProfileScreenState extends State<ProfileScreen>
     }
   }
 
-  /// Double confirmation locale sur les actions destructives (Reset à 0, Reset Boss, Suppression).
+  /// Double confirmation locale sur les actions destructives (Reset à 0, Reset Boss).
   void _confirmDestructiveAdminAction({
     required String title,
     required String message,
@@ -395,31 +395,6 @@ class _ProfileScreenState extends State<ProfileScreen>
         ),
       ],
     );
-  }
-
-  Future<void> _deleteActiveRoom() async {
-    final roomToDelete = _activeRoom ??
-        Provider.of<GameProvider>(context, listen: false).pairedAdminRoom;
-    if (roomToDelete == null || roomToDelete.isEmpty) return;
-
-    bool canWrite =
-        await QuotaGuardService.checkAndIncrementWrite(isCriticalClosure: true);
-    if (!canWrite) {
-      _rejectIntrusionAttempt("Quota journalier atteint.");
-      return;
-    }
-
-    try {
-      await FirebaseFirestore.instance
-          .collection('current_raids')
-          .doc(roomToDelete)
-          .delete()
-          .timeout(_kFirestoreTimeout);
-      _unbindFromRoom("Salle [$roomToDelete] supprimée définitivement.");
-    } catch (e) {
-      debugPrint("Erreur suppression: $e");
-      _rejectIntrusionAttempt("Erreur suppression : $e");
-    }
   }
 
   void _unbindFromRoom(String reason) {
@@ -1202,7 +1177,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                     );
                   }),
                 ),
-                const SizedBox(width: 4),
+                const SizedBox(width: 6),
                 Expanded(
                   child: _compactButton("+15 MIN", systemBlue, () {
                     _runGuardedAdminCommand(
@@ -1213,7 +1188,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                     );
                   }),
                 ),
-                const SizedBox(width: 4),
+                const SizedBox(width: 6),
                 Expanded(
                   child: _compactButton("+30 MIN", systemBlue, () {
                     _runGuardedAdminCommand(
@@ -1221,17 +1196,6 @@ class _ProfileScreenState extends State<ProfileScreen>
                       successLabel: "+30 minutes ajoutées.",
                       command: () => RaidAdminService.extendRaidMinutes(30,
                           roomId: effectiveRoom),
-                    );
-                  }),
-                ),
-                const SizedBox(width: 4),
-                Expanded(
-                  child: _compactButton("RESET 24H", Colors.amber, () {
-                    _runGuardedAdminCommand(
-                      actionKey: 'reset_midnight',
-                      successLabel: "Chrono réinitialisé à 23h58.",
-                      command: () =>
-                          RaidAdminService.resetToMidnight(roomId: effectiveRoom),
                     );
                   }),
                 ),
@@ -1250,7 +1214,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                     );
                   }),
                 ),
-                const SizedBox(width: 4),
+                const SizedBox(width: 6),
                 Expanded(
                   child: _compactButton("-15 MIN", const Color(0xFFFF7043), () {
                     _runGuardedAdminCommand(
@@ -1261,7 +1225,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                     );
                   }),
                 ),
-                const SizedBox(width: 4),
+                const SizedBox(width: 6),
                 Expanded(
                   child: _compactButton("-30 MIN", const Color(0xFFFF7043), () {
                     _runGuardedAdminCommand(
@@ -1272,26 +1236,27 @@ class _ProfileScreenState extends State<ProfileScreen>
                     );
                   }),
                 ),
-                const SizedBox(width: 4),
-                Expanded(
-                  child: _compactButton("RESET À 0", const Color(0xFFFF2E56), () {
-                    _confirmDestructiveAdminAction(
-                      title: "CONFIRMER RESET À 0",
-                      message:
-                          "Mettre fin immédiatement au chronomètre de [$effectiveRoom] ?",
-                      confirmLabel: "CLÔTURER MAINTENANT",
-                      onConfirmed: () {
-                        _runGuardedAdminCommand(
-                          actionKey: 'expire_now',
-                          successLabel: "Raid clôturé (chrono à 0).",
-                          command: () => RaidAdminService.expireRaidNow(
-                              roomId: effectiveRoom),
-                        );
-                      },
-                    );
-                  }),
-                ),
               ],
+            ),
+            const SizedBox(height: 6),
+            SizedBox(
+              width: double.infinity,
+              child: _compactButton("RESET À 0", const Color(0xFFFF2E56), () {
+                _confirmDestructiveAdminAction(
+                  title: "CONFIRMER RESET À 0",
+                  message:
+                      "Mettre fin immédiatement au chronomètre de [$effectiveRoom] ?",
+                  confirmLabel: "CLÔTURER MAINTENANT",
+                  onConfirmed: () {
+                    _runGuardedAdminCommand(
+                      actionKey: 'expire_now',
+                      successLabel: "Raid clôturé (chrono à 0).",
+                      command: () =>
+                          RaidAdminService.expireRaidNow(roomId: effectiveRoom),
+                    );
+                  },
+                );
+              }),
             ),
             const SizedBox(height: 12),
             Align(
@@ -1347,39 +1312,17 @@ class _ProfileScreenState extends State<ProfileScreen>
               ],
             ),
             const SizedBox(height: 12),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                TextButton.icon(
-                  onPressed: () => _unbindFromRoom("Déconnexion volontaire."),
-                  icon: const Icon(Icons.link_off,
-                      color: Colors.white38, size: 14),
-                  label: const Text(
-                    "DÉCONNECTER",
-                    style: TextStyle(color: Colors.white38, fontSize: 10),
-                  ),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                onPressed: () => _unbindFromRoom("Déconnexion volontaire."),
+                icon:
+                    const Icon(Icons.link_off, color: Colors.white38, size: 14),
+                label: const Text(
+                  "DÉCONNECTER",
+                  style: TextStyle(color: Colors.white38, fontSize: 10),
                 ),
-                TextButton.icon(
-                  onPressed: () {
-                    _confirmDestructiveAdminAction(
-                      title: "SUPPRIMER LA SALLE",
-                      message:
-                          "Supprimer définitivement le document [$effectiveRoom] dans Firestore ?",
-                      confirmLabel: "SUPPRIMER",
-                      onConfirmed: _deleteActiveRoom,
-                    );
-                  },
-                  icon: const Icon(Icons.delete_forever,
-                      color: Color(0xFFFF2E56), size: 14),
-                  label: const Text(
-                    "FERMER & SUPPRIMER LA SALLE",
-                    style: TextStyle(
-                        color: Color(0xFFFF2E56),
-                        fontSize: 10,
-                        fontWeight: FontWeight.bold),
-                  ),
-                ),
-              ],
+              ),
             ),
           ],
         ],
