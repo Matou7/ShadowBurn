@@ -9,7 +9,7 @@ class RaidAdminService {
   static const Duration _kTimeout = Duration(seconds: 6);
   static const int _kAdminLeaseMs = 600000; // 10 minutes
 
-  static const List> raidPresets = [
+  static const List<dynamic> raidPresets = [
     {'hp': 5000, 'label': 'RAID STANDARD (5 000 PV)'},
     {'hp': 15000, 'label': 'RAID ÉLITE (15 000 PV)'},
     {'hp': 30000, 'label': 'RAID MONARQUE (30 000 PV)'},
@@ -40,13 +40,13 @@ class RaidAdminService {
       final snap = await docRef.get().timeout(_kTimeout);
       if (!snap.exists) return "Salle [$roomId] introuvable.";
 
-      final List> resetHunters = [];
+      final resetHunters = [];
       final Map<String, dynamic> data = snap.data() ?? {};
       final dynamic rawHunters = data['hunters'];
       if (rawHunters is Iterable) {
         for (final h in rawHunters) {
           if (h is Map) {
-            final Map<String, dynamic> copy = Map<String, dynamic>.from(h);
+            final copy = Map<String, dynamic>.from(h);
             copy['total_damage'] = 0;
             copy['squat_reps'] = 0;
             copy['pushup_reps'] = 0;
@@ -124,12 +124,12 @@ class RaidAdminService {
       final Map<String, dynamic> data = snap.data() ?? {};
       final int maxHp = (data['max_hp'] as num?)?.toInt() ?? 5000;
       final dynamic rawHunters = data['hunters'];
-      final List> resetHunters = [];
+      final resetHunters = [];
 
       if (rawHunters is Iterable) {
         for (final h in rawHunters) {
           if (h is Map) {
-            final Map<String, dynamic> copy = Map<String, dynamic>.from(h);
+            final copy = Map<String, dynamic>.from(h);
             copy['total_damage'] = 0;
             copy['squat_reps'] = 0;
             copy['pushup_reps'] = 0;
