@@ -67,9 +67,12 @@ class _RaidAdminPanelScreenState extends State<RaidAdminPanelScreen> {
       return;
     }
 
+    final String cleanRoom =
+        widget.roomId.trim().isEmpty ? 'LAN_1' : widget.roomId.trim();
+
     RaidAdminService.configureLan(
       wsUrl: targetWs,
-      roomId: widget.roomId,
+      roomId: cleanRoom,
     );
 
     if (mounted) {
@@ -101,7 +104,7 @@ class _RaidAdminPanelScreenState extends State<RaidAdminPanelScreen> {
 
     await _lanSocket.connect(
       targetWs,
-      roomId: widget.roomId,
+      roomId: cleanRoom,
       role: 'admin',
       clientId: 'admin_${DateTime.now().millisecondsSinceEpoch}',
       name: 'MONARQUE (LAN)',
