@@ -20,8 +20,9 @@ import '../utils/admin_utils.dart';
 import '../services/raid_admin_service.dart';
 import '../services/lan_socket_service.dart';
 
-const String kDefaultLanWsUrl = 'ws://192.168.1.8:8765';
-const String kDefaultLanTvBaseUrl = 'http://192.168.1.8:8080';
+const String kDefaultLanHostIp = '192.168.1.48';
+const int kDefaultLanWsPort = 8765;
+const int kDefaultLanWebPort = 8080;
 const String kDefaultLanRoomId = 'LAN_1';
 
 class ProfileScreen extends StatefulWidget {
@@ -40,7 +41,7 @@ class _ProfileScreenState extends State<ProfileScreen>
       MethodChannel('com.shadowburn.app/lock');
 
   static const int _kAdminLeaseDurationMs = 600000;
-  static const int _kAdminCommandCooldownMs = 5000;
+  static const int _kAdminCommandCooldownMs = 1500;
   static const Duration _kFirestoreTimeout = Duration(seconds: 6);
 
   final ScrollController _scrollController = ScrollController();
@@ -53,9 +54,10 @@ class _ProfileScreenState extends State<ProfileScreen>
   bool _isBindingInProgress = false;
 
   bool _isLanMode = false;
-  final String _lanWsUrl = kDefaultLanWsUrl;
+  String _lanHostIp = kDefaultLanHostIp;
+  String _lanWsUrl = 'ws://$kDefaultLanHostIp:$kDefaultLanWsPort';
   String _lanTvUrl =
-      '$kDefaultLanTvBaseUrl/?mode=lan&room=$kDefaultLanRoomId&ws=${Uri.encodeComponent(kDefaultLanWsUrl)}';
+      'http://$kDefaultLanHostIp:$kDefaultLanWebPort/?mode=lan&room=$kDefaultLanRoomId&ws=${Uri.encodeComponent('ws://$kDefaultLanHostIp:$kDefaultLanWsPort')}';
   final LanSocketService _lanSocket = LanSocketService();
   StreamSubscription? _lanSub;
   int _lanCurrentHp = 5000;
@@ -73,16 +75,30 @@ class _ProfileScreenState extends State<ProfileScreen>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _initDeviceAdminSecurity();
+    _loadSavedLanHost();
 
     _lanSub = _lanSocket.messages.listen((msg) {
       if (!mounted) return;
-      if (msg['type'] == 'state') {
+      final String msgType = (msg['type'] ?? '').toString();
+      if (msgType == 'state' ||
+          msgType == 'welcome' ||
+          msgType == 'state_sync') {
+        final Map<String, dynamic> incoming = (msg['state'] is Map)
+            ? Map<String, dynamic>.from(msg['state'] as Map)
+            : Map<String, dynamic>.from(msg);
         setState(() {
-          _lanMaxHp = ((msg['max_hp'] ?? _lanMaxHp) as num).toInt();
-          _lanCurrentHp = ((msg['current_hp'] ?? _lanCurrentHp) as num).toInt();
-          _lanStatus = (msg['status'] ?? _lanStatus).toString();
+          _lanMaxHp = ((incoming['max_hp'] ??
+                  incoming['bossMaxHp'] ??
+                  _lanMaxHp) as num)
+              .toInt();
+          _lanCurrentHp = ((incoming['current_hp'] ??
+                  incoming['bossHp'] ??
+                  _lanCurrentHp) as num)
+              .toInt();
+          _lanStatus = (incoming['status'] ?? _lanStatus).toString();
           _lanRemainingSeconds =
-              ((msg['remaining_seconds'] ?? _lanRemainingSeconds) as num).toInt();
+              ((incoming['remaining_seconds'] ?? _lanRemainingSeconds) as num)
+                  .toInt();
         });
       }
     });
@@ -106,16 +122,159 @@ class _ProfileScreenState extends State<ProfileScreen>
     });
   }
 
-  Future<void> _activateLanMode() async {
+  Future<void> _loadSavedLanHost() async {
+    final prefs = await SharedPreferences.getInstance();
+    final String? savedIp = prefs.getString('shadow_lan_host_ip');
+    final String webHost = (kIsWeb &&
+            Uri.base.host.isNotEmpty &&
+            Uri.base.host != 'localhost' &&
+            Uri.base.host != '127.0.0.1')
+        ? Uri.base.host
+        : '';
+    final String resolvedIp = webHost.isNotEmpty
+        ? webHost
+        : ((savedIp != null && savedIp.trim().isNotEmpty)
+            ? savedIp.trim()
+            : kDefaultLanHostIp);
+
+    if (!mounted) return;
+    setState(() {
+      _lanHostIp = resolvedIp;
+      _lanWsUrl = 'ws://$resolvedIp:$kDefaultLanWsPort';
+      _lanTvUrl =
+          'http://$resolvedIp:$kDefaultLanWebPort/?mode=lan&room=$kDefaultLanRoomId&ws=${Uri.encodeComponent(_lanWsUrl)}';
+    });
+  }
+
+  Future<void> _promptAndActivateLanMode({
+    String? prefilledWsUrl,
+    String? prefilledRoom,
+  }) async {
+    if (prefilledWsUrl != null && prefilledWsUrl.trim().isNotEmpty) {
+      final Uri? parsed = Uri.tryParse(prefilledWsUrl.trim());
+      final String host =
+          (parsed != null && parsed.host.isNotEmpty) ? parsed.host : _lanHostIp;
+      await _connectLanAdminWithHost(
+        hostIp: host,
+        customWsUrl: prefilledWsUrl.trim(),
+        roomId: (prefilledRoom != null && prefilledRoom.trim().isNotEmpty)
+            ? prefilledRoom.trim()
+            : kDefaultLanRoomId,
+      );
+      return;
+    }
+
+    final ipController = TextEditingController(text: _lanHostIp);
+    final roomController =
+        TextEditingController(text: _activeRoom ?? kDefaultLanRoomId);
+
+    SystemDialog.show(
+      context,
+      title: "SERVEUR LAN LOCAL",
+      color: const Color(0xFF00FF66),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            "Entrez l'adresse IP Wi-Fi du téléphone/PC qui héberge le serveur LAN :",
+            style: TextStyle(color: Colors.white70, fontSize: 12, height: 1.4),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: ipController,
+            keyboardType: TextInputType.url,
+            style: const TextStyle(
+                color: Colors.white, fontFamily: 'monospace', fontSize: 14),
+            decoration: const InputDecoration(
+              labelText: "IP de l'hôte (ex: 192.168.1.48)",
+              labelStyle: TextStyle(color: Colors.white54),
+              enabledBorder: UnderlineInputBorder(
+                  borderSide: BorderSide(color: Color(0xFF00FF66))),
+              focusedBorder: UnderlineInputBorder(
+                  borderSide: BorderSide(color: Color(0xFF00FF66))),
+            ),
+          ),
+          const SizedBox(height: 10),
+          TextField(
+            controller: roomController,
+            style: const TextStyle(
+                color: Colors.white, fontFamily: 'monospace', fontSize: 13),
+            decoration: const InputDecoration(
+              labelText: "Nom de la salle (défaut: LAN_1)",
+              labelStyle: TextStyle(color: Colors.white54),
+              enabledBorder: UnderlineInputBorder(
+                  borderSide: BorderSide(color: Color(0xFF00E5FF))),
+              focusedBorder: UnderlineInputBorder(
+                  borderSide: BorderSide(color: Color(0xFF00E5FF))),
+            ),
+          ),
+          const SizedBox(height: 10),
+          const Text(
+            "Dossier serveur recommandé : Download/LAN/web",
+            style: TextStyle(
+                color: Colors.white38, fontFamily: 'monospace', fontSize: 10),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text("ANNULER", style: TextStyle(color: Colors.white54)),
+        ),
+        OutlinedButton(
+          style: OutlinedButton.styleFrom(
+            foregroundColor: const Color(0xFF00FF66),
+            side: const BorderSide(color: Color(0xFF00FF66)),
+            backgroundColor: const Color(0xFF00FF66).withOpacity(0.15),
+          ),
+          onPressed: () async {
+            final String cleanIp = ipController.text
+                .trim()
+                .replaceAll('http://', '')
+                .replaceAll('ws://', '')
+                .split(':')
+                .first;
+            final String cleanRoom = roomController.text.trim().isEmpty
+                ? kDefaultLanRoomId
+                : roomController.text.trim();
+            Navigator.pop(context);
+            if (cleanIp.isNotEmpty) {
+              await _connectLanAdminWithHost(
+                hostIp: cleanIp,
+                roomId: cleanRoom,
+              );
+            }
+          },
+          child: const Text("CONNECTER LAN",
+              style: TextStyle(fontWeight: FontWeight.bold)),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _connectLanAdminWithHost({
+    required String hostIp,
+    String? customWsUrl,
+    String roomId = kDefaultLanRoomId,
+  }) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('shadow_lan_host_ip', hostIp);
+
+    final String wsUrl =
+        customWsUrl ?? 'ws://$hostIp:$kDefaultLanWsPort';
     final String tvUrl =
-        '$kDefaultLanTvBaseUrl/?mode=lan&room=$kDefaultLanRoomId&ws=${Uri.encodeComponent(_lanWsUrl)}';
+        'http://$hostIp:$kDefaultLanWebPort/?mode=lan&room=$roomId&ws=${Uri.encodeComponent(wsUrl)}';
+
     await Clipboard.setData(ClipboardData(text: tvUrl));
 
-    final bool connected = await _lanSocket.connect(_lanWsUrl);
+    final bool connected = await _lanSocket.connect(wsUrl);
     if (connected) {
       _lanSocket.sendJson({
         'type': 'join',
-        'roomId': kDefaultLanRoomId,
+        'role': 'admin',
+        'room': roomId,
+        'roomId': roomId,
         'hunterId': _deviceAdminToken ?? 'admin_lan',
         'name': 'Admin_LAN',
       });
@@ -124,7 +283,9 @@ class _ProfileScreenState extends State<ProfileScreen>
     if (!mounted) return;
     setState(() {
       _isLanMode = true;
-      _activeRoom = kDefaultLanRoomId;
+      _lanHostIp = hostIp;
+      _lanWsUrl = wsUrl;
+      _activeRoom = roomId;
       _verifiedKey = 'LAN';
       _lanTvUrl = tvUrl;
       _lanMaxHp = 5000;
@@ -138,8 +299,8 @@ class _ProfileScreenState extends State<ProfileScreen>
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(connected
-            ? "LAN connecté ($_lanWsUrl). Ouvrez sur la TV : $tvUrl"
-            : "Mode LAN prêt (serveur WS non joint). Ouvrez sur la TV : $tvUrl"),
+            ? "LAN connecté ($wsUrl). Lien TV copié : $tvUrl"
+            : "Mode LAN prêt (serveur WS non joint sur $wsUrl). Lien TV copié."),
         backgroundColor:
             connected ? const Color(0xFF00FF66) : const Color(0xFFFF9100),
         duration: const Duration(seconds: 4),
@@ -228,6 +389,29 @@ class _ProfileScreenState extends State<ProfileScreen>
 
       if (rawUrl == null || rawUrl.isEmpty) {
         rawUrl = Uri.base.toString();
+      }
+
+      if (rawUrl.contains('mode=lan') || rawUrl.contains('ws=')) {
+        try {
+          final parsedUri = Uri.parse(rawUrl);
+          String? wsParam = parsedUri.queryParameters['ws'];
+          String? roomId = parsedUri.queryParameters['room'] ?? 'LAN_1';
+          if (wsParam == null && parsedUri.fragment.contains('?')) {
+            final fragParams =
+                Uri.splitQueryString(parsedUri.fragment.split('?').last);
+            wsParam = fragParams['ws'];
+            roomId = fragParams['room'] ?? roomId;
+          }
+          if (wsParam != null && wsParam.isNotEmpty) {
+            await _promptAndActivateLanMode(
+              prefilledWsUrl: Uri.decodeComponent(wsParam),
+              prefilledRoom: roomId,
+            );
+            return;
+          }
+        } catch (e) {
+          debugPrint("Erreur deeplink LAN: $e");
+        }
       }
 
       if (rawUrl.contains('room=')) {
@@ -416,8 +600,11 @@ class _ProfileScreenState extends State<ProfileScreen>
 
     if (_isLanMode) {
       lanOptimisticUpdate();
+      final String room = _activeRoom ?? kDefaultLanRoomId;
       _lanSocket.sendJson({
-        'roomId': _activeRoom ?? kDefaultLanRoomId,
+        'room': room,
+        'roomId': room,
+        'role': 'admin',
         'actorId': _deviceAdminToken ?? 'admin_lan',
         ...lanPayload,
       });
@@ -1206,7 +1393,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                               letterSpacing: 1.1,
                             ),
                           ),
-                          onPressed: _activateLanMode,
+                          onPressed: () => _promptAndActivateLanMode(),
                         ),
                       ),
                       const SizedBox(width: 10),
@@ -1282,6 +1469,25 @@ class _ProfileScreenState extends State<ProfileScreen>
                           fontFamily: 'monospace',
                           fontSize: 9,
                           decoration: TextDecoration.underline,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    TextButton(
+                      style: TextButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 2),
+                        minimumSize: Size.zero,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                      onPressed: () => _promptAndActivateLanMode(),
+                      child: const Text(
+                        "CHANGER L'IP DU SERVEUR LAN",
+                        style: TextStyle(
+                          color: Color(0xFFFF9100),
+                          fontFamily: 'monospace',
+                          fontSize: 9,
+                          fontWeight: FontWeight.bold,
                         ),
                       ),
                     ),

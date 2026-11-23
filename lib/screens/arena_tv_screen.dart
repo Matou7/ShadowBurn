@@ -27,7 +27,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
   StreamSubscription? _raidSubscription;
 
   bool _isLanMode = false;
-  String _lanWsUrl = 'ws://192.168.1.8:8765';
+  String _lanWsUrl = '';
   final LanSocketService _lanSocket = LanSocketService();
   StreamSubscription? _lanSub;
 
@@ -59,6 +59,12 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
   static const int kRoomInactivityThresholdMs = 600000;
   static const Duration _kFirestoreTimeout = Duration(seconds: 6);
 
+  String _resolveDefaultLanWsUrl() {
+    final String host =
+        Uri.base.host.isNotEmpty ? Uri.base.host : '127.0.0.1';
+    return 'ws://$host:8765';
+  }
+
   Map<String, String> _readUrlParams() {
     String raw = Uri.base.toString();
     try {
@@ -80,7 +86,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
       out['mode'] = 'lan';
     }
     if (!out.containsKey('ws')) {
-      final wsMatch = RegExp(r'(?:^|[?&#])ws=([^&#]+)').firstMatch(lower);
+      final wsMatch = RegExp(r'(?:^|[?&#])ws=([^&#]+)').firstMatch(raw);
       if (wsMatch != null) {
         out['ws'] = Uri.decodeComponent(wsMatch.group(1)!);
       }
@@ -93,6 +99,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _lastRoomActivityMs = DateTime.now().millisecondsSinceEpoch;
+    _lanWsUrl = _resolveDefaultLanWsUrl();
 
     if (kIsWeb) {
       ArenaWebHelper.registerBeforeUnload(() {
@@ -184,16 +191,35 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
     await _lanSub?.cancel();
     _lanSub = _lanSocket.messages.listen((msg) {
       if (!mounted) return;
-      if (msg['type'] == 'state') {
-        final endMs = (msg['target_end_time_ms'] as num?)?.toInt() ?? 0;
+      final String msgType = (msg['type'] ?? '').toString();
+      if (msgType == 'state' ||
+          msgType == 'welcome' ||
+          msgType == 'state_sync') {
+        final Map<String, dynamic> incoming = (msg['state'] is Map)
+            ? Map<String, dynamic>.from(msg['state'] as Map)
+            : Map<String, dynamic>.from(msg);
+        final int endMs = (incoming['target_end_time_ms'] as num?)?.toInt() ??
+            (incoming['target_end_time'] as num?)?.toInt() ??
+            0;
+        final int remSec =
+            (incoming['remaining_seconds'] as num?)?.toInt() ?? -1;
+
         setState(() {
           if (endMs > 0) {
             _targetEndTimeMs = endMs;
             final diff =
                 (endMs - DateTime.now().millisecondsSinceEpoch) ~/ 1000;
             _remainingSeconds = diff > 0 ? diff : 0;
+          } else if (remSec >= 0) {
+            _remainingSeconds = remSec;
+            _targetEndTimeMs =
+                DateTime.now().millisecondsSinceEpoch + (remSec * 1000);
           }
-          _raidData = Map<String, dynamic>.from(msg);
+          _raidData = {
+            ..._raidData,
+            ...incoming,
+            'roomId': roomId,
+          };
           _isRaidDataLoaded = true;
         });
       }
@@ -203,11 +229,14 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
     if (ok) {
       _lanSocket.sendJson({
         'type': 'join',
+        'role': 'tv',
+        'room': roomId,
         'roomId': roomId,
         'hunterId': 'tv_${Random().nextInt(999999)}',
         'name': 'Arena_TV',
       });
     }
+    if (mounted) setState(() {});
   }
 
   void _recordActivity() {
@@ -293,9 +322,10 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
     if (isLan) {
       if (!_isLanMode) {
         final room = (params['room'] ?? 'LAN_1').trim();
-        final wsUrl = (params['ws'] ?? 'ws://192.168.1.8:8765').trim();
+        final fallbackWs = _resolveDefaultLanWsUrl();
+        final wsUrl = (params['ws'] ?? fallbackWs).trim();
         _connectLanTv(room.isEmpty ? 'LAN_1' : room,
-            wsUrl.isEmpty ? 'ws://192.168.1.8:8765' : wsUrl);
+            wsUrl.isEmpty ? fallbackWs : wsUrl);
       }
       return;
     }
@@ -1857,11 +1887,20 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
 
   Widget _buildDynamicMaximizedQrPanel(String raidStatus,
       {required bool isVictory}) {
+    final Uri? lanWsUri = Uri.tryParse(_lanWsUrl);
+    final String lanHost = (lanWsUri != null && lanWsUri.host.isNotEmpty)
+        ? lanWsUri.host
+        : (Uri.base.host.isNotEmpty ? Uri.base.host : '127.0.0.1');
+    final int lanPort = Uri.base.port != 0 ? Uri.base.port : 8080;
+    final String lanScheme =
+        Uri.base.scheme.isNotEmpty ? Uri.base.scheme : 'http';
+
     final String rawJoinUrl = _isLanMode
-        ? 'http://192.168.1.8:8080/?mode=lan&role=hunter&room=$_roomId&ws=${Uri.encodeComponent(_lanWsUrl)}'
+        ? '$lanScheme://$lanHost:$lanPort/?mode=lan&role=hunter&room=$_roomId&ws=${Uri.encodeComponent(_lanWsUrl)}'
         : 'https://shadowburn-1d8f8.web.app/#/join?room=$_roomId&token=${_joinToken ?? ""}';
-    final String rawAdminAppUrl =
-        'shadowburn://admin?room=$_roomId&key=${_adminKey ?? ""}';
+    final String rawAdminAppUrl = _isLanMode
+        ? 'shadowburn://admin?mode=lan&room=$_roomId&ws=${Uri.encodeComponent(_lanWsUrl)}'
+        : 'shadowburn://admin?room=$_roomId&key=${_adminKey ?? ""}';
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
