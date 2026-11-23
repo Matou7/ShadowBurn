@@ -1,4 +1,4 @@
-import 'dart:async';
+﻿import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -36,7 +36,7 @@ class _RaidAdminPanelScreenState extends State<RaidAdminPanelScreen> {
   String _denialReason = "VÉRIFICATION DES HAUTES PRIVILÈGES DU MONARQUE...";
   Map<String, dynamic> _raidData = {};
   StreamSubscription? _subscription;
-  StreamSubscription>? _lanSubscription;
+  StreamSubscription? _lanSubscription;
   final LanSocketService _lanSocket = LanSocketService();
   String? _lastErrorBanner;
 
@@ -79,36 +79,57 @@ class _RaidAdminPanelScreenState extends State<RaidAdminPanelScreen> {
       setState(() {
         _isChecking = false;
         _isAuthorized = true;
+        _lastErrorBanner = null;
         _raidData = {
           'status': 'waiting',
           'current_hp': 5000,
           'max_hp': 5000,
-          'hunters': [],
+          'remaining_seconds': 1800,
+          'hunters': <dynamic>[],
         };
       });
     }
 
-    _lanSubscription?.cancel();
+    await _lanSubscription?.cancel();
     _lanSubscription = _lanSocket.messages.listen((msg) {
       if (!mounted) return;
       final String type = (msg['type'] ?? '').toString().toLowerCase();
-      if (type == 'state' || msg.containsKey('current_hp')) {
+      final Map<String, dynamic> payload = (msg['state'] is Map)
+          ? Map<String, dynamic>.from(msg['state'] as Map)
+          : msg;
+      if (type == 'state' ||
+          type == 'welcome' ||
+          type == 'state_sync' ||
+          payload.containsKey('current_hp')) {
         setState(() {
           _raidData = {
             ..._raidData,
-            ...msg,
+            ...payload,
           };
         });
       }
     });
 
-    await _lanSocket.connect(
-      targetWs,
-      roomId: cleanRoom,
-      role: 'admin',
-      clientId: 'admin_${DateTime.now().millisecondsSinceEpoch}',
-      name: 'MONARQUE (LAN)',
-    );
+    final String clientId = 'admin_${DateTime.now().millisecondsSinceEpoch}';
+    final bool connected = await _lanSocket.connect(targetWs);
+    if (!mounted) return;
+
+    if (!connected) {
+      setState(() {
+        _lastErrorBanner = "Connexion WebSocket LAN impossible sur $targetWs.";
+      });
+      return;
+    }
+
+    _lanSocket.sendJson({
+      'type': 'join',
+      'role': 'admin',
+      'room': cleanRoom,
+      'roomId': cleanRoom,
+      'hunterId': clientId,
+      'clientId': clientId,
+      'name': 'MONARQUE (LAN)',
+    });
   }
 
   Future<void> _verifyCloudAccess() async {
@@ -133,14 +154,15 @@ class _RaidAdminPanelScreenState extends State<RaidAdminPanelScreen> {
           setState(() {
             _isChecking = false;
             _isAuthorized = false;
-            _denialReason = "SALLE INTROUVABLE : [${widget.roomId}] n'existe pas.";
+            _denialReason =
+                "SALLE INTROUVABLE : [${widget.roomId}] n'existe pas.";
           });
         }
         return;
       }
 
-      final data = doc.data() ?? {};
-      final expectedKey = (data['admin_key'] ?? '').toString().trim();
+      final Map<String, dynamic> data = doc.data() ?? <String, dynamic>{};
+      final String expectedKey = (data['admin_key'] ?? '').toString().trim();
 
       if (expectedKey.isEmpty || expectedKey != widget.adminKey.trim()) {
         if (mounted) {
@@ -182,7 +204,7 @@ class _RaidAdminPanelScreenState extends State<RaidAdminPanelScreen> {
       if (!mounted) return;
       if (doc.exists) {
         setState(() {
-          _raidData = doc.data() ?? {};
+          _raidData = doc.data() ?? <String, dynamic>{};
         });
       }
     });
@@ -282,7 +304,8 @@ class _RaidAdminPanelScreenState extends State<RaidAdminPanelScreen> {
     final num currentHp = (_raidData['current_hp'] ?? 5000) as num;
     final num maxHp = (_raidData['max_hp'] ?? 5000) as num;
     final dynamic rawHunters = _raidData['hunters'];
-    final List hunters = rawHunters is Iterable ? rawHunters.toList() : [];
+    final List<dynamic> hunters =
+        rawHunters is Iterable ? rawHunters.toList() : <dynamic>[];
 
     return Scaffold(
       backgroundColor: const Color(0xFF02070D),
