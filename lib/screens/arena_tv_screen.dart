@@ -1781,6 +1781,14 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
   }
 
   Widget _buildWaitingLobby(List hunterList) {
+    final String countLabel = _isLanMode
+        ? '${hunterList.length} CHASSEURS'
+        : '${hunterList.length} / $kMaxHuntersPerRoom CHASSEURS';
+    final Color countColor =
+        (!_isLanMode && hunterList.length >= kMaxHuntersPerRoom)
+            ? const Color(0xFFFF2E56)
+            : const Color(0xFF00FF66);
+
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
@@ -1802,11 +1810,9 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
                     fontWeight: FontWeight.bold),
               ),
               Text(
-                '${hunterList.length} / $kMaxHuntersPerRoom CHASSEURS',
+                countLabel,
                 style: TextStyle(
-                  color: hunterList.length >= kMaxHuntersPerRoom
-                      ? const Color(0xFFFF2E56)
-                      : const Color(0xFF00FF66),
+                  color: countColor,
                   fontFamily: 'monospace',
                   fontSize: 11,
                   fontWeight: FontWeight.bold,
@@ -1898,9 +1904,8 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
     final String rawJoinUrl = _isLanMode
         ? '$lanScheme://$lanHost:$lanPort/?mode=lan&role=hunter&room=$_roomId&ws=${Uri.encodeComponent(_lanWsUrl)}'
         : 'https://shadowburn-1d8f8.web.app/#/join?room=$_roomId&token=${_joinToken ?? ""}';
-    final String rawAdminAppUrl = _isLanMode
-        ? 'shadowburn://admin?mode=lan&room=$_roomId&ws=${Uri.encodeComponent(_lanWsUrl)}'
-        : 'shadowburn://admin?room=$_roomId&key=${_adminKey ?? ""}';
+    final String rawAdminAppUrl =
+        'shadowburn://admin?room=$_roomId&key=${_adminKey ?? ""}';
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
@@ -1911,6 +1916,66 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
       ),
       child: LayoutBuilder(
         builder: (context, constraints) {
+          if (_isLanMode) {
+            return Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Text(
+                  'SCAN CHASSEUR LAN',
+                  style: TextStyle(
+                      color: Color(0xFF00E5FF),
+                      fontFamily: 'monospace',
+                      fontWeight: FontWeight.bold,
+                      fontSize: 11,
+                      letterSpacing: 1.1),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 8),
+                Expanded(
+                  child: Center(
+                    child: AspectRatio(
+                      aspectRatio: 1.0,
+                      child: Container(
+                        padding: const EdgeInsets.all(6),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Image.network(
+                          'https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=${Uri.encodeComponent(rawJoinUrl)}',
+                          fit: BoxFit.contain,
+                          errorBuilder: (context, error, stackTrace) =>
+                              const Icon(Icons.qr_code_2,
+                                  size: 60, color: Colors.black),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Salle : $_roomId',
+                  style: const TextStyle(
+                      color: Color(0xFF00FF66),
+                      fontSize: 9.5,
+                      fontFamily: 'monospace',
+                      fontWeight: FontWeight.bold),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  '($_lanWsUrl)',
+                  style: const TextStyle(
+                      color: Colors.white54,
+                      fontSize: 8,
+                      fontFamily: 'monospace'),
+                  textAlign: TextAlign.center,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            );
+          }
+
           final double totalHeight = constraints.maxHeight;
           final double sectionHeight = (totalHeight - 16) / 2;
 
@@ -1921,9 +1986,9 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Text(
-                      _isLanMode ? 'SCAN CHASSEUR LAN' : 'SCAN CHASSEUR',
-                      style: const TextStyle(
+                    const Text(
+                      'SCAN CHASSEUR',
+                      style: TextStyle(
                           color: Color(0xFF00E5FF),
                           fontFamily: 'monospace',
                           fontWeight: FontWeight.bold,
@@ -1955,11 +2020,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      _isLanMode
-                          ? '($_lanWsUrl)'
-                          : (raidStatus == 'waiting'
-                              ? '(En attente)'
-                              : '(Actif)'),
+                      raidStatus == 'waiting' ? '(En attente)' : '(Actif)',
                       style: TextStyle(
                           color: raidStatus == 'waiting'
                               ? Colors.white54

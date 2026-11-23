@@ -23,14 +23,20 @@ import '../services/lan_socket_service.dart';
 const String kDefaultLanHostIp = '192.0.0.4';
 const int kDefaultLanWsPort = 8765;
 const int kDefaultLanWebPort = 8080;
-const String kDefaultLanRoomId = 'LAN_1';
 
-const String kLanPackDriveFileId = '1sSehJ4eQLcG3QKl9t05eM3RkeIP39nJ0';
+const String kLanPackDriveFileId = '1qhEJS5YLDMOn3fpLJxq7E8o63Qx2h8uI';
 const String kLanPackDownloadUrl =
     'https://drive.google.com/uc?export=download&id=$kLanPackDriveFileId';
+const String kLanPackDriveViewUrl =
+    'https://drive.google.com/file/d/$kLanPackDriveFileId/view?usp=sharing';
 const String kLanTargetDir = '/storage/emulated/0/Download/LAN/web';
-const String kTermuxSetupCommand =
+
+const String kTermuxAutoAllowCommand =
     'mkdir -p ~/.termux && echo "allow-external-apps = true" >> ~/.termux/termux.properties && termux-reload-settings';
+const String kTermuxDepsCommand =
+    'termux-setup-storage && pkg update -y && pkg install -y python && pip install websockets';
+const String kTermuxManualStartCommand =
+    'cd /storage/emulated/0/Download/LAN/web && chmod +x start_lan.sh && ./start_lan.sh';
 
 class ProfileScreen extends StatefulWidget {
   final String? initialRoomId;
@@ -65,8 +71,7 @@ class _ProfileScreenState extends State<ProfileScreen>
   String _lanPackStatus = '';
   String _lanHostIp = kDefaultLanHostIp;
   String _lanWsUrl = 'ws://$kDefaultLanHostIp:$kDefaultLanWsPort';
-  String _lanTvUrl =
-      'http://$kDefaultLanHostIp:$kDefaultLanWebPort/?mode=lan&room=$kDefaultLanRoomId&ws=${Uri.encodeComponent('ws://$kDefaultLanHostIp:$kDefaultLanWsPort')}';
+  String _lanTvUrl = '';
   final LanSocketService _lanSocket = LanSocketService();
   StreamSubscription? _lanSub;
   int _lanCurrentHp = 5000;
@@ -144,6 +149,20 @@ class _ProfileScreenState extends State<ProfileScreen>
     });
   }
 
+  String _generateUniqueLanRoomId() {
+    final rng = Random.secure();
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    final suffix =
+        List.generate(6, (_) => chars[rng.nextInt(chars.length)]).join();
+    final shortToken = (_deviceAdminToken ?? 'DEV')
+        .replaceAll(RegExp(r'[^A-Za-z0-9]'), '')
+        .toUpperCase();
+    final tail = shortToken.length >= 4
+        ? shortToken.substring(shortToken.length - 4)
+        : shortToken.padRight(4, 'X');
+    return 'LAN_${tail}_$suffix';
+  }
+
   Future<void> _loadSavedLanHost() async {
     final prefs = await SharedPreferences.getInstance();
     final String? savedIp = prefs.getString('shadow_lan_host_ip');
@@ -159,12 +178,15 @@ class _ProfileScreenState extends State<ProfileScreen>
             ? savedIp.trim()
             : kDefaultLanHostIp);
 
+    final String autoRoom = _activeRoom ?? _generateUniqueLanRoomId();
+    final String wsUrl = 'ws://$resolvedIp:$kDefaultLanWsPort';
+
     if (!mounted) return;
     setState(() {
       _lanHostIp = resolvedIp;
-      _lanWsUrl = 'ws://$resolvedIp:$kDefaultLanWsPort';
+      _lanWsUrl = wsUrl;
       _lanTvUrl =
-          'http://$resolvedIp:$kDefaultLanWebPort/?mode=lan&room=$kDefaultLanRoomId&ws=${Uri.encodeComponent(_lanWsUrl)}';
+          'http://$resolvedIp:$kDefaultLanWebPort/?mode=lan&room=$autoRoom&ws=${Uri.encodeComponent(wsUrl)}';
     });
   }
 
@@ -197,7 +219,7 @@ class _ProfileScreenState extends State<ProfileScreen>
     if (kIsWeb) return;
     if (_isDownloadingLanPack) return;
     if (!force && _isLanPackInstalledLocally()) {
-      const msg = "Pack LAN prêt dans Download/LAN/web";
+      const msg = "Pack LAN pret dans Download/LAN/web";
       if (mounted) {
         setState(() => _lanPackStatus = msg);
       }
@@ -206,7 +228,7 @@ class _ProfileScreenState extends State<ProfileScreen>
     }
 
     _isDownloadingLanPack = true;
-    const startMsg = "Téléchargement du pack LAN en arrière-plan...";
+    const startMsg = "Telechargement automatique du pack LAN...";
     if (mounted) {
       setState(() => _lanPackStatus = startMsg);
     }
@@ -242,10 +264,10 @@ class _ProfileScreenState extends State<ProfileScreen>
         }
 
         if (bytes.length < 4 || bytes[0] != 0x50 || bytes[1] != 0x4B) {
-          throw Exception("Archive ZIP invalide reçue depuis Google Drive.");
+          throw Exception("Archive ZIP invalide recuperee depuis Drive.");
         }
 
-        const extractMsg = "Extraction vers Download/LAN/web...";
+        const extractMsg = "Extraction automatique vers Download/LAN/web...";
         if (mounted) {
           setState(() => _lanPackStatus = extractMsg);
         }
@@ -280,7 +302,7 @@ class _ProfileScreenState extends State<ProfileScreen>
         }
 
         final doneMsg =
-            "Pack LAN installé ($extractedCount fichiers) dans Download/LAN/web";
+            "Pack LAN installe ($extractedCount fichiers) dans Download/LAN/web";
         if (mounted) {
           setState(() => _lanPackStatus = doneMsg);
         }
@@ -289,8 +311,7 @@ class _ProfileScreenState extends State<ProfileScreen>
         client.close();
       }
     } catch (e) {
-      final errMsg =
-          "Pack LAN non téléchargé (vérifie permission stockage / réseau) : $e";
+      final errMsg = "Telechargement auto en attente : $e";
       debugPrint("[LAN PACK] $errMsg");
       if (mounted) {
         setState(() => _lanPackStatus = errMsg);
@@ -301,13 +322,73 @@ class _ProfileScreenState extends State<ProfileScreen>
     }
   }
 
+  void _copyWithToast(String text, String label) {
+    Clipboard.setData(ClipboardData(text: text));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text("$label copie dans le presse-papiers."),
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
+  Widget _buildCopyBox({
+    required String value,
+    required Color accentColor,
+    required String toastLabel,
+    bool underline = false,
+  }) {
+    return InkWell(
+      onTap: () => _copyWithToast(value, toastLabel),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          color: Colors.black,
+          border: Border.all(color: accentColor.withOpacity(0.5)),
+          borderRadius: BorderRadius.circular(4),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              value,
+              style: TextStyle(
+                color: accentColor,
+                fontFamily: 'monospace',
+                fontSize: 9.5,
+                decoration:
+                    underline ? TextDecoration.underline : TextDecoration.none,
+              ),
+            ),
+            const SizedBox(height: 4),
+            const Text(
+              "[TOUCHER POUR COPIER]",
+              style: TextStyle(
+                color: Colors.white70,
+                fontFamily: 'monospace',
+                fontSize: 8.5,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Future<void> _promptAndActivateLanMode({
     String? prefilledWsUrl,
     String? prefilledRoom,
   }) async {
-    await _ensureLanPackInstalledInBackground();
-    await _launchLanServerAutomatically();
-    await Future.delayed(const Duration(seconds: 2));
+    unawaited(_ensureLanPackInstalledInBackground());
+    unawaited(_launchLanServerAutomatically());
+
+    final String uniqueRoom =
+        (prefilledRoom != null && prefilledRoom.trim().isNotEmpty)
+            ? prefilledRoom.trim()
+            : _generateUniqueLanRoomId();
 
     if (prefilledWsUrl != null && prefilledWsUrl.trim().isNotEmpty) {
       final Uri? parsed = Uri.tryParse(prefilledWsUrl.trim());
@@ -316,21 +397,17 @@ class _ProfileScreenState extends State<ProfileScreen>
       await _connectLanAdminWithHost(
         hostIp: host,
         customWsUrl: prefilledWsUrl.trim(),
-        roomId: (prefilledRoom != null && prefilledRoom.trim().isNotEmpty)
-            ? prefilledRoom.trim()
-            : kDefaultLanRoomId,
+        roomId: uniqueRoom,
       );
       return;
     }
 
     final ipController = TextEditingController(text: _lanHostIp);
-    final roomController =
-        TextEditingController(text: _activeRoom ?? kDefaultLanRoomId);
     String dialogPackStatus = _lanPackStatus.isNotEmpty
         ? _lanPackStatus
         : (_isLanPackInstalledLocally()
-            ? "Pack LAN prêt dans Download/LAN/web"
-            : "Téléchargement du pack LAN en arrière-plan...");
+            ? "Pack LAN pret dans Download/LAN/web"
+            : "Telechargement automatique du pack LAN en cours...");
 
     SystemDialog.show(
       context,
@@ -338,144 +415,196 @@ class _ProfileScreenState extends State<ProfileScreen>
       color: const Color(0xFF00FF66),
       content: StatefulBuilder(
         builder: (dialogCtx, setDialogState) {
-          return Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                "1) L'app télécharge et extrait le pack dans Download/LAN/web puis tente de lancer le serveur.\n"
-                "2) Si le serveur ne démarre pas seul : installe Termux, autorise les commandes de ShadowBurn dans les réglages, et lance une fois dans Termux :",
-                style:
-                    TextStyle(color: Colors.white70, fontSize: 11, height: 1.35),
-              ),
-              const SizedBox(height: 6),
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: Colors.black,
-                  border: Border.all(color: const Color(0xFF00FF66).withOpacity(0.45)),
-                  borderRadius: BorderRadius.circular(4),
+          return SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  "Salle auto-attribuee : $uniqueRoom",
+                  style: const TextStyle(
+                    color: Color(0xFF00FF66),
+                    fontFamily: 'monospace',
+                    fontSize: 10.5,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const SelectableText(
-                      kTermuxSetupCommand,
-                      style: TextStyle(
-                        color: Color(0xFF00FF66),
-                        fontFamily: 'monospace',
-                        fontSize: 9.5,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    InkWell(
-                      onTap: () {
-                        Clipboard.setData(
-                            const ClipboardData(text: kTermuxSetupCommand));
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text("Commande Termux copiée !"),
-                            duration: Duration(seconds: 2),
-                          ),
-                        );
-                      },
-                      child: const Text(
-                        "[COPIER LA COMMANDE TERMUX]",
+                const SizedBox(height: 10),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF00FF66).withOpacity(0.07),
+                    border: Border.all(
+                        color: const Color(0xFF00FF66).withOpacity(0.45)),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: const Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        "MODE AUTO (recommande)",
                         style: TextStyle(
-                          color: Color(0xFF00E5FF),
+                          color: Color(0xFF00FF66),
                           fontFamily: 'monospace',
-                          fontSize: 9.5,
+                          fontSize: 10,
                           fontWeight: FontWeight.bold,
                         ),
                       ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 8),
-              const Text(
-                "3) Sans signal pendant 60s : remise à zéro auto et arrêt propre du serveur.",
-                style:
-                    TextStyle(color: Colors.white54, fontSize: 10.5, height: 1.3),
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: ipController,
-                keyboardType: TextInputType.url,
-                style: const TextStyle(
-                    color: Colors.white, fontFamily: 'monospace', fontSize: 13),
-                decoration: const InputDecoration(
-                  labelText: "IP Wi-Fi de l'hôte (ex: 192.0.0.4)",
-                  labelStyle: TextStyle(color: Colors.white54),
-                  enabledBorder: UnderlineInputBorder(
-                      borderSide: BorderSide(color: Color(0xFF00FF66))),
-                  focusedBorder: UnderlineInputBorder(
-                      borderSide: BorderSide(color: Color(0xFF00FF66))),
-                ),
-              ),
-              const SizedBox(height: 8),
-              TextField(
-                controller: roomController,
-                style: const TextStyle(
-                    color: Colors.white, fontFamily: 'monospace', fontSize: 13),
-                decoration: const InputDecoration(
-                  labelText: "Nom de la salle (défaut: LAN_1)",
-                  labelStyle: TextStyle(color: Colors.white54),
-                  enabledBorder: UnderlineInputBorder(
-                      borderSide: BorderSide(color: Color(0xFF00E5FF))),
-                  focusedBorder: UnderlineInputBorder(
-                      borderSide: BorderSide(color: Color(0xFF00E5FF))),
-                ),
-              ),
-              const SizedBox(height: 10),
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: Colors.black45,
-                  border: Border.all(color: Colors.white12),
-                  borderRadius: BorderRadius.circular(4),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      dialogPackStatus,
-                      style: const TextStyle(
-                        color: Color(0xFF00E5FF),
-                        fontFamily: 'monospace',
-                        fontSize: 10,
-                      ),
-                    ),
-                    if (!kIsWeb) ...[
-                      const SizedBox(height: 6),
-                      InkWell(
-                        onTap: () {
-                          unawaited(_ensureLanPackInstalledInBackground(
-                            force: true,
-                            onProgress: (status) {
-                              if (dialogCtx.mounted) {
-                                setDialogState(() => dialogPackStatus = status);
-                              }
-                            },
-                          ));
-                        },
-                        child: const Text(
-                          "[FORCER TÉLÉCHARGEMENT / MISE À JOUR PACK LAN]",
-                          style: TextStyle(
-                            color: Color(0xFFFF9100),
-                            fontFamily: 'monospace',
-                            fontSize: 9,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
+                      SizedBox(height: 4),
+                      Text(
+                        "- ShadowBurn telecharge et extrait le pack dans Download/LAN/web puis lance le serveur automatiquement.\n"
+                        "- A faire 1 fois dans Termux : autoriser les commandes externes puis installer stockage + Python + websockets.",
+                        style: TextStyle(
+                            color: Colors.white70, fontSize: 10.5, height: 1.35),
                       ),
                     ],
-                  ],
+                  ),
                 ),
-              ),
-            ],
+                const SizedBox(height: 8),
+                const Text(
+                  "Auto (1 fois dans Termux) - autoriser commandes externes :",
+                  style: TextStyle(color: Colors.white70, fontSize: 10.5),
+                ),
+                const SizedBox(height: 4),
+                _buildCopyBox(
+                  value: kTermuxAutoAllowCommand,
+                  accentColor: const Color(0xFF00FF66),
+                  toastLabel: "Commande autorisation Termux",
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  "Auto & Manuel (1 fois dans Termux) - stockage + Python + websockets :",
+                  style: TextStyle(color: Colors.white70, fontSize: 10.5),
+                ),
+                const SizedBox(height: 4),
+                _buildCopyBox(
+                  value: kTermuxDepsCommand,
+                  accentColor: const Color(0xFF00E5FF),
+                  toastLabel: "Commande prerequis Termux",
+                ),
+                const SizedBox(height: 12),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFF9100).withOpacity(0.07),
+                    border: Border.all(
+                        color: const Color(0xFFFF9100).withOpacity(0.45)),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: const Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        "MODE MANUEL (sans lancement auto)",
+                        style: TextStyle(
+                          color: Color(0xFFFF9100),
+                          fontFamily: 'monospace',
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      SizedBox(height: 4),
+                      Text(
+                        "- Telecharge le pack via le lien Drive ci-dessous et extrais-le dans Download/LAN/web.\n"
+                        "- Lance ensuite la commande de demarrage directement dans Termux.",
+                        style: TextStyle(
+                            color: Colors.white70, fontSize: 10.5, height: 1.35),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  "Manuel - lien du pack LAN (Drive) :",
+                  style: TextStyle(color: Colors.white70, fontSize: 10.5),
+                ),
+                const SizedBox(height: 4),
+                _buildCopyBox(
+                  value: kLanPackDriveViewUrl,
+                  accentColor: const Color(0xFF00E5FF),
+                  toastLabel: "Lien Drive",
+                  underline: true,
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  "Manuel - lancer le serveur dans Termux :",
+                  style: TextStyle(color: Colors.white70, fontSize: 10.5),
+                ),
+                const SizedBox(height: 4),
+                _buildCopyBox(
+                  value: kTermuxManualStartCommand,
+                  accentColor: const Color(0xFFFF9100),
+                  toastLabel: "Commande demarrage manuel",
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: ipController,
+                  keyboardType: TextInputType.url,
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontFamily: 'monospace',
+                      fontSize: 13),
+                  decoration: const InputDecoration(
+                    labelText: "IP Wi-Fi affichee par Termux (ex: 192.0.0.4)",
+                    labelStyle: TextStyle(color: Colors.white54),
+                    enabledBorder: UnderlineInputBorder(
+                        borderSide: BorderSide(color: Color(0xFF00FF66))),
+                    focusedBorder: UnderlineInputBorder(
+                        borderSide: BorderSide(color: Color(0xFF00FF66))),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.black45,
+                    border: Border.all(color: Colors.white12),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        dialogPackStatus,
+                        style: const TextStyle(
+                          color: Color(0xFF00E5FF),
+                          fontFamily: 'monospace',
+                          fontSize: 10,
+                        ),
+                      ),
+                      if (!kIsWeb) ...[
+                        const SizedBox(height: 6),
+                        InkWell(
+                          onTap: () {
+                            unawaited(_ensureLanPackInstalledInBackground(
+                              force: true,
+                              onProgress: (status) {
+                                if (dialogCtx.mounted) {
+                                  setDialogState(
+                                      () => dialogPackStatus = status);
+                                }
+                              },
+                            ));
+                          },
+                          child: const Text(
+                            "[FORCER TELECHARGEMENT AUTO PACK LAN]",
+                            style: TextStyle(
+                              color: Color(0xFFFF9100),
+                              fontFamily: 'monospace',
+                              fontSize: 9,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ],
+            ),
           );
         },
       ),
@@ -497,14 +626,11 @@ class _ProfileScreenState extends State<ProfileScreen>
                 .replaceAll('ws://', '')
                 .split(':')
                 .first;
-            final String cleanRoom = roomController.text.trim().isEmpty
-                ? kDefaultLanRoomId
-                : roomController.text.trim();
             Navigator.pop(context);
             if (cleanIp.isNotEmpty) {
               await _connectLanAdminWithHost(
                 hostIp: cleanIp,
-                roomId: cleanRoom,
+                roomId: uniqueRoom,
               );
             }
           },
@@ -518,26 +644,29 @@ class _ProfileScreenState extends State<ProfileScreen>
   Future<void> _connectLanAdminWithHost({
     required String hostIp,
     String? customWsUrl,
-    String roomId = kDefaultLanRoomId,
+    String? roomId,
   }) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('shadow_lan_host_ip', hostIp);
 
+    final String resolvedRoom = (roomId != null && roomId.trim().isNotEmpty)
+        ? roomId.trim()
+        : _generateUniqueLanRoomId();
     final String wsUrl = customWsUrl ?? 'ws://$hostIp:$kDefaultLanWsPort';
     final String tvUrl =
-        'http://$hostIp:$kDefaultLanWebPort/?mode=lan&room=$roomId&ws=${Uri.encodeComponent(wsUrl)}';
+        'http://$hostIp:$kDefaultLanWebPort/?mode=lan&room=$resolvedRoom&ws=${Uri.encodeComponent(wsUrl)}';
 
     await Clipboard.setData(ClipboardData(text: tvUrl));
 
-    RaidAdminService.configureLan(wsUrl: wsUrl, roomId: roomId);
+    RaidAdminService.configureLan(wsUrl: wsUrl, roomId: resolvedRoom);
 
     final bool connected = await _lanSocket.connect(wsUrl);
     if (connected) {
       _lanSocket.sendJson({
         'type': 'join',
         'role': 'admin',
-        'room': roomId,
-        'roomId': roomId,
+        'room': resolvedRoom,
+        'roomId': resolvedRoom,
         'hunterId': _deviceAdminToken ?? 'admin_lan',
         'name': 'Admin_LAN',
       });
@@ -548,7 +677,7 @@ class _ProfileScreenState extends State<ProfileScreen>
       _isLanMode = true;
       _lanHostIp = hostIp;
       _lanWsUrl = wsUrl;
-      _activeRoom = roomId;
+      _activeRoom = resolvedRoom;
       _verifiedKey = 'LAN';
       _lanTvUrl = tvUrl;
       _lanMaxHp = 5000;
@@ -562,8 +691,8 @@ class _ProfileScreenState extends State<ProfileScreen>
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(connected
-            ? "LAN connecté ($wsUrl). Lien TV copié : $tvUrl"
-            : "Mode LAN prêt (serveur WS non joint sur $wsUrl). Lien TV copié."),
+            ? "LAN [$resolvedRoom] connecte ($wsUrl). Lien TV copie."
+            : "Mode LAN [$resolvedRoom] pret (WS non joint sur $wsUrl). Lien TV copie."),
         backgroundColor:
             connected ? const Color(0xFF00FF66) : const Color(0xFFFF9100),
         duration: const Duration(seconds: 4),
@@ -658,7 +787,7 @@ class _ProfileScreenState extends State<ProfileScreen>
         try {
           final parsedUri = Uri.parse(rawUrl);
           String? wsParam = parsedUri.queryParameters['ws'];
-          String? roomId = parsedUri.queryParameters['room'] ?? 'LAN_1';
+          String? roomId = parsedUri.queryParameters['room'];
           if (wsParam == null && parsedUri.fragment.contains('?')) {
             final fragParams =
                 Uri.splitQueryString(parsedUri.fragment.split('?').last);
@@ -741,7 +870,7 @@ class _ProfileScreenState extends State<ProfileScreen>
       if (!mounted) return;
 
       if (!isProVerified) {
-        _rejectIntrusionAttempt("ACCÈS REFUSÉ : STATUT MONARQUE PRO REQUIS.");
+        _rejectIntrusionAttempt("ACCES REFUSE : STATUT MONARQUE PRO REQUIS.");
         return;
       }
 
@@ -751,7 +880,7 @@ class _ProfileScreenState extends State<ProfileScreen>
       final doc = await docRef.get().timeout(_kFirestoreTimeout);
 
       if (!doc.exists) {
-        _unbindFromRoom("Donjon [$cleanRoomId] inexistant ou fermé.");
+        _unbindFromRoom("Donjon [$cleanRoomId] inexistant ou ferme.");
         return;
       }
 
@@ -762,7 +891,7 @@ class _ProfileScreenState extends State<ProfileScreen>
       if (expectedKey.isNotEmpty &&
           cleanKey.isNotEmpty &&
           expectedKey != cleanKey) {
-        _rejectIntrusionAttempt("ACCÈS REFUSÉ : Clé Maître invalide.");
+        _rejectIntrusionAttempt("ACCES REFUSE : Cle Maitre invalide.");
         return;
       }
 
@@ -790,7 +919,7 @@ class _ProfileScreenState extends State<ProfileScreen>
           await game.unpairAdminRoom();
         }
         _rejectIntrusionAttempt(
-            "INTRUSION REFUSÉE : Un autre administrateur contrôle déjà [$cleanRoomId].");
+            "INTRUSION REFUSEE : Un autre administrateur controle deja [$cleanRoomId].");
         return;
       }
 
@@ -823,7 +952,7 @@ class _ProfileScreenState extends State<ProfileScreen>
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text("Télécommande Maître active sur [$cleanRoomId]"),
+            content: Text("Telecommande Maitre active sur [$cleanRoomId]"),
             backgroundColor: const Color(0xFF00FF66),
             duration: const Duration(seconds: 2),
           ),
@@ -833,7 +962,7 @@ class _ProfileScreenState extends State<ProfileScreen>
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text("Délai réseau dépassé lors de la liaison au portail."),
+            content: Text("Delai reseau depasse lors de la liaison au portail."),
             backgroundColor: Color(0xFFFF2E56),
           ),
         );
@@ -873,7 +1002,7 @@ class _ProfileScreenState extends State<ProfileScreen>
 
     if (_isLanMode) {
       lanOptimisticUpdate();
-      final String room = _activeRoom ?? kDefaultLanRoomId;
+      final String room = _activeRoom ?? _generateUniqueLanRoomId();
       _lanSocket.sendJson({
         'room': room,
         'roomId': room,
@@ -1012,7 +1141,7 @@ class _ProfileScreenState extends State<ProfileScreen>
         mainAxisSize: MainAxisSize.min,
         children: [
           const Text(
-            "Entrez votre clé de licence Pro ou vérifiez votre achat instantanément via l'empreinte de votre appareil :",
+            "Entrez votre cle de licence Pro ou verifiez votre achat instantanement via l'empreinte de votre appareil :",
             style: TextStyle(color: Colors.white70, fontSize: 13),
           ),
           const SizedBox(height: 15),
@@ -1020,7 +1149,7 @@ class _ProfileScreenState extends State<ProfileScreen>
             controller: keyController,
             style: const TextStyle(color: Colors.white),
             decoration: const InputDecoration(
-              hintText: "Clé de licence Pro (ex: SHADOW-...)",
+              hintText: "Cle de licence Pro (ex: SHADOW-...)",
               hintStyle: TextStyle(color: Colors.white24),
               enabledBorder: UnderlineInputBorder(
                   borderSide: BorderSide(color: Color(0xFFFF9100))),
@@ -1042,7 +1171,7 @@ class _ProfileScreenState extends State<ProfileScreen>
               ),
               icon: const Icon(Icons.security, size: 16),
               label: const Text(
-                "VÉRIFIER MON APPAREIL (AUTOMATIQUE)",
+                "VERIFIER MON APPAREIL (AUTOMATIQUE)",
                 style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold),
               ),
               onPressed: () async {
@@ -1052,15 +1181,15 @@ class _ProfileScreenState extends State<ProfileScreen>
                 messenger.showSnackBar(
                   const SnackBar(
                       content:
-                          Text("Interrogation de l'empreinte matérielle...")),
+                          Text("Interrogation de l'empreinte materielle...")),
                 );
 
                 final bool success = await game.requestHardwareAutoRecovery();
                 messenger.showSnackBar(
                   SnackBar(
                     content: Text(success
-                        ? "Pass Pro restauré et activé avec succès !"
-                        : "Aucun achat détecté pour cet appareil."),
+                        ? "Pass Pro restaure et active avec succes !"
+                        : "Aucun achat detecte pour cet appareil."),
                     backgroundColor: success ? Colors.green : Colors.redAccent,
                   ),
                 );
@@ -1091,14 +1220,14 @@ class _ProfileScreenState extends State<ProfileScreen>
               messenger.showSnackBar(
                 SnackBar(
                   content: Text(success
-                      ? "Statut Monarque activé avec succès !"
-                      : "Clé invalide ou déjà liée à un autre matériel."),
+                      ? "Statut Monarque active avec succes !"
+                      : "Cle invalide ou deja liee a un autre materiel."),
                   backgroundColor: success ? Colors.green : Colors.redAccent,
                 ),
               );
             }
           },
-          child: const Text("VALIDER LA CLÉ",
+          child: const Text("VALIDER LA CLE",
               style: TextStyle(color: Colors.white)),
         ),
       ],
@@ -1122,7 +1251,7 @@ class _ProfileScreenState extends State<ProfileScreen>
           mainAxisSize: MainAxisSize.min,
           children: [
             const Text(
-              "Une anomalie dans le Système ou une question sur vos quêtes ? Entrez votre e-mail et votre message.",
+              "Une anomalie dans le Systeme ou une question sur vos quetes ? Entrez votre e-mail et votre message.",
               style: TextStyle(color: Colors.white70, fontSize: 12, height: 1.4),
             ),
             const SizedBox(height: 15),
@@ -1164,7 +1293,7 @@ class _ProfileScreenState extends State<ProfileScreen>
               ),
               validator: (value) {
                 if (value == null || value.trim().isEmpty) {
-                  return "Le message ne peut pas être vide.";
+                  return "Le message ne peut pas etre vide.";
                 }
                 return null;
               },
@@ -1193,7 +1322,7 @@ class _ProfileScreenState extends State<ProfileScreen>
 
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(
-                    content: Text("Transmission du rapport au Système en cours..."),
+                    content: Text("Transmission du rapport au Systeme en cours..."),
                     duration: Duration(seconds: 2)),
               );
 
@@ -1211,14 +1340,14 @@ class _ProfileScreenState extends State<ProfileScreen>
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(
                       content: Text(
-                          "Rapport transmis avec succès ! Le Quartier Général a reçu votre message."),
+                          "Rapport transmis avec succes ! Le Quartier General a recu votre message."),
                       backgroundColor: Color(0xFF00FF66),
                     ),
                   );
                 } else {
                   final errorData = jsonDecode(response.body);
                   final errorMsg = errorData['detail'] ??
-                      "Échec de la transmission du rapport.";
+                      "Echec de la transmission du rapport.";
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
                         content: Text(errorMsg),
@@ -1368,7 +1497,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                             if (game.isGodMode)
                               Padding(
                                 padding: const EdgeInsets.only(bottom: 6.0),
-                                child: Text("[ GOD MODE ACTIF : BAC À SABLE ]",
+                                child: Text("[ GOD MODE ACTIF : BAC A SABLE ]",
                                     style: GoogleFonts.orbitron(
                                         color: Colors.redAccent,
                                         fontSize: 10,
@@ -1386,7 +1515,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                             ),
                             const SizedBox(height: 6),
                             Text(
-                              "PREMIER ÉVEIL : ${game.awakeningDate}",
+                              "PREMIER EVEIL : ${game.awakeningDate}",
                               style: GoogleFonts.orbitron(
                                 color: Colors.white38,
                                 fontSize: 9,
@@ -1429,7 +1558,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                   ),
                 ),
                 const SizedBox(height: 25),
-                Text("HISTORIQUE DE DÉVELOPPEMENT",
+                Text("HISTORIQUE DE DEVELOPPEMENT",
                     style: GoogleFonts.orbitron(
                         color: systemBlue,
                         fontSize: 12,
@@ -1463,7 +1592,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         Text(
-                          "PERSISTANCE PÉNALITÉ",
+                          "PERSISTANCE PENALITE",
                           style: GoogleFonts.orbitron(
                               color: Colors.redAccent, fontSize: 11),
                         ),
@@ -1500,9 +1629,8 @@ class _ProfileScreenState extends State<ProfileScreen>
 
   Widget _buildRaidRemoteConsole(
       BuildContext context, GameProvider game, Color systemBlue) {
-    final String? effectiveRoom = _isLanMode
-        ? (_activeRoom ?? kDefaultLanRoomId)
-        : (_activeRoom ?? game.pairedAdminRoom);
+    final String? effectiveRoom =
+        _isLanMode ? _activeRoom : (_activeRoom ?? game.pairedAdminRoom);
     final bool hasActiveLink =
         effectiveRoom != null && effectiveRoom.trim().isNotEmpty;
 
@@ -1523,7 +1651,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                 Icon(Icons.lock_outline, color: Color(0xFFFF9100), size: 18),
                 SizedBox(width: 8),
                 Text(
-                  "TÉLÉCOMMANDE MAÎTRE (ADMIN)",
+                  "TELECOMMANDE MAITRE (ADMIN)",
                   style: TextStyle(
                     color: Colors.white54,
                     fontFamily: 'monospace',
@@ -1536,7 +1664,7 @@ class _ProfileScreenState extends State<ProfileScreen>
             ),
             const SizedBox(height: 10),
             const Text(
-              "Réservé exclusivement aux détenteurs de la clé Monarque Pro.\nEn mode gratuit, rejoignez les raids comme invité via le scan Chasseur.",
+              "Reserve exclusivement aux detenteurs de la cle Monarque Pro.\nEn mode gratuit, rejoignez les raids comme invite via le scan Chasseur.",
               textAlign: TextAlign.center,
               style: TextStyle(color: Colors.white38, fontSize: 11, height: 1.4),
             ),
@@ -1585,7 +1713,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                   ),
                   const SizedBox(width: 8),
                   Text(
-                    "TÉLÉCOMMANDE MAÎTRE",
+                    "TELECOMMANDE MAITRE",
                     style: GoogleFonts.orbitron(
                       color: hasActiveLink
                           ? const Color(0xFFFF9100)
@@ -1611,7 +1739,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                   borderRadius: BorderRadius.circular(4),
                 ),
                 child: Text(
-                  hasActiveLink ? effectiveRoom!.toUpperCase() : "NON JUMELÉ",
+                  hasActiveLink ? effectiveRoom!.toUpperCase() : "NON JUMELE",
                   style: GoogleFonts.orbitron(
                     color: hasActiveLink
                         ? const Color(0xFFFF9100)
@@ -1633,7 +1761,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                   ConstrainedBox(
                     constraints: const BoxConstraints(maxWidth: 320),
                     child: const Text(
-                      "Choisissez LAN (serveur WebSocket Wi-Fi local) ou MULTI (scan QR Code & Firestore).",
+                      "Choisissez LAN (salle auto-isolee Wi-Fi local) ou MULTI (scan QR Code & Firestore).",
                       textAlign: TextAlign.center,
                       style: TextStyle(
                         color: Colors.white54,
@@ -1715,7 +1843,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                 child: Column(
                   children: [
                     Text(
-                      "LAN WS • ${_lanSocket.isConnected ? 'CONNECTÉ' : 'HORS-LIGNE'} • STATUT: ${_lanStatus.toUpperCase()} • BOSS: $_lanCurrentHp / $_lanMaxHp PV • ${_formatLanClock(_lanRemainingSeconds)}",
+                      "LAN WS • ${_lanSocket.isConnected ? 'CONNECTE' : 'HORS-LIGNE'} • STATUT: ${_lanStatus.toUpperCase()} • BOSS: $_lanCurrentHp / $_lanMaxHp PV • ${_formatLanClock(_lanRemainingSeconds)}",
                       textAlign: TextAlign.center,
                       style: const TextStyle(
                         color: Color(0xFF00FF66),
@@ -1730,13 +1858,13 @@ class _ProfileScreenState extends State<ProfileScreen>
                         Clipboard.setData(ClipboardData(text: _lanTvUrl));
                         ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(
-                            content: Text("URL TV LAN copiée !"),
+                            content: Text("URL TV LAN copiee !"),
                             duration: Duration(seconds: 1),
                           ),
                         );
                       },
                       child: Text(
-                        "Ouvrir sur la TV : $_lanTvUrl\n(Toucher pour copier l'adresse TV)",
+                        "Lien Chasseurs / TV : $_lanTvUrl\n(Toucher pour copier le lien)",
                         textAlign: TextAlign.center,
                         style: const TextStyle(
                           color: Color(0xFF00E5FF),
@@ -1756,7 +1884,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                       ),
                       onPressed: () => _promptAndActivateLanMode(),
                       child: const Text(
-                        "CHANGER L'IP DU SERVEUR LAN",
+                        "NOUVELLE SALLE LAN / IP",
                         style: TextStyle(
                           color: Color(0xFFFF9100),
                           fontFamily: 'monospace',
@@ -1810,7 +1938,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                           .firstWhere((p) => p['hp'] == newHp);
                       await _runGuardedAdminCommand(
                         actionKey: 'preset',
-                        successLabel: "Boss configuré : ${selected['label']}",
+                        successLabel: "Boss configure : ${selected['label']}",
                         lanPayload: {
                           'type': 'admin',
                           'command': 'set_preset',
@@ -1853,7 +1981,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                   child: _compactButton("+1 MIN", const Color(0xFF00E5FF), () {
                     _runGuardedAdminCommand(
                       actionKey: 'extend_time',
-                      successLabel: "+1 minute ajoutée.",
+                      successLabel: "+1 minute ajoutee.",
                       lanPayload: {
                         'type': 'admin',
                         'command': 'add_minutes',
@@ -1871,7 +1999,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                   child: _compactButton("+15 MIN", systemBlue, () {
                     _runGuardedAdminCommand(
                       actionKey: 'extend_time',
-                      successLabel: "+15 minutes ajoutées.",
+                      successLabel: "+15 minutes ajoutees.",
                       lanPayload: {
                         'type': 'admin',
                         'command': 'add_minutes',
@@ -1889,7 +2017,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                   child: _compactButton("+30 MIN", systemBlue, () {
                     _runGuardedAdminCommand(
                       actionKey: 'extend_time',
-                      successLabel: "+30 minutes ajoutées.",
+                      successLabel: "+30 minutes ajoutees.",
                       lanPayload: {
                         'type': 'admin',
                         'command': 'add_minutes',
@@ -1911,7 +2039,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                   child: _compactButton("-1 MIN", const Color(0xFFFFAB91), () {
                     _runGuardedAdminCommand(
                       actionKey: 'reduce_time',
-                      successLabel: "-1 minute retirée.",
+                      successLabel: "-1 minute retiree.",
                       lanPayload: {
                         'type': 'admin',
                         'command': 'add_minutes',
@@ -1930,7 +2058,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                   child: _compactButton("-15 MIN", const Color(0xFFFF7043), () {
                     _runGuardedAdminCommand(
                       actionKey: 'reduce_time',
-                      successLabel: "-15 minutes retirées.",
+                      successLabel: "-15 minutes retirees.",
                       lanPayload: {
                         'type': 'admin',
                         'command': 'add_minutes',
@@ -1949,7 +2077,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                   child: _compactButton("-30 MIN", const Color(0xFFFF7043), () {
                     _runGuardedAdminCommand(
                       actionKey: 'reduce_time',
-                      successLabel: "-30 minutes retirées.",
+                      successLabel: "-30 minutes retirees.",
                       lanPayload: {
                         'type': 'admin',
                         'command': 'add_minutes',
@@ -1968,16 +2096,16 @@ class _ProfileScreenState extends State<ProfileScreen>
             const SizedBox(height: 6),
             SizedBox(
               width: double.infinity,
-              child: _compactButton("RESET À 0", const Color(0xFFFF2E56), () {
+              child: _compactButton("RESET A 0", const Color(0xFFFF2E56), () {
                 _confirmDestructiveAdminAction(
-                  title: "CONFIRMER RESET À 0",
+                  title: "CONFIRMER RESET A 0",
                   message:
-                      "Mettre fin immédiatement au chronomètre de [$effectiveRoom] ?",
-                  confirmLabel: "CLÔTURER MAINTENANT",
+                      "Mettre fin immediatement au chronometre de [$effectiveRoom] ?",
+                  confirmLabel: "CLOTURER MAINTENANT",
                   onConfirmed: () {
                     _runGuardedAdminCommand(
                       actionKey: 'expire_now',
-                      successLabel: "Raid clôturé (chrono à 0).",
+                      successLabel: "Raid cloture (chrono a 0).",
                       lanPayload: {
                         'type': 'admin',
                         'command': 'expire_now',
@@ -2008,7 +2136,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                   child: _compactButton("LANCER", const Color(0xFF00FF66), () {
                     _runGuardedAdminCommand(
                       actionKey: 'launch_raid',
-                      successLabel: "Raid lancé sur [$effectiveRoom] !",
+                      successLabel: "Raid lance sur [$effectiveRoom] !",
                       lanPayload: {
                         'type': 'admin',
                         'command': 'start',
@@ -2026,7 +2154,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                   child: _compactButton("-200 PV", const Color(0xFFFF9100), () {
                     _runGuardedAdminCommand(
                       actionKey: 'strike_boss',
-                      successLabel: "-200 PV infligés au Boss.",
+                      successLabel: "-200 PV infliges au Boss.",
                       lanPayload: {
                         'type': 'admin',
                         'command': 'strike_boss',
@@ -2050,12 +2178,12 @@ class _ProfileScreenState extends State<ProfileScreen>
                     _confirmDestructiveAdminAction(
                       title: "CONFIRMER RESET BOSS",
                       message:
-                          "Remettre les PV du Boss au maximum et les scores à zéro sur [$effectiveRoom] ?",
-                      confirmLabel: "RÉINITIALISER",
+                          "Remettre les PV du Boss au maximum et les scores a zero sur [$effectiveRoom] ?",
+                      confirmLabel: "REINITIALISER",
                       onConfirmed: () {
                         _runGuardedAdminCommand(
                           actionKey: 'reset_boss',
-                          successLabel: "Boss et scores réinitialisés.",
+                          successLabel: "Boss et scores reinitialises.",
                           lanPayload: {
                             'type': 'admin',
                             'command': 'reset_boss',
@@ -2077,11 +2205,11 @@ class _ProfileScreenState extends State<ProfileScreen>
             Align(
               alignment: Alignment.centerLeft,
               child: TextButton.icon(
-                onPressed: () => _unbindFromRoom("Déconnexion volontaire."),
+                onPressed: () => _unbindFromRoom("Deconnexion volontaire."),
                 icon:
                     const Icon(Icons.link_off, color: Colors.white38, size: 14),
                 label: const Text(
-                  "DÉCONNECTER",
+                  "DECONNECTER",
                   style: TextStyle(color: Colors.white38, fontSize: 10),
                 ),
               ),
@@ -2132,7 +2260,7 @@ class _ProfileScreenState extends State<ProfileScreen>
 
     SystemDialog.show(
       context,
-      title: "PANTHÉON DES TITRES",
+      title: "PANTHEON DES TITRES",
       color: systemBlue,
       content: SizedBox(
         width: double.maxFinite,
@@ -2178,7 +2306,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                   ),
                 ),
                 trailing: Text(
-                  unlocked ? "ACCOMPLI" : "VERROUILLÉ",
+                  unlocked ? "ACCOMPLI" : "VERROUILLE",
                   style: GoogleFonts.orbitron(
                     color: unlocked ? systemBlue : Colors.white24,
                     fontSize: 9,
@@ -2218,7 +2346,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(
                         content: Text(
-                            "Apparition d'un Portail (10s) dans 5s... Allez voir vos clés.")),
+                            "Apparition d'un Portail (10s) dans 5s... Allez voir vos cles.")),
                   );
                 },
                 icon: Icons.door_sliding_outlined,
@@ -2230,7 +2358,7 @@ class _ProfileScreenState extends State<ProfileScreen>
         SizedBox(
           width: double.infinity,
           child: _holoButton(
-            "TEST QUÊTE URGENTE",
+            "TEST QUETE URGENTE",
             Colors.purpleAccent,
             () {
               try {
@@ -2240,7 +2368,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(
                     content:
-                        Text("Alerte ! Une Quête Urgente vient de se déclencher."),
+                        Text("Alerte ! Une Quete Urgente vient de se declencher."),
                     backgroundColor: Colors.purpleAccent,
                     duration: Duration(seconds: 2),
                   ),
@@ -2248,7 +2376,7 @@ class _ProfileScreenState extends State<ProfileScreen>
               } catch (e) {
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
-                      content: Text("Erreur déclenchement quête urgente : $e"),
+                      content: Text("Erreur declenchement quete urgente : $e"),
                       backgroundColor: Colors.red),
                 );
               }
@@ -2264,7 +2392,7 @@ class _ProfileScreenState extends State<ProfileScreen>
     final controller = TextEditingController(text: game.username);
     SystemDialog.show(
       context,
-      title: "IDENTITÉ",
+      title: "IDENTITE",
       content: TextField(
         controller: controller,
         style: const TextStyle(color: Colors.white),
@@ -2491,7 +2619,7 @@ class _ProfileScreenState extends State<ProfileScreen>
     SystemDialog.show(
       context,
       title: "JOUR : $dateKey",
-      content: const Text("Modifier l'état de ce jour ?",
+      content: const Text("Modifier l'etat de ce jour ?",
           style: TextStyle(color: Colors.white70)),
       actions: [
         Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
@@ -2637,7 +2765,7 @@ class _ProfileScreenState extends State<ProfileScreen>
       BuildContext context, GameProvider game, Color systemBlue) {
     return Column(
       children: [
-        Text("ARCHIVES DU SYSTÈME",
+        Text("ARCHIVES DU SYSTEME",
             style: GoogleFonts.orbitron(
                 color: systemBlue,
                 fontSize: 12,
@@ -2652,14 +2780,14 @@ class _ProfileScreenState extends State<ProfileScreen>
           itemBuilder: (ctx, i) {
             final item = game.saveHistory[i];
             return ListTile(
-              title: Text("Séquence du ${_formatDate(item['date'])}",
+              title: Text("Sequence du ${_formatDate(item['date'])}",
                   style: GoogleFonts.rajdhani(color: Colors.white)),
               trailing:
                   const Icon(Icons.copy, color: Colors.white24, size: 16),
               onTap: () {
                 Clipboard.setData(ClipboardData(text: item['code']));
                 ScaffoldMessenger.of(context)
-                    .showSnackBar(const SnackBar(content: Text("Copié !")));
+                    .showSnackBar(const SnackBar(content: Text("Copie !")));
               },
             );
           },
@@ -2683,7 +2811,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(
                       content: Text(
-                          "Code de sauvegarde copié ! Conservez-le en lieu sûr."),
+                          "Code de sauvegarde copie ! Conservez-le en lieu sur."),
                       backgroundColor: Color(0xFF00FF66),
                     ),
                   );
@@ -2704,7 +2832,7 @@ class _ProfileScreenState extends State<ProfileScreen>
         ),
         const SizedBox(height: 10),
         const Text(
-          "Générez un code de secours pour ne jamais perdre votre progression en changeant de téléphone.",
+          "Generez un code de secours pour ne jamais perdre votre progression en changeant de telephone.",
           textAlign: TextAlign.center,
           style: TextStyle(
               color: Colors.white38, fontSize: 10, fontFamily: 'monospace'),
@@ -2774,8 +2902,8 @@ class _ProfileScreenState extends State<ProfileScreen>
             messenger.showSnackBar(
               SnackBar(
                 content: Text(ok
-                    ? "Sauvegarde importée."
-                    : "Code invalide : rien n'a été modifié."),
+                    ? "Sauvegarde importee."
+                    : "Code invalide : rien n'a ete modifie."),
                 backgroundColor: ok ? null : Colors.red,
               ),
             );
@@ -2789,7 +2917,7 @@ class _ProfileScreenState extends State<ProfileScreen>
   void _showShopDialog(BuildContext context, GameProvider game) {
     SystemDialog.show(
       context,
-      title: "BOUTIQUE DU SYSTÈME",
+      title: "BOUTIQUE DU SYSTEME",
       content: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -2797,8 +2925,8 @@ class _ProfileScreenState extends State<ProfileScreen>
               game.priceMinorPotion, "mineure"),
           _buildShopItem(context, game, "Potion Majeure", "Soigne 200 PV",
               game.priceMajorPotion, "majeure"),
-          _buildShopItem(context, game, "Élixir Royal", "Restaure 100% des PV",
-              game.priceFullHeal, "guérison"),
+          _buildShopItem(context, game, "Elixir Royal", "Restaure 100% des PV",
+              game.priceFullHeal, "guerison"),
         ],
       ),
       actions: [
@@ -2840,7 +2968,7 @@ class _ProfileScreenState extends State<ProfileScreen>
             if (game.currentHealth >= game.maxHealth) {
               ScaffoldMessenger.of(ctx).showSnackBar(
                 const SnackBar(
-                    content: Text("Santé déjà au maximum."),
+                    content: Text("Sante deja au maximum."),
                     backgroundColor: Colors.blueAccent),
               );
               return;
@@ -2849,7 +2977,7 @@ class _ProfileScreenState extends State<ProfileScreen>
             if (success) {
               ScaffoldMessenger.of(ctx).showSnackBar(
                 const SnackBar(
-                    content: Text("Ravitaillement consommé."),
+                    content: Text("Ravitaillement consomme."),
                     duration: Duration(seconds: 1)),
               );
             } else {
