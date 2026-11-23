@@ -1,9 +1,8 @@
-// lib/screens/raid_admin_panel_screen.dart
-
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_fonts/google_fonts.dart';
+import '../services/lan_socket_service.dart';
 import '../services/raid_admin_service.dart';
 
 const Color kSystemOrange = Color(0xFFFF9100);
@@ -12,12 +11,20 @@ const Color kSystemBlue = Color(0xFF00E5FF);
 class RaidAdminPanelScreen extends StatefulWidget {
   final String roomId;
   final String adminKey;
+  final String mode;
+  final String? wsUrl;
 
   const RaidAdminPanelScreen({
     super.key,
     required this.roomId,
     required this.adminKey,
+    this.mode = 'cloud',
+    this.wsUrl,
   });
+
+  bool get isLanMode =>
+      mode.trim().toLowerCase() == 'lan' ||
+      (wsUrl != null && wsUrl!.trim().isNotEmpty);
 
   @override
   State<RaidAdminPanelScreen> createState() => _RaidAdminPanelScreenState();
@@ -29,14 +36,79 @@ class _RaidAdminPanelScreenState extends State<RaidAdminPanelScreen> {
   String _denialReason = "VÉRIFICATION DES HAUTES PRIVILÈGES DU MONARQUE...";
   Map<String, dynamic> _raidData = {};
   StreamSubscription? _subscription;
+  StreamSubscription>? _lanSubscription;
+  final LanSocketService _lanSocket = LanSocketService();
+  String? _lastErrorBanner;
 
   @override
   void initState() {
     super.initState();
-    _verifyAccess();
+    _initSession();
   }
 
-  Future<void> _verifyAccess() async {
+  Future<void> _initSession() async {
+    if (widget.isLanMode) {
+      await _initLanSession();
+    } else {
+      await _verifyCloudAccess();
+    }
+  }
+
+  Future<void> _initLanSession() async {
+    final String targetWs = (widget.wsUrl ?? '').trim();
+    if (targetWs.isEmpty) {
+      if (mounted) {
+        setState(() {
+          _isChecking = false;
+          _isAuthorized = false;
+          _denialReason = "URL WEBSOCKET LAN ABSENTE.";
+        });
+      }
+      return;
+    }
+
+    RaidAdminService.configureLan(
+      wsUrl: targetWs,
+      roomId: widget.roomId,
+    );
+
+    if (mounted) {
+      setState(() {
+        _isChecking = false;
+        _isAuthorized = true;
+        _raidData = {
+          'status': 'waiting',
+          'current_hp': 5000,
+          'max_hp': 5000,
+          'hunters': [],
+        };
+      });
+    }
+
+    _lanSubscription?.cancel();
+    _lanSubscription = _lanSocket.messages.listen((msg) {
+      if (!mounted) return;
+      final String type = (msg['type'] ?? '').toString().toLowerCase();
+      if (type == 'state' || msg.containsKey('current_hp')) {
+        setState(() {
+          _raidData = {
+            ..._raidData,
+            ...msg,
+          };
+        });
+      }
+    });
+
+    await _lanSocket.connect(
+      targetWs,
+      roomId: widget.roomId,
+      role: 'admin',
+      clientId: 'admin_${DateTime.now().millisecondsSinceEpoch}',
+      name: 'MONARQUE (LAN)',
+    );
+  }
+
+  Future<void> _verifyCloudAccess() async {
     if (widget.adminKey.trim().isEmpty) {
       if (mounted) {
         setState(() {
@@ -49,7 +121,10 @@ class _RaidAdminPanelScreenState extends State<RaidAdminPanelScreen> {
     }
 
     try {
-      final doc = await FirebaseFirestore.instance.collection('current_raids').doc(widget.roomId).get();
+      final doc = await FirebaseFirestore.instance
+          .collection('current_raids')
+          .doc(widget.roomId)
+          .get();
       if (!doc.exists) {
         if (mounted) {
           setState(() {
@@ -61,7 +136,7 @@ class _RaidAdminPanelScreenState extends State<RaidAdminPanelScreen> {
         return;
       }
 
-      final data = doc.data() as Map<String, dynamic>? ?? {};
+      final data = doc.data() ?? {};
       final expectedKey = (data['admin_key'] ?? '').toString().trim();
 
       if (expectedKey.isEmpty || expectedKey != widget.adminKey.trim()) {
@@ -81,7 +156,7 @@ class _RaidAdminPanelScreenState extends State<RaidAdminPanelScreen> {
           _isAuthorized = true;
           _raidData = data;
         });
-        _startListening();
+        _startCloudListening();
       }
     } catch (e) {
       if (mounted) {
@@ -94,7 +169,7 @@ class _RaidAdminPanelScreenState extends State<RaidAdminPanelScreen> {
     }
   }
 
-  void _startListening() {
+  void _startCloudListening() {
     _subscription?.cancel();
     _subscription = FirebaseFirestore.instance
         .collection('current_raids')
@@ -104,15 +179,28 @@ class _RaidAdminPanelScreenState extends State<RaidAdminPanelScreen> {
       if (!mounted) return;
       if (doc.exists) {
         setState(() {
-          _raidData = doc.data() as Map<String, dynamic>? ?? {};
+          _raidData = doc.data() ?? {};
         });
       }
+    });
+  }
+
+  Future<void> _runCommand(Future<String?> Function() action) async {
+    final String? err = await action();
+    if (!mounted) return;
+    setState(() {
+      _lastErrorBanner = err;
     });
   }
 
   @override
   void dispose() {
     _subscription?.cancel();
+    _lanSubscription?.cancel();
+    if (widget.isLanMode) {
+      RaidAdminService.clearLan();
+      unawaited(_lanSocket.disconnect());
+    }
     super.dispose();
   }
 
@@ -129,7 +217,11 @@ class _RaidAdminPanelScreenState extends State<RaidAdminPanelScreen> {
               SizedBox(height: 16),
               Text(
                 "SYNCHRONISATION DE LA TÉLÉCOMMANDE MAÎTRE...",
-                style: TextStyle(color: kSystemOrange, fontFamily: 'monospace', letterSpacing: 2),
+                style: TextStyle(
+                  color: kSystemOrange,
+                  fontFamily: 'monospace',
+                  letterSpacing: 2,
+                ),
               ),
             ],
           ),
@@ -168,7 +260,12 @@ class _RaidAdminPanelScreenState extends State<RaidAdminPanelScreen> {
                   Text(
                     _denialReason,
                     textAlign: TextAlign.center,
-                    style: const TextStyle(color: Colors.white70, fontFamily: 'monospace', fontSize: 12, height: 1.4),
+                    style: const TextStyle(
+                      color: Colors.white70,
+                      fontFamily: 'monospace',
+                      fontSize: 12,
+                      height: 1.4,
+                    ),
                   ),
                 ],
               ),
@@ -189,8 +286,14 @@ class _RaidAdminPanelScreenState extends State<RaidAdminPanelScreen> {
       appBar: AppBar(
         backgroundColor: const Color(0xFF04101E),
         title: Text(
-          "TÉLÉCOMMANDE : SALLE [${widget.roomId}]",
-          style: GoogleFonts.orbitron(color: kSystemOrange, fontSize: 14, fontWeight: FontWeight.bold),
+          widget.isLanMode
+              ? "TÉLÉCOMMANDE LAN : [${widget.roomId}]"
+              : "TÉLÉCOMMANDE : SALLE [${widget.roomId}]",
+          style: GoogleFonts.orbitron(
+            color: kSystemOrange,
+            fontSize: 13,
+            fontWeight: FontWeight.bold,
+          ),
         ),
         iconTheme: const IconThemeData(color: kSystemOrange),
       ),
@@ -199,6 +302,24 @@ class _RaidAdminPanelScreenState extends State<RaidAdminPanelScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            if (_lastErrorBanner != null && _lastErrorBanner!.isNotEmpty) ...[
+              Container(
+                padding: const EdgeInsets.all(12),
+                margin: const EdgeInsets.only(bottom: 14),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF2A0710),
+                  border: Border.all(color: const Color(0xFFFF2E56)),
+                ),
+                child: Text(
+                  _lastErrorBanner!,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontFamily: 'monospace',
+                    fontSize: 12,
+                  ),
+                ),
+              ),
+            ],
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
@@ -208,18 +329,41 @@ class _RaidAdminPanelScreenState extends State<RaidAdminPanelScreen> {
               child: Column(
                 children: [
                   Text(
+                    widget.isLanMode
+                        ? "LIAISON : ${widget.wsUrl ?? 'LAN'}"
+                        : "LIAISON : CLOUD FIRESTORE",
+                    style: const TextStyle(
+                      color: Colors.white54,
+                      fontFamily: 'monospace',
+                      fontSize: 11,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
                     "STATUT DU DONJON : ${status.toUpperCase()}",
-                    style: GoogleFonts.orbitron(color: kSystemBlue, fontSize: 13, fontWeight: FontWeight.bold),
+                    style: GoogleFonts.orbitron(
+                      color: kSystemBlue,
+                      fontSize: 13,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                   const SizedBox(height: 8),
                   Text(
                     "PV DU BOSS : $currentHp / $maxHp",
-                    style: GoogleFonts.orbitron(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+                    style: GoogleFonts.orbitron(
+                      color: Colors.white,
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                   const SizedBox(height: 12),
                   Text(
                     "Chasseurs connectés : ${hunters.length}",
-                    style: const TextStyle(color: Colors.white70, fontFamily: 'monospace', fontSize: 12),
+                    style: const TextStyle(
+                      color: Colors.white70,
+                      fontFamily: 'monospace',
+                      fontSize: 12,
+                    ),
                   ),
                 ],
               ),
@@ -227,7 +371,11 @@ class _RaidAdminPanelScreenState extends State<RaidAdminPanelScreen> {
             const SizedBox(height: 20),
             Text(
               "GESTION DES PRÈSETS DE BOSS",
-              style: GoogleFonts.orbitron(color: kSystemOrange, fontSize: 12, fontWeight: FontWeight.bold),
+              style: GoogleFonts.orbitron(
+                color: kSystemOrange,
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+              ),
             ),
             const SizedBox(height: 10),
             Wrap(
@@ -241,42 +389,83 @@ class _RaidAdminPanelScreenState extends State<RaidAdminPanelScreen> {
                     backgroundColor: const Color(0xFF04101E),
                     side: const BorderSide(color: kSystemOrange),
                   ),
-                  onPressed: () async {
-                    await RaidAdminService.applyPreset(hp, label, roomId: widget.roomId);
-                  },
-                  child: Text("$label ($hp PV)", style: const TextStyle(color: Colors.white, fontSize: 11)),
+                  onPressed: () => _runCommand(
+                    () => RaidAdminService.applyPreset(
+                      hp,
+                      label,
+                      roomId: widget.roomId,
+                    ),
+                  ),
+                  child: Text(
+                    "$label ($hp PV)",
+                    style: const TextStyle(color: Colors.white, fontSize: 11),
+                  ),
                 );
               }).toList(),
             ),
             const SizedBox(height: 20),
             Text(
               "COMMANDES TACTIQUES",
-              style: GoogleFonts.orbitron(color: kSystemOrange, fontSize: 12, fontWeight: FontWeight.bold),
+              style: GoogleFonts.orbitron(
+                color: kSystemOrange,
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+              ),
             ),
             const SizedBox(height: 10),
             Row(
               children: [
                 Expanded(
                   child: ElevatedButton(
-                    style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00FF66), foregroundColor: Colors.black),
-                    onPressed: () => RaidAdminService.setRaidStatus('active', roomId: widget.roomId),
-                    child: const Text("LANCER", style: TextStyle(fontWeight: FontWeight.bold)),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF00FF66),
+                      foregroundColor: Colors.black,
+                    ),
+                    onPressed: () => _runCommand(
+                      () => RaidAdminService.setRaidStatus(
+                        'active',
+                        roomId: widget.roomId,
+                      ),
+                    ),
+                    child: const Text(
+                      "LANCER",
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
                   ),
                 ),
                 const SizedBox(width: 8),
                 Expanded(
                   child: ElevatedButton(
-                    style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFF9100), foregroundColor: Colors.black),
-                    onPressed: () => RaidAdminService.strikeBoss(200, roomId: widget.roomId),
-                    child: const Text("-200 PV", style: TextStyle(fontWeight: FontWeight.bold)),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFFFF9100),
+                      foregroundColor: Colors.black,
+                    ),
+                    onPressed: () => _runCommand(
+                      () => RaidAdminService.strikeBoss(
+                        200,
+                        roomId: widget.roomId,
+                      ),
+                    ),
+                    child: const Text(
+                      "-200 PV",
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
                   ),
                 ),
                 const SizedBox(width: 8),
                 Expanded(
                   child: ElevatedButton(
-                    style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFF2E56), foregroundColor: Colors.white),
-                    onPressed: () => RaidAdminService.resetBoss(roomId: widget.roomId),
-                    child: const Text("RESET", style: TextStyle(fontWeight: FontWeight.bold)),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFFFF2E56),
+                      foregroundColor: Colors.white,
+                    ),
+                    onPressed: () => _runCommand(
+                      () => RaidAdminService.resetBoss(roomId: widget.roomId),
+                    ),
+                    child: const Text(
+                      "RESET",
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
                   ),
                 ),
               ],
@@ -284,32 +473,64 @@ class _RaidAdminPanelScreenState extends State<RaidAdminPanelScreen> {
             const SizedBox(height: 20),
             Text(
               "CONTRÔLE DU TEMPS",
-              style: GoogleFonts.orbitron(color: kSystemOrange, fontSize: 12, fontWeight: FontWeight.bold),
+              style: GoogleFonts.orbitron(
+                color: kSystemOrange,
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+              ),
             ),
             const SizedBox(height: 10),
             Row(
               children: [
                 Expanded(
                   child: OutlinedButton(
-                    style: OutlinedButton.styleFrom(side: const BorderSide(color: kSystemBlue)),
-                    onPressed: () => RaidAdminService.extendRaidMinutes(15, roomId: widget.roomId),
-                    child: const Text("+15 MIN", style: TextStyle(color: kSystemBlue)),
+                    style: OutlinedButton.styleFrom(
+                      side: const BorderSide(color: kSystemBlue),
+                    ),
+                    onPressed: () => _runCommand(
+                      () => RaidAdminService.extendRaidMinutes(
+                        15,
+                        roomId: widget.roomId,
+                      ),
+                    ),
+                    child: const Text(
+                      "+15 MIN",
+                      style: TextStyle(color: kSystemBlue),
+                    ),
                   ),
                 ),
                 const SizedBox(width: 8),
                 Expanded(
                   child: OutlinedButton(
-                    style: OutlinedButton.styleFrom(side: const BorderSide(color: Colors.amber)),
-                    onPressed: () => RaidAdminService.resetToMidnight(roomId: widget.roomId),
-                    child: const Text("RESET 24H", style: TextStyle(color: Colors.amber)),
+                    style: OutlinedButton.styleFrom(
+                      side: const BorderSide(color: Colors.amber),
+                    ),
+                    onPressed: () => _runCommand(
+                      () => RaidAdminService.resetToMidnight(
+                        roomId: widget.roomId,
+                      ),
+                    ),
+                    child: const Text(
+                      "RESET 24H",
+                      style: TextStyle(color: Colors.amber),
+                    ),
                   ),
                 ),
                 const SizedBox(width: 8),
                 Expanded(
                   child: OutlinedButton(
-                    style: OutlinedButton.styleFrom(side: const BorderSide(color: Color(0xFFFF2E56))),
-                    onPressed: () => RaidAdminService.expireRaidNow(roomId: widget.roomId),
-                    child: const Text("CLÔTURER", style: TextStyle(color: Color(0xFFFF2E56))),
+                    style: OutlinedButton.styleFrom(
+                      side: const BorderSide(color: Color(0xFFFF2E56)),
+                    ),
+                    onPressed: () => _runCommand(
+                      () => RaidAdminService.expireRaidNow(
+                        roomId: widget.roomId,
+                      ),
+                    ),
+                    child: const Text(
+                      "CLÔTURER",
+                      style: TextStyle(color: Color(0xFFFF2E56)),
+                    ),
                   ),
                 ),
               ],
