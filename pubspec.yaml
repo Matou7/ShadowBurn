@@ -10,9 +10,10 @@ dependencies:
   flutter:
     sdk: flutter
 
-  # Envoi réseau (webhooks Stripe, etc.)
+  # Envoi réseau (webhooks Stripe, téléchargement pack LAN, etc.)
   http: ^1.2.2
   web: ^1.1.1
+  archive: ^3.6.1
 
   # QR CODE
   qr_flutter: ^4.1.0

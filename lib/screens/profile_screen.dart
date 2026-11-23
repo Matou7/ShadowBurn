@@ -1,8 +1,8 @@
-// lib/screens/profile_screen.dart
-
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:math';
+import 'package:archive/archive.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -20,10 +20,17 @@ import '../utils/admin_utils.dart';
 import '../services/raid_admin_service.dart';
 import '../services/lan_socket_service.dart';
 
-const String kDefaultLanHostIp = '192.168.1.48';
+const String kDefaultLanHostIp = '192.0.0.4';
 const int kDefaultLanWsPort = 8765;
 const int kDefaultLanWebPort = 8080;
 const String kDefaultLanRoomId = 'LAN_1';
+
+const String kLanPackDriveFileId = '1sSehJ4eQLcG3QKl9t05eM3RkeIP39nJ0';
+const String kLanPackDownloadUrl =
+    'https://drive.google.com/uc?export=download&id=$kLanPackDriveFileId';
+const String kLanTargetDir = '/storage/emulated/0/Download/LAN/web';
+const String kTermuxSetupCommand =
+    'mkdir -p ~/.termux && echo "allow-external-apps = true" >> ~/.termux/termux.properties && termux-reload-settings';
 
 class ProfileScreen extends StatefulWidget {
   final String? initialRoomId;
@@ -54,6 +61,8 @@ class _ProfileScreenState extends State<ProfileScreen>
   bool _isBindingInProgress = false;
 
   bool _isLanMode = false;
+  bool _isDownloadingLanPack = false;
+  String _lanPackStatus = '';
   String _lanHostIp = kDefaultLanHostIp;
   String _lanWsUrl = 'ws://$kDefaultLanHostIp:$kDefaultLanWsPort';
   String _lanTvUrl =
@@ -109,6 +118,19 @@ class _ProfileScreenState extends State<ProfileScreen>
       await game.ensureProStatusLoaded();
       if (!mounted) return;
 
+      final prefs = await SharedPreferences.getInstance();
+      final String? pendingLanWs = prefs.getString('shadow_lan_active_ws');
+      final String? pendingLanRoom = prefs.getString('shadow_lan_active_room');
+      if (pendingLanWs != null && pendingLanWs.trim().isNotEmpty) {
+        await prefs.remove('shadow_lan_active_ws');
+        await prefs.remove('shadow_lan_active_room');
+        await _promptAndActivateLanMode(
+          prefilledWsUrl: pendingLanWs.trim(),
+          prefilledRoom: pendingLanRoom,
+        );
+        return;
+      }
+
       if (widget.initialRoomId != null && widget.initialRoomId!.isNotEmpty) {
         await _attemptSecureBinding(
             widget.initialRoomId!, widget.initialKey ?? '');
@@ -146,10 +168,147 @@ class _ProfileScreenState extends State<ProfileScreen>
     });
   }
 
+  bool _isLanPackInstalledLocally() {
+    if (kIsWeb) return true;
+    try {
+      final indexFile = File('$kLanTargetDir/index.html');
+      final serverFile = File('$kLanTargetDir/server_lan.py');
+      return indexFile.existsSync() && serverFile.existsSync();
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<void> _launchLanServerAutomatically() async {
+    if (kIsWeb) return;
+    try {
+      await _intentChannel.invokeMethod<bool>('runTermuxLanScript', {
+        'scriptPath': '$kLanTargetDir/start_lan.sh',
+      });
+    } catch (e) {
+      debugPrint("[LAN AUTO-START] $e");
+    }
+  }
+
+  Future<void> _ensureLanPackInstalledInBackground({
+    bool force = false,
+    void Function(String status)? onProgress,
+  }) async {
+    if (kIsWeb) return;
+    if (_isDownloadingLanPack) return;
+    if (!force && _isLanPackInstalledLocally()) {
+      const msg = "Pack LAN prêt dans Download/LAN/web";
+      if (mounted) {
+        setState(() => _lanPackStatus = msg);
+      }
+      onProgress?.call(msg);
+      return;
+    }
+
+    _isDownloadingLanPack = true;
+    const startMsg = "Téléchargement du pack LAN en arrière-plan...";
+    if (mounted) {
+      setState(() => _lanPackStatus = startMsg);
+    }
+    onProgress?.call(startMsg);
+
+    try {
+      final client = http.Client();
+      try {
+        http.Response response = await client
+            .get(Uri.parse(kLanPackDownloadUrl))
+            .timeout(const Duration(seconds: 30));
+
+        Uint8List bytes = response.bodyBytes;
+
+        final bool looksLikeZip =
+            bytes.length >= 2 && bytes[0] == 0x50 && bytes[1] == 0x4B;
+        if (!looksLikeZip) {
+          final html = utf8.decode(bytes, allowMalformed: true);
+          final confirmMatch =
+              RegExp(r'confirm=([0-9A-Za-z_\-]+)').firstMatch(html);
+          final uuidMatch = RegExp(r'uuid=([0-9A-Za-z_\-]+)').firstMatch(html);
+          if (confirmMatch != null) {
+            final confirmToken = confirmMatch.group(1)!;
+            final uuidPart =
+                uuidMatch != null ? '&uuid=${uuidMatch.group(1)}' : '';
+            final fallbackUrl =
+                'https://drive.usercontent.google.com/download?id=$kLanPackDriveFileId&export=download&confirm=$confirmToken$uuidPart';
+            response = await client
+                .get(Uri.parse(fallbackUrl))
+                .timeout(const Duration(seconds: 30));
+            bytes = response.bodyBytes;
+          }
+        }
+
+        if (bytes.length < 4 || bytes[0] != 0x50 || bytes[1] != 0x4B) {
+          throw Exception("Archive ZIP invalide reçue depuis Google Drive.");
+        }
+
+        const extractMsg = "Extraction vers Download/LAN/web...";
+        if (mounted) {
+          setState(() => _lanPackStatus = extractMsg);
+        }
+        onProgress?.call(extractMsg);
+
+        final targetDir = Directory(kLanTargetDir);
+        if (!await targetDir.exists()) {
+          await targetDir.create(recursive: true);
+        }
+
+        final archive = ZipDecoder().decodeBytes(bytes);
+        int extractedCount = 0;
+
+        for (final file in archive) {
+          String entryName = file.name.replaceAll('\\', '/');
+          if (entryName.startsWith('LAN/web/')) {
+            entryName = entryName.substring('LAN/web/'.length);
+          } else if (entryName.startsWith('web/')) {
+            entryName = entryName.substring('web/'.length);
+          }
+          if (entryName.isEmpty || entryName.contains('..')) continue;
+
+          final outPath = '$kLanTargetDir/$entryName';
+          if (file.isFile) {
+            final outFile = File(outPath);
+            await outFile.parent.create(recursive: true);
+            await outFile.writeAsBytes(file.content as List<int>, flush: true);
+            extractedCount++;
+          } else {
+            await Directory(outPath).create(recursive: true);
+          }
+        }
+
+        final doneMsg =
+            "Pack LAN installé ($extractedCount fichiers) dans Download/LAN/web";
+        if (mounted) {
+          setState(() => _lanPackStatus = doneMsg);
+        }
+        onProgress?.call(doneMsg);
+      } finally {
+        client.close();
+      }
+    } catch (e) {
+      final errMsg =
+          "Pack LAN non téléchargé (vérifie permission stockage / réseau) : $e";
+      debugPrint("[LAN PACK] $errMsg");
+      if (mounted) {
+        setState(() => _lanPackStatus = errMsg);
+      }
+      onProgress?.call(errMsg);
+    } finally {
+      _isDownloadingLanPack = false;
+    }
+  }
+
   Future<void> _promptAndActivateLanMode({
     String? prefilledWsUrl,
     String? prefilledRoom,
   }) async {
+    await _ensureLanPackInstalledInBackground();
+    await _launchLanServerAutomatically();
+    await Future.delayed(const Duration(seconds: 2));
+
     if (prefilledWsUrl != null && prefilledWsUrl.trim().isNotEmpty) {
       final Uri? parsed = Uri.tryParse(prefilledWsUrl.trim());
       final String host =
@@ -167,55 +326,158 @@ class _ProfileScreenState extends State<ProfileScreen>
     final ipController = TextEditingController(text: _lanHostIp);
     final roomController =
         TextEditingController(text: _activeRoom ?? kDefaultLanRoomId);
+    String dialogPackStatus = _lanPackStatus.isNotEmpty
+        ? _lanPackStatus
+        : (_isLanPackInstalledLocally()
+            ? "Pack LAN prêt dans Download/LAN/web"
+            : "Téléchargement du pack LAN en arrière-plan...");
 
     SystemDialog.show(
       context,
       title: "SERVEUR LAN LOCAL",
       color: const Color(0xFF00FF66),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            "Entrez l'adresse IP Wi-Fi du téléphone/PC qui héberge le serveur LAN :",
-            style: TextStyle(color: Colors.white70, fontSize: 12, height: 1.4),
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: ipController,
-            keyboardType: TextInputType.url,
-            style: const TextStyle(
-                color: Colors.white, fontFamily: 'monospace', fontSize: 14),
-            decoration: const InputDecoration(
-              labelText: "IP de l'hôte (ex: 192.168.1.48)",
-              labelStyle: TextStyle(color: Colors.white54),
-              enabledBorder: UnderlineInputBorder(
-                  borderSide: BorderSide(color: Color(0xFF00FF66))),
-              focusedBorder: UnderlineInputBorder(
-                  borderSide: BorderSide(color: Color(0xFF00FF66))),
-            ),
-          ),
-          const SizedBox(height: 10),
-          TextField(
-            controller: roomController,
-            style: const TextStyle(
-                color: Colors.white, fontFamily: 'monospace', fontSize: 13),
-            decoration: const InputDecoration(
-              labelText: "Nom de la salle (défaut: LAN_1)",
-              labelStyle: TextStyle(color: Colors.white54),
-              enabledBorder: UnderlineInputBorder(
-                  borderSide: BorderSide(color: Color(0xFF00E5FF))),
-              focusedBorder: UnderlineInputBorder(
-                  borderSide: BorderSide(color: Color(0xFF00E5FF))),
-            ),
-          ),
-          const SizedBox(height: 10),
-          const Text(
-            "Dossier serveur recommandé : Download/LAN/web",
-            style: TextStyle(
-                color: Colors.white38, fontFamily: 'monospace', fontSize: 10),
-          ),
-        ],
+      content: StatefulBuilder(
+        builder: (dialogCtx, setDialogState) {
+          return Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                "1) L'app télécharge et extrait le pack dans Download/LAN/web puis tente de lancer le serveur.\n"
+                "2) Si le serveur ne démarre pas seul : installe Termux, autorise les commandes de ShadowBurn dans les réglages, et lance une fois dans Termux :",
+                style:
+                    TextStyle(color: Colors.white70, fontSize: 11, height: 1.35),
+              ),
+              const SizedBox(height: 6),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.black,
+                  border: Border.all(color: const Color(0xFF00FF66).withOpacity(0.45)),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const SelectableText(
+                      kTermuxSetupCommand,
+                      style: TextStyle(
+                        color: Color(0xFF00FF66),
+                        fontFamily: 'monospace',
+                        fontSize: 9.5,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    InkWell(
+                      onTap: () {
+                        Clipboard.setData(
+                            const ClipboardData(text: kTermuxSetupCommand));
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text("Commande Termux copiée !"),
+                            duration: Duration(seconds: 2),
+                          ),
+                        );
+                      },
+                      child: const Text(
+                        "[COPIER LA COMMANDE TERMUX]",
+                        style: TextStyle(
+                          color: Color(0xFF00E5FF),
+                          fontFamily: 'monospace',
+                          fontSize: 9.5,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                "3) Sans signal pendant 60s : remise à zéro auto et arrêt propre du serveur.",
+                style:
+                    TextStyle(color: Colors.white54, fontSize: 10.5, height: 1.3),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: ipController,
+                keyboardType: TextInputType.url,
+                style: const TextStyle(
+                    color: Colors.white, fontFamily: 'monospace', fontSize: 13),
+                decoration: const InputDecoration(
+                  labelText: "IP Wi-Fi de l'hôte (ex: 192.0.0.4)",
+                  labelStyle: TextStyle(color: Colors.white54),
+                  enabledBorder: UnderlineInputBorder(
+                      borderSide: BorderSide(color: Color(0xFF00FF66))),
+                  focusedBorder: UnderlineInputBorder(
+                      borderSide: BorderSide(color: Color(0xFF00FF66))),
+                ),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: roomController,
+                style: const TextStyle(
+                    color: Colors.white, fontFamily: 'monospace', fontSize: 13),
+                decoration: const InputDecoration(
+                  labelText: "Nom de la salle (défaut: LAN_1)",
+                  labelStyle: TextStyle(color: Colors.white54),
+                  enabledBorder: UnderlineInputBorder(
+                      borderSide: BorderSide(color: Color(0xFF00E5FF))),
+                  focusedBorder: UnderlineInputBorder(
+                      borderSide: BorderSide(color: Color(0xFF00E5FF))),
+                ),
+              ),
+              const SizedBox(height: 10),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.black45,
+                  border: Border.all(color: Colors.white12),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      dialogPackStatus,
+                      style: const TextStyle(
+                        color: Color(0xFF00E5FF),
+                        fontFamily: 'monospace',
+                        fontSize: 10,
+                      ),
+                    ),
+                    if (!kIsWeb) ...[
+                      const SizedBox(height: 6),
+                      InkWell(
+                        onTap: () {
+                          unawaited(_ensureLanPackInstalledInBackground(
+                            force: true,
+                            onProgress: (status) {
+                              if (dialogCtx.mounted) {
+                                setDialogState(() => dialogPackStatus = status);
+                              }
+                            },
+                          ));
+                        },
+                        child: const Text(
+                          "[FORCER TÉLÉCHARGEMENT / MISE À JOUR PACK LAN]",
+                          style: TextStyle(
+                            color: Color(0xFFFF9100),
+                            fontFamily: 'monospace',
+                            fontSize: 9,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ],
+          );
+        },
       ),
       actions: [
         TextButton(
@@ -261,12 +523,13 @@ class _ProfileScreenState extends State<ProfileScreen>
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('shadow_lan_host_ip', hostIp);
 
-    final String wsUrl =
-        customWsUrl ?? 'ws://$hostIp:$kDefaultLanWsPort';
+    final String wsUrl = customWsUrl ?? 'ws://$hostIp:$kDefaultLanWsPort';
     final String tvUrl =
         'http://$hostIp:$kDefaultLanWebPort/?mode=lan&room=$roomId&ws=${Uri.encodeComponent(wsUrl)}';
 
     await Clipboard.setData(ClipboardData(text: tvUrl));
+
+    RaidAdminService.configureLan(wsUrl: wsUrl, roomId: roomId);
 
     final bool connected = await _lanSocket.connect(wsUrl);
     if (connected) {
@@ -455,6 +718,20 @@ class _ProfileScreenState extends State<ProfileScreen>
     _isBindingInProgress = true;
 
     try {
+      final cleanRoomId = roomId.trim();
+      final cleanKey = secretKey.trim();
+
+      if (cleanRoomId.isEmpty) return;
+
+      if (cleanRoomId.toUpperCase().startsWith('LAN_') ||
+          cleanKey.toUpperCase() == 'LAN') {
+        await _connectLanAdminWithHost(
+          hostIp: _lanHostIp,
+          roomId: cleanRoomId,
+        );
+        return;
+      }
+
       if (_deviceAdminToken == null || _hardwareFingerprint == null) {
         await _initDeviceAdminSecurity();
       }
@@ -467,11 +744,6 @@ class _ProfileScreenState extends State<ProfileScreen>
         _rejectIntrusionAttempt("ACCÈS REFUSÉ : STATUT MONARQUE PRO REQUIS.");
         return;
       }
-
-      final cleanRoomId = roomId.trim();
-      final cleanKey = secretKey.trim();
-
-      if (cleanRoomId.isEmpty) return;
 
       final docRef = FirebaseFirestore.instance
           .collection('current_raids')
@@ -537,6 +809,7 @@ class _ProfileScreenState extends State<ProfileScreen>
           RaidAdminService.raidPresets.any((p) => p['hp'] == rawMaxHp);
 
       if (!mounted) return;
+      RaidAdminService.clearLan();
       await _lanSocket.disconnect();
       setState(() {
         _isLanMode = false;
@@ -688,6 +961,7 @@ class _ProfileScreenState extends State<ProfileScreen>
       _releaseAdminLease(roomToRelease);
     }
     if (wasLan) {
+      RaidAdminService.clearLan();
       _lanSocket.disconnect();
     }
     if (!mounted) return;
@@ -1226,7 +1500,13 @@ class _ProfileScreenState extends State<ProfileScreen>
 
   Widget _buildRaidRemoteConsole(
       BuildContext context, GameProvider game, Color systemBlue) {
-    if (!game.isPro) {
+    final String? effectiveRoom = _isLanMode
+        ? (_activeRoom ?? kDefaultLanRoomId)
+        : (_activeRoom ?? game.pairedAdminRoom);
+    final bool hasActiveLink =
+        effectiveRoom != null && effectiveRoom.trim().isNotEmpty;
+
+    if (!game.isPro && !hasActiveLink && !_isLanMode) {
       return Container(
         width: double.infinity,
         padding: const EdgeInsets.all(16),
@@ -1277,12 +1557,6 @@ class _ProfileScreenState extends State<ProfileScreen>
         ),
       );
     }
-
-    final String? effectiveRoom = _isLanMode
-        ? (_activeRoom ?? kDefaultLanRoomId)
-        : (_activeRoom ?? game.pairedAdminRoom);
-    final bool hasActiveLink =
-        effectiveRoom != null && effectiveRoom.trim().isNotEmpty;
 
     return Container(
       width: double.infinity,

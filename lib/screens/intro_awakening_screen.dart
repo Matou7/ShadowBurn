@@ -1,5 +1,3 @@
-// lib/screens/intro_awakening_screen.dart
-
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -24,6 +22,7 @@ enum IntroStep {
   lawMidnight,
   lawPortals,
   lawUrgent,
+  lawArenaPro,
   peaksWarning,
   nameEntry,
   finalAwakening,
@@ -79,7 +78,8 @@ class _IntroAwakeningScreenState extends State<IntroAwakeningScreen> {
     });
 
     int charIndex = 0;
-    _typewriterTimer = Timer.periodic(const Duration(milliseconds: 25), (timer) {
+    _typewriterTimer =
+        Timer.periodic(const Duration(milliseconds: 25), (timer) {
       if (charIndex < _fullTargetText.length) {
         setState(() {
           _displayedText += _fullTargetText[charIndex];
@@ -163,6 +163,16 @@ class _IntroAwakeningScreenState extends State<IntroAwakeningScreen> {
         );
         break;
 
+      case IntroStep.lawArenaPro:
+        _startTypewriter(
+          "LOI V : RAIDS EN ÉQUIPE, ÉCRAN TV & STATUT PRO\n\n"
+          "Au-delà de votre entraînement solo, le Système ouvre des Raids multijoueurs contre des Boss géants :\n\n"
+          "• MODE INVITÉ (GRATUIT) : Scannez le QR Code Chasseur d'une salle pour rejoindre l'assaut et infliger des dégâts au Boss en temps réel.\n\n"
+          "• ÉCRAN D'ARÈNE TV : Projetez le combat sur téléviseur ou PC pour suivre la barre de vie du Boss, le classement des Chasseurs et le chronomètre en direct.\n\n"
+          "• STATUT MONARQUE PRO : Débloque la Télécommande Maître Admin (création de salle, choix des Boss jusqu'à 30 000 PV, gestion du chrono, frappes système) ainsi que le mode Arène LAN hors-ligne sur votre Wi-Fi local.",
+        );
+        break;
+
       case IntroStep.peaksWarning:
         _startTypewriter(
           "AVERTISSEMENT DU SYSTÈME :\n\n"
@@ -183,7 +193,9 @@ class _IntroAwakeningScreenState extends State<IntroAwakeningScreen> {
 
       case IntroStep.finalAwakening:
         _vibrateHeavy();
-        final name = _nameController.text.trim().isEmpty ? "Chasseur" : _nameController.text.trim();
+        final name = _nameController.text.trim().isEmpty
+            ? "Chasseur"
+            : _nameController.text.trim();
         _startTypewriter(
           "SYNCHRONISATION TERMINÉE.\n\n"
           "Licence délivrée : Rang E.\n\n"
@@ -247,6 +259,9 @@ class _IntroAwakeningScreenState extends State<IntroAwakeningScreen> {
           _currentStep = IntroStep.lawUrgent;
           break;
         case IntroStep.lawUrgent:
+          _currentStep = IntroStep.lawArenaPro;
+          break;
+        case IntroStep.lawArenaPro:
           _currentStep = IntroStep.peaksWarning;
           break;
         case IntroStep.peaksWarning:
@@ -268,7 +283,9 @@ class _IntroAwakeningScreenState extends State<IntroAwakeningScreen> {
   Future<void> _finishIntro() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('has_completed_intro', true);
-    final hunterName = _nameController.text.trim().isEmpty ? "Chasseur" : _nameController.text.trim();
+    final hunterName = _nameController.text.trim().isEmpty
+        ? "Chasseur"
+        : _nameController.text.trim();
     widget.onIntroComplete(hunterName);
   }
 
@@ -303,7 +320,8 @@ class _IntroAwakeningScreenState extends State<IntroAwakeningScreen> {
                     decoration: BoxDecoration(
                       color: const Color(0xFF090D16),
                       borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: _systemCyan.withOpacity(0.8), width: 1.5),
+                      border: Border.all(
+                          color: _systemCyan.withOpacity(0.8), width: 1.5),
                       boxShadow: [
                         BoxShadow(
                           color: _systemCyan.withOpacity(0.15),
@@ -330,9 +348,11 @@ class _IntroAwakeningScreenState extends State<IntroAwakeningScreen> {
                             const SizedBox(height: 30),
                             Center(
                               child: Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 24, vertical: 12),
                                 decoration: BoxDecoration(
-                                  border: Border.all(color: Colors.redAccent, width: 2),
+                                  border: Border.all(
+                                      color: Colors.redAccent, width: 2),
                                   borderRadius: BorderRadius.circular(8),
                                   color: Colors.black45,
                                 ),
@@ -353,7 +373,10 @@ class _IntroAwakeningScreenState extends State<IntroAwakeningScreen> {
                               "Descendez en 2 secondes, tenez 2 secondes au point bas, remontez en 2 secondes.\n\n"
                               "Maintenez la cadence jusqu'à l'extinction du chronomètre.",
                               textAlign: TextAlign.center,
-                              style: TextStyle(color: Colors.white70, fontSize: 13, height: 1.4),
+                              style: TextStyle(
+                                  color: Colors.white70,
+                                  fontSize: 13,
+                                  height: 1.4),
                             ),
                           ] else ...[
                             Text(
@@ -365,7 +388,8 @@ class _IntroAwakeningScreenState extends State<IntroAwakeningScreen> {
                                 fontWeight: FontWeight.w600,
                               ),
                             ),
-                            if (_currentStep == IntroStep.nameEntry && !_isTyping) ...[
+                            if (_currentStep == IntroStep.nameEntry &&
+                                !_isTyping) ...[
                               const SizedBox(height: 25),
                               TextField(
                                 controller: _nameController,
@@ -378,12 +402,15 @@ class _IntroAwakeningScreenState extends State<IntroAwakeningScreen> {
                                   filled: true,
                                   fillColor: Colors.black54,
                                   hintText: "VOTRE NOM DE CODE...",
-                                  hintStyle: const TextStyle(color: Colors.white24, fontSize: 13),
+                                  hintStyle: const TextStyle(
+                                      color: Colors.white24, fontSize: 13),
                                   enabledBorder: OutlineInputBorder(
-                                    borderSide: BorderSide(color: _systemCyan.withOpacity(0.5)),
+                                    borderSide: BorderSide(
+                                        color: _systemCyan.withOpacity(0.5)),
                                   ),
                                   focusedBorder: OutlineInputBorder(
-                                    borderSide: BorderSide(color: _systemCyan, width: 2),
+                                    borderSide: BorderSide(
+                                        color: _systemCyan, width: 2),
                                   ),
                                 ),
                               ),
@@ -418,7 +445,8 @@ class _IntroAwakeningScreenState extends State<IntroAwakeningScreen> {
             _isTyping = false;
           });
         },
-        child: const Text("PASSER L'ANIMATION", style: TextStyle(color: Colors.white38, fontSize: 12)),
+        child: const Text("PASSER L'ANIMATION",
+            style: TextStyle(color: Colors.white38, fontSize: 12)),
       );
     }
 
@@ -445,11 +473,16 @@ class _IntroAwakeningScreenState extends State<IntroAwakeningScreen> {
 
     String label = "SUIVANT";
     if (_currentStep == IntroStep.injunction) label = "AFFICHER LE PROTOCOLE";
-    if (_currentStep == IntroStep.tempoExplanation) label = "INITIALISER LE TEST (01:05)";
-    if (_currentStep == IntroStep.lawUrgent) label = "ACCEPTER LE PACTE";
+    if (_currentStep == IntroStep.tempoExplanation) {
+      label = "INITIALISER LE TEST (01:05)";
+    }
+    if (_currentStep == IntroStep.lawUrgent) label = "DÉCOUVRIR L'ARÈNE & PRO";
+    if (_currentStep == IntroStep.lawArenaPro) label = "ACCEPTER LE PACTE";
     if (_currentStep == IntroStep.peaksWarning) label = "JE SUIS PRÊT";
     if (_currentStep == IntroStep.nameEntry) label = "GRAVER DANS LA MATRICE";
-    if (_currentStep == IntroStep.finalAwakening) label = "ENTRER DANS LE SYSTÈME";
+    if (_currentStep == IntroStep.finalAwakening) {
+      label = "ENTRER DANS LE SYSTÈME";
+    }
 
     return ElevatedButton(
       style: ElevatedButton.styleFrom(
@@ -462,7 +495,8 @@ class _IntroAwakeningScreenState extends State<IntroAwakeningScreen> {
       onPressed: _nextStep,
       child: Text(
         label,
-        style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w900, letterSpacing: 1.5),
+        style: const TextStyle(
+            fontSize: 15, fontWeight: FontWeight.w900, letterSpacing: 1.5),
       ),
     );
   }

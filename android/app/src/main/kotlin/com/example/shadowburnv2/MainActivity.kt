@@ -3,6 +3,7 @@ package com.example.shadowburnv2
 import android.app.AppOpsManager
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -10,7 +11,9 @@ import android.os.PowerManager
 import android.os.Process
 import android.provider.Settings
 import android.view.WindowManager
+import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -20,10 +23,14 @@ class MainActivity: FlutterActivity() {
     private val LEGACY_CHANNEL = "com.shadowburn.lock/channel"
     private val INTENT_CHANNEL = "com.shadowburn.app/intents"
 
+    private val TERMUX_RUN_COMMAND_PERMISSION = "com.termux.permission.RUN_COMMAND"
+    private val REQUEST_CODE_TERMUX_PERMISSION = 1042
+
     private var lastIntentUrl: String? = null
     private var primaryMethodChannel: MethodChannel? = null
     private var legacyMethodChannel: MethodChannel? = null
     private var intentMethodChannel: MethodChannel? = null
+    private var pendingTermuxPermissionResult: MethodChannel.Result? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -86,6 +93,22 @@ class MainActivity: FlutterActivity() {
     override fun onStop() {
         super.onStop()
         overridePendingTransition(0, 0)
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == REQUEST_CODE_TERMUX_PERMISSION) {
+            val granted = grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED
+            pendingTermuxPermissionResult?.success(granted)
+            pendingTermuxPermissionResult = null
+            if (!granted) {
+                openAppDetailsFallback()
+            }
+        }
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -207,6 +230,55 @@ class MainActivity: FlutterActivity() {
                     result.success(areAllNotificationsEnabled())
                 }
 
+                "checkTermuxPermission" -> {
+                    result.success(isTermuxPermissionGranted())
+                }
+
+                "requestTermuxPermission" -> {
+                    if (isTermuxPermissionGranted()) {
+                        result.success(true)
+                    } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                        pendingTermuxPermissionResult?.success(false)
+                        pendingTermuxPermissionResult = result
+                        ActivityCompat.requestPermissions(
+                            this,
+                            arrayOf(TERMUX_RUN_COMMAND_PERMISSION),
+                            REQUEST_CODE_TERMUX_PERMISSION
+                        )
+                    } else {
+                        openAppDetailsFallback()
+                        result.success(false)
+                    }
+                }
+
+                "runTermuxLanScript" -> {
+                    val scriptPath = call.argument<String>("scriptPath")
+                        ?: "/storage/emulated/0/Download/LAN/web/start_lan.sh"
+                    val argsList = call.argument<List<*>>("args")
+                        ?.mapNotNull { it?.toString() }
+                        ?.toTypedArray()
+                        ?: emptyArray()
+
+                    try {
+                        val intent = Intent("com.termux.RUN_COMMAND").apply {
+                            setClassName("com.termux", "com.termux.app.RunCommandService")
+                            putExtra("com.termux.RUN_COMMAND_PATH", "/data/data/com.termux/files/usr/bin/bash")
+                            putExtra("com.termux.RUN_COMMAND_ARGUMENTS", arrayOf(scriptPath) + argsList)
+                            putExtra("com.termux.RUN_COMMAND_WORKDIR", "/storage/emulated/0/Download/LAN/web")
+                            putExtra("com.termux.RUN_COMMAND_BACKGROUND", true)
+                            putExtra("com.termux.RUN_COMMAND_SESSION_ACTION", "0")
+                        }
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                            startForegroundService(intent)
+                        } else {
+                            startService(intent)
+                        }
+                        result.success(true)
+                    } catch (e: Exception) {
+                        result.error("TERMUX_RUN_FAILED", e.message, null)
+                    }
+                }
+
                 else -> result.notImplemented()
             }
         }
@@ -231,7 +303,17 @@ class MainActivity: FlutterActivity() {
         primaryMethodChannel = null
         legacyMethodChannel = null
         intentMethodChannel = null
+        pendingTermuxPermissionResult = null
         super.cleanUpFlutterEngine(flutterEngine)
+    }
+
+    private fun isTermuxPermissionGranted(): Boolean {
+        return try {
+            ContextCompat.checkSelfPermission(this, TERMUX_RUN_COMMAND_PERMISSION) ==
+                PackageManager.PERMISSION_GRANTED
+        } catch (_: Exception) {
+            false
+        }
     }
 
     private fun startCoreWatcherService() {

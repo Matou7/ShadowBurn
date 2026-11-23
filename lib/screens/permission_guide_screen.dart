@@ -1,5 +1,3 @@
-// lib/screens/permission_guide_screen.dart
-
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -26,6 +24,7 @@ class _PermissionGuideScreenState extends State<PermissionGuideScreen>
   bool _hasOverlay = false;
   bool _hasUsageStats = false;
   bool _hasBatteryExemption = false;
+  bool _hasTermuxRunCommand = false;
 
   @override
   void initState() {
@@ -50,7 +49,8 @@ class _PermissionGuideScreenState extends State<PermissionGuideScreen>
   Future<bool> _checkUsageStatsPermission() async {
     if (!Platform.isAndroid) return true;
     try {
-      final bool? result = await _platform.invokeMethod<bool>('checkUsagePermission');
+      final bool? result =
+          await _platform.invokeMethod<bool>('checkUsagePermission');
       return result ?? false;
     } catch (_) {
       return false;
@@ -60,7 +60,8 @@ class _PermissionGuideScreenState extends State<PermissionGuideScreen>
   Future<bool> _checkBatteryPermission() async {
     if (!Platform.isAndroid) return true;
     try {
-      final bool? result = await _platform.invokeMethod<bool>('checkBatteryOptimizations');
+      final bool? result =
+          await _platform.invokeMethod<bool>('checkBatteryOptimizations');
       return result ?? false;
     } catch (_) {
       final status = await Permission.ignoreBatteryOptimizations.status;
@@ -71,7 +72,8 @@ class _PermissionGuideScreenState extends State<PermissionGuideScreen>
   Future<bool> _checkAllNotifications() async {
     if (!Platform.isAndroid) return true;
     try {
-      final bool? nativeResult = await _platform.invokeMethod<bool>('checkAllNotificationsEnabled');
+      final bool? nativeResult =
+          await _platform.invokeMethod<bool>('checkAllNotificationsEnabled');
       if (nativeResult != null) return nativeResult;
     } catch (_) {}
 
@@ -79,13 +81,25 @@ class _PermissionGuideScreenState extends State<PermissionGuideScreen>
     return status.isGranted;
   }
 
+  Future<bool> _checkTermuxPermission() async {
+    if (!Platform.isAndroid) return true;
+    try {
+      final bool? nativeResult =
+          await _platform.invokeMethod<bool>('checkTermuxPermission');
+      if (nativeResult != null) return nativeResult;
+    } catch (_) {}
+    return false;
+  }
+
   Future<void> _checkAllPermissions() async {
-    final PermissionStatus activity = await Permission.activityRecognition.status;
+    final PermissionStatus activity =
+        await Permission.activityRecognition.status;
     final PermissionStatus overlay = await Permission.systemAlertWindow.status;
 
     final bool notifsOk = await _checkAllNotifications();
     final bool usageOk = await _checkUsageStatsPermission();
     final bool batteryOk = await _checkBatteryPermission();
+    final bool termuxOk = await _checkTermuxPermission();
 
     if (!mounted) return;
 
@@ -95,6 +109,7 @@ class _PermissionGuideScreenState extends State<PermissionGuideScreen>
       _hasOverlay = overlay.isGranted;
       _hasUsageStats = usageOk;
       _hasBatteryExemption = batteryOk;
+      _hasTermuxRunCommand = termuxOk;
       _isChecking = false;
     });
 
@@ -143,7 +158,7 @@ class _PermissionGuideScreenState extends State<PermissionGuideScreen>
   Future<void> _handleBatteryDeep() async {
     setState(() => _isChecking = true);
     final status = await Permission.ignoreBatteryOptimizations.request();
-    
+
     if (!status.isGranted) {
       try {
         await _platform.invokeMethod('openBatteryNoRestrictions');
@@ -152,6 +167,20 @@ class _PermissionGuideScreenState extends State<PermissionGuideScreen>
       }
     }
 
+    await _checkAllPermissions();
+  }
+
+  Future<void> _handleTermuxPermission() async {
+    setState(() => _isChecking = true);
+    try {
+      final bool? granted =
+          await _platform.invokeMethod<bool>('requestTermuxPermission');
+      if (granted != true) {
+        await openAppSettings();
+      }
+    } catch (_) {
+      await openAppSettings();
+    }
     await _checkAllPermissions();
   }
 
@@ -191,7 +220,8 @@ class _PermissionGuideScreenState extends State<PermissionGuideScreen>
         backgroundColor: Colors.black,
         body: SafeArea(
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 16.0),
+            padding:
+                const EdgeInsets.symmetric(horizontal: 20.0, vertical: 16.0),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
@@ -219,7 +249,6 @@ class _PermissionGuideScreenState extends State<PermissionGuideScreen>
                   style: TextStyle(color: Colors.white70, fontSize: 12),
                 ),
                 const SizedBox(height: 16),
-
                 Expanded(
                   child: ListView(
                     children: [
@@ -232,19 +261,27 @@ class _PermissionGuideScreenState extends State<PermissionGuideScreen>
                         actionButton: OutlinedButton.icon(
                           style: OutlinedButton.styleFrom(
                             side: BorderSide(
-                              color: s1Ok ? const Color(0xFF00E5FF) : Colors.redAccent,
+                              color: s1Ok
+                                  ? const Color(0xFF00E5FF)
+                                  : Colors.redAccent,
                             ),
                           ),
                           onPressed: _handleSector1,
                           icon: Icon(
                             s1Ok ? Icons.check : Icons.lock_open,
-                            color: s1Ok ? const Color(0xFF00E5FF) : Colors.redAccent,
+                            color: s1Ok
+                                ? const Color(0xFF00E5FF)
+                                : Colors.redAccent,
                             size: 16,
                           ),
                           label: Text(
-                            s1Ok ? "PODOMÈTRE & NOTIFS : ACTIFS" : "ACTIVER PODOMÈTRE & NOTIFS",
+                            s1Ok
+                                ? "PODOMÈTRE & NOTIFS : ACTIFS"
+                                : "ACTIVER PODOMÈTRE & NOTIFS",
                             style: TextStyle(
-                              color: s1Ok ? const Color(0xFF00E5FF) : Colors.redAccent,
+                              color: s1Ok
+                                  ? const Color(0xFF00E5FF)
+                                  : Colors.redAccent,
                               fontSize: 11,
                               fontWeight: FontWeight.bold,
                             ),
@@ -252,7 +289,6 @@ class _PermissionGuideScreenState extends State<PermissionGuideScreen>
                         ),
                       ),
                       const SizedBox(height: 12),
-
                       _buildSectorContainer(
                         title: "2. Confinement Cerbère",
                         subtitle: "SYSTEM_ALERT_WINDOW • PACKAGE_USAGE_STATS",
@@ -265,19 +301,27 @@ class _PermissionGuideScreenState extends State<PermissionGuideScreen>
                             OutlinedButton.icon(
                               style: OutlinedButton.styleFrom(
                                 side: BorderSide(
-                                  color: _hasOverlay ? const Color(0xFF00E5FF) : Colors.redAccent,
+                                  color: _hasOverlay
+                                      ? const Color(0xFF00E5FF)
+                                      : Colors.redAccent,
                                 ),
                               ),
                               onPressed: _handleOverlay,
                               icon: Icon(
                                 _hasOverlay ? Icons.check : Icons.layers,
-                                color: _hasOverlay ? const Color(0xFF00E5FF) : Colors.redAccent,
+                                color: _hasOverlay
+                                    ? const Color(0xFF00E5FF)
+                                    : Colors.redAccent,
                                 size: 16,
                               ),
                               label: Text(
-                                _hasOverlay ? "SUPERPOSITION : ACCORDÉE" : "1. ACTIVER : SUPERPOSITION D'ÉCRAN",
+                                _hasOverlay
+                                    ? "SUPERPOSITION : ACCORDÉE"
+                                    : "1. ACTIVER : SUPERPOSITION D'ÉCRAN",
                                 style: TextStyle(
-                                  color: _hasOverlay ? const Color(0xFF00E5FF) : Colors.redAccent,
+                                  color: _hasOverlay
+                                      ? const Color(0xFF00E5FF)
+                                      : Colors.redAccent,
                                   fontSize: 11,
                                   fontWeight: FontWeight.bold,
                                 ),
@@ -287,19 +331,29 @@ class _PermissionGuideScreenState extends State<PermissionGuideScreen>
                             OutlinedButton.icon(
                               style: OutlinedButton.styleFrom(
                                 side: BorderSide(
-                                  color: _hasUsageStats ? const Color(0xFF00E5FF) : Colors.redAccent,
+                                  color: _hasUsageStats
+                                      ? const Color(0xFF00E5FF)
+                                      : Colors.redAccent,
                                 ),
                               ),
                               onPressed: _handleUsageAccessDeep,
                               icon: Icon(
-                                _hasUsageStats ? Icons.check : Icons.query_stats,
-                                color: _hasUsageStats ? const Color(0xFF00E5FF) : Colors.redAccent,
+                                _hasUsageStats
+                                    ? Icons.check
+                                    : Icons.query_stats,
+                                color: _hasUsageStats
+                                    ? const Color(0xFF00E5FF)
+                                    : Colors.redAccent,
                                 size: 16,
                               ),
                               label: Text(
-                                _hasUsageStats ? "DONNÉES D'USAGE : ACCORDÉES" : "2. ACTIVER : DONNÉES D'USAGE",
+                                _hasUsageStats
+                                    ? "DONNÉES D'USAGE : ACCORDÉES"
+                                    : "2. ACTIVER : DONNÉES D'USAGE",
                                 style: TextStyle(
-                                  color: _hasUsageStats ? const Color(0xFF00E5FF) : Colors.redAccent,
+                                  color: _hasUsageStats
+                                      ? const Color(0xFF00E5FF)
+                                      : Colors.redAccent,
                                   fontSize: 11,
                                   fontWeight: FontWeight.bold,
                                 ),
@@ -309,7 +363,6 @@ class _PermissionGuideScreenState extends State<PermissionGuideScreen>
                         ),
                       ),
                       const SizedBox(height: 12),
-
                       _buildSectorContainer(
                         title: "3. Matrice de Réveil & Zéro Restriction",
                         subtitle: "BATTERY_OPTIMIZATIONS • MATÉRIEL",
@@ -319,19 +372,67 @@ class _PermissionGuideScreenState extends State<PermissionGuideScreen>
                         actionButton: OutlinedButton.icon(
                           style: OutlinedButton.styleFrom(
                             side: BorderSide(
-                              color: s3Ok ? const Color(0xFF00E5FF) : Colors.redAccent,
+                              color: s3Ok
+                                  ? const Color(0xFF00E5FF)
+                                  : Colors.redAccent,
                             ),
                           ),
                           onPressed: _handleBatteryDeep,
                           icon: Icon(
                             s3Ok ? Icons.check : Icons.battery_alert,
-                            color: s3Ok ? const Color(0xFF00E5FF) : Colors.redAccent,
+                            color: s3Ok
+                                ? const Color(0xFF00E5FF)
+                                : Colors.redAccent,
                             size: 16,
                           ),
                           label: Text(
-                            s3Ok ? "BATTERIE : AUCUNE RESTRICTION (VÉRIFIÉ)" : "AUTORISER L'EXEMPTION DE BATTERIE",
+                            s3Ok
+                                ? "BATTERIE : AUCUNE RESTRICTION (VÉRIFIÉ)"
+                                : "AUTORISER L'EXEMPTION DE BATTERIE",
                             style: TextStyle(
-                              color: s3Ok ? const Color(0xFF00E5FF) : Colors.redAccent,
+                              color: s3Ok
+                                  ? const Color(0xFF00E5FF)
+                                  : Colors.redAccent,
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      _buildSectorContainer(
+                        title: "4. Passerelle Serveur LAN (Optionnel)",
+                        subtitle: "COM.TERMUX.PERMISSION.RUN_COMMAND",
+                        description:
+                            "Permet de démarrer automatiquement le serveur local LAN (TV & Raids Wi-Fi) depuis l'application sans saisir de commandes.",
+                        isComplete: _hasTermuxRunCommand,
+                        isOptional: true,
+                        actionButton: OutlinedButton.icon(
+                          style: OutlinedButton.styleFrom(
+                            side: BorderSide(
+                              color: _hasTermuxRunCommand
+                                  ? const Color(0xFF00FF66)
+                                  : const Color(0xFFFF9100),
+                            ),
+                          ),
+                          onPressed: _handleTermuxPermission,
+                          icon: Icon(
+                            _hasTermuxRunCommand
+                                ? Icons.check
+                                : Icons.terminal,
+                            color: _hasTermuxRunCommand
+                                ? const Color(0xFF00FF66)
+                                : const Color(0xFFFF9100),
+                            size: 16,
+                          ),
+                          label: Text(
+                            _hasTermuxRunCommand
+                                ? "COMMANDES TERMUX : AUTORISÉES"
+                                : "AUTORISER DANS LES PARAMÈTRES (LAN)",
+                            style: TextStyle(
+                              color: _hasTermuxRunCommand
+                                  ? const Color(0xFF00FF66)
+                                  : const Color(0xFFFF9100),
                               fontSize: 11,
                               fontWeight: FontWeight.bold,
                             ),
@@ -341,15 +442,15 @@ class _PermissionGuideScreenState extends State<PermissionGuideScreen>
                     ],
                   ),
                 ),
-
                 const SizedBox(height: 10),
-
                 ElevatedButton(
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: allGood ? const Color(0xFF00E5FF) : Colors.grey[900],
+                    backgroundColor:
+                        allGood ? const Color(0xFF00E5FF) : Colors.grey[900],
                     foregroundColor: allGood ? Colors.black : Colors.white38,
                     padding: const EdgeInsets.symmetric(vertical: 16),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8)),
                     elevation: allGood ? 5 : 0,
                   ),
                   onPressed: allGood ? _handleGlobalValidate : null,
@@ -357,10 +458,13 @@ class _PermissionGuideScreenState extends State<PermissionGuideScreen>
                       ? const SizedBox(
                           height: 20,
                           width: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF00E5FF)),
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2, color: Color(0xFF00E5FF)),
                         )
                       : Text(
-                          allGood ? "MATRICE COMPLÈTE : ENTRER DANS L'ÉVEIL" : "ACCÈS MATRICIELS INCOMPLETS",
+                          allGood
+                              ? "MATRICE COMPLÈTE : ENTRER DANS L'ÉVEIL"
+                              : "ACCÈS MATRICIELS INCOMPLETS",
                           style: const TextStyle(
                             fontSize: 13,
                             fontWeight: FontWeight.w900,
@@ -389,17 +493,20 @@ class _PermissionGuideScreenState extends State<PermissionGuideScreen>
     required String description,
     required bool isComplete,
     required Widget actionButton,
+    bool isOptional = false,
   }) {
+    final Color borderColor = isComplete
+        ? const Color(0xFF00E5FF).withOpacity(0.6)
+        : (isOptional
+            ? const Color(0xFFFF9100).withOpacity(0.45)
+            : Colors.redAccent.withOpacity(0.4));
+
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: const Color(0xFF0D131D),
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(
-          color: isComplete
-              ? const Color(0xFF00E5FF).withOpacity(0.6)
-              : Colors.redAccent.withOpacity(0.4),
-        ),
+        border: Border.all(color: borderColor),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -417,8 +524,12 @@ class _PermissionGuideScreenState extends State<PermissionGuideScreen>
                 ),
               ),
               Icon(
-                isComplete ? Icons.check_circle : Icons.cancel_outlined,
-                color: isComplete ? const Color(0xFF00E5FF) : Colors.redAccent,
+                isComplete
+                    ? Icons.check_circle
+                    : (isOptional ? Icons.info_outline : Icons.cancel_outlined),
+                color: isComplete
+                    ? const Color(0xFF00E5FF)
+                    : (isOptional ? const Color(0xFFFF9100) : Colors.redAccent),
                 size: 20,
               ),
             ],

@@ -1,5 +1,3 @@
-// lib/main.dart
-
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -27,6 +25,7 @@ import 'screens/intro_awakening_screen.dart';
 import 'screens/arena_tv_screen.dart';
 import 'screens/hunter_join_screen.dart';
 import 'screens/admin_screen.dart';
+import 'screens/raid_admin_panel_screen.dart';
 
 import 'widgets/urgent_quest_overlay.dart';
 import 'widgets/penalty_overlay.dart';
@@ -462,29 +461,69 @@ class _ShadowBurnAppState extends State<ShadowBurnApp>
 
     if (uri.host == 'admin' ||
         uri.path.contains('admin') ||
-        link.contains('room=')) {
+        link.contains('room=') ||
+        link.contains('mode=lan') ||
+        link.contains('ws=')) {
       String? roomId = uri.queryParameters['room'];
       String? adminKey = uri.queryParameters['key'];
+      String? mode = uri.queryParameters['mode'];
+      String? ws = uri.queryParameters['ws'];
 
-      if ((roomId == null || roomId.isEmpty) && uri.fragment.contains('?')) {
+      if (uri.fragment.contains('?')) {
         try {
           final fragParams = Uri.splitQueryString(uri.fragment.split('?').last);
-          roomId = fragParams['room'];
+          roomId ??= fragParams['room'];
           adminKey ??= fragParams['key'];
+          mode ??= fragParams['mode'];
+          ws ??= fragParams['ws'];
         } catch (_) {}
       }
 
-      final String cleanRoom = (roomId ?? '').trim();
+      final String cleanMode =
+          (mode ?? ((ws != null && ws.isNotEmpty) ? 'lan' : 'cloud'))
+              .trim()
+              .toLowerCase();
+      final String decodedWs = (ws != null && ws.trim().isNotEmpty)
+          ? Uri.decodeComponent(ws.trim())
+          : '';
+      final bool isLan = cleanMode == 'lan' || decodedWs.isNotEmpty;
+      final String cleanRoom = (roomId ?? (isLan ? 'LAN_1' : '')).trim();
       final String cleanKey = (adminKey ?? '').trim();
-      if (cleanRoom.isEmpty) return;
+
+      if (cleanRoom.isEmpty && !isLan) return;
 
       WidgetsBinding.instance.addPostFrameCallback((_) async {
         if (!mounted) return;
+        final ctx = rootNavigatorKey.currentContext;
         final game = Provider.of<GameProvider>(context, listen: false);
+
+        if (isLan) {
+          final prefs = await SharedPreferences.getInstance();
+          final parsedWs = Uri.tryParse(decodedWs);
+          if (parsedWs != null && parsedWs.host.isNotEmpty) {
+            await prefs.setString('shadow_lan_host_ip', parsedWs.host);
+          }
+          final String resolvedRoom = cleanRoom.isEmpty ? 'LAN_1' : cleanRoom;
+          await prefs.setString('shadow_lan_active_room', resolvedRoom);
+          await prefs.setString('shadow_lan_active_ws', decodedWs);
+
+          final nav = rootNavigatorKey.currentState;
+          if (nav != null && nav.mounted) {
+            nav.push(
+              MaterialPageRoute(
+                builder: (_) => RaidAdminPanelScreen(
+                  roomId: resolvedRoom,
+                  adminKey: cleanKey.isNotEmpty ? cleanKey : 'LAN',
+                ),
+              ),
+            );
+          }
+          return;
+        }
+
         final bool isProVerified = await game.ensureProStatusLoaded();
 
         if (!isProVerified) {
-          final ctx = rootNavigatorKey.currentContext;
           if (ctx != null && ctx.mounted) {
             ScaffoldMessenger.of(ctx).showSnackBar(
               const SnackBar(

@@ -1,5 +1,3 @@
-// lib/screens/admin_screen.dart
-
 import 'dart:async';
 import 'dart:math';
 import 'package:flutter/material.dart';
@@ -19,6 +17,9 @@ class AdminScreen extends StatefulWidget {
 class _AdminScreenState extends State<AdminScreen> {
   late String _roomId;
   late String _key;
+  late String _mode;
+  late String _wsUrl;
+  bool _isLanMode = false;
   bool _attemptedAutoLaunch = false;
   bool _isChecking = true;
   bool _isAuthorized = false;
@@ -39,17 +40,39 @@ class _AdminScreenState extends State<AdminScreen> {
     final uri = Uri.base;
     String? roomParam = uri.queryParameters['room'];
     String? keyParam = uri.queryParameters['key'];
+    String? modeParam = uri.queryParameters['mode'];
+    String? wsParam = uri.queryParameters['ws'];
 
     if (uri.fragment.contains('?')) {
       final fragmentParams = Uri.splitQueryString(uri.fragment.split('?').last);
       roomParam ??= fragmentParams['room'];
       keyParam ??= fragmentParams['key'];
+      modeParam ??= fragmentParams['mode'];
+      wsParam ??= fragmentParams['ws'];
     }
+
+    _mode = (modeParam ?? '').trim().toLowerCase();
+    _wsUrl = (wsParam != null && wsParam.trim().isNotEmpty)
+        ? Uri.decodeComponent(wsParam.trim())
+        : '';
+    _isLanMode = _mode == 'lan' || _wsUrl.isNotEmpty;
 
     _roomId = (roomParam != null && roomParam.trim().isNotEmpty)
         ? roomParam.trim()
-        : 'room_1';
+        : (_isLanMode ? 'LAN_1' : 'room_1');
     _key = (keyParam ?? '').trim();
+
+    if (_isLanMode) {
+      _isChecking = false;
+      _isAuthorized = true;
+      if (!_attemptedAutoLaunch) {
+        _attemptedAutoLaunch = true;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _launchNativeApp();
+        });
+      }
+      return;
+    }
 
     _verifyAdminAccess();
   }
@@ -63,7 +86,8 @@ class _AdminScreenState extends State<AdminScreen> {
   void _startRelaunchCooldown() {
     setState(() => _relaunchCooldownSeconds = kAdminActionCooldownSeconds);
     _relaunchCooldownTimer?.cancel();
-    _relaunchCooldownTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+    _relaunchCooldownTimer =
+        Timer.periodic(const Duration(seconds: 1), (timer) {
       if (!mounted) {
         timer.cancel();
         return;
@@ -204,8 +228,9 @@ class _AdminScreenState extends State<AdminScreen> {
     if (_relaunchCooldownSeconds > 0) return;
     _startRelaunchCooldown();
 
-    final String customSchemeUrl =
-        "shadowburn://admin?room=$_roomId&key=$_key";
+    final String customSchemeUrl = _isLanMode
+        ? "shadowburn://admin?mode=lan&room=${Uri.encodeComponent(_roomId)}&ws=${Uri.encodeComponent(_wsUrl)}"
+        : "shadowburn://admin?room=${Uri.encodeComponent(_roomId)}&key=${Uri.encodeComponent(_key)}";
 
     try {
       final schemeUri = Uri.parse(customSchemeUrl);
@@ -367,7 +392,9 @@ class _AdminScreenState extends State<AdminScreen> {
                   ),
                   const SizedBox(height: 14),
                   Text(
-                    "Clé : ${_key.isNotEmpty ? _key : "aucune"}",
+                    _isLanMode
+                        ? "Mode : LAN ($_wsUrl)"
+                        : "Clé : ${_key.isNotEmpty ? _key : "aucune"}",
                     textAlign: TextAlign.center,
                     style: const TextStyle(
                         color: Colors.white38,
