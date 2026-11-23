@@ -1,19 +1,76 @@
-// lib/services/raid_admin_service.dart
-
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
+import 'lan_socket_service.dart';
 import 'quota_guard_service.dart';
 
 class RaidAdminService {
   static final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  static final LanSocketService _lanSocket = LanSocketService();
+
   static const Duration _kTimeout = Duration(seconds: 6);
   static const int _kAdminLeaseMs = 600000; // 10 minutes
+
+  static String? _activeLanWsUrl;
+  static String? _activeLanRoomId;
 
   static const List<dynamic> raidPresets = [
     {'hp': 5000, 'label': 'RAID STANDARD (5 000 PV)'},
     {'hp': 15000, 'label': 'RAID ÉLITE (15 000 PV)'},
     {'hp': 30000, 'label': 'RAID MONARQUE (30 000 PV)'},
   ];
+
+  static bool get isLanActive =>
+      _activeLanWsUrl != null && _activeLanWsUrl!.trim().isNotEmpty;
+
+  static void configureLan({
+    required String wsUrl,
+    required String roomId,
+  }) {
+    _activeLanWsUrl = wsUrl.trim();
+    _activeLanRoomId = roomId.trim().isEmpty ? 'LAN_1' : roomId.trim();
+  }
+
+  static void clearLan() {
+    _activeLanWsUrl = null;
+    _activeLanRoomId = null;
+  }
+
+  static Future<String?> _sendLanAdminCommand(
+    String roomId,
+    Map<String, dynamic> payload,
+  ) async {
+    final String wsUrl = (_activeLanWsUrl ?? '').trim();
+    final String targetRoom =
+        roomId.trim().isNotEmpty ? roomId.trim() : (_activeLanRoomId ?? 'LAN_1');
+
+    if (wsUrl.isEmpty) {
+      return "URL WebSocket LAN non configurée.";
+    }
+
+    try {
+      if (!_lanSocket.isConnected) {
+        await _lanSocket.connect(
+          wsUrl,
+          roomId: targetRoom,
+          role: 'admin',
+          clientId: 'admin_${DateTime.now().millisecondsSinceEpoch}',
+          name: 'MONARQUE (LAN)',
+        );
+      }
+
+      await _lanSocket.sendJson({
+        'type': 'admin',
+        'role': 'admin',
+        'room': targetRoom,
+        'roomId': targetRoom,
+        ...payload,
+      });
+      return null;
+    } catch (e) {
+      debugPrint("[RAID ADMIN LAN] Erreur commande: $e");
+      return "Erreur LAN : $e";
+    }
+  }
 
   static Map<String, dynamic> _adminActivityStamp() {
     final int nowMs = DateTime.now().millisecondsSinceEpoch;
@@ -30,6 +87,14 @@ class RaidAdminService {
     String label, {
     required String roomId,
   }) async {
+    if (isLanActive) {
+      return _sendLanAdminCommand(roomId, {
+        'command': 'set_preset',
+        'maxHp': maxHp,
+        'label': label,
+      });
+    }
+
     try {
       bool canWrite = await QuotaGuardService.checkAndIncrementWrite();
       if (!canWrite) {
@@ -79,6 +144,13 @@ class RaidAdminService {
     int damage, {
     required String roomId,
   }) async {
+    if (isLanActive) {
+      return _sendLanAdminCommand(roomId, {
+        'command': 'strike_boss',
+        'damage': damage,
+      });
+    }
+
     try {
       bool canWrite = await QuotaGuardService.checkAndIncrementWrite();
       if (!canWrite) {
@@ -111,6 +183,12 @@ class RaidAdminService {
   }
 
   static Future<String?> resetBoss({required String roomId}) async {
+    if (isLanActive) {
+      return _sendLanAdminCommand(roomId, {
+        'command': 'reset_boss',
+      });
+    }
+
     try {
       bool canWrite = await QuotaGuardService.checkAndIncrementWrite();
       if (!canWrite) {
@@ -160,6 +238,13 @@ class RaidAdminService {
     String status, {
     required String roomId,
   }) async {
+    if (isLanActive) {
+      return _sendLanAdminCommand(roomId, {
+        'command': status == 'active' ? 'start' : status,
+        'status': status,
+      });
+    }
+
     try {
       bool canWrite = await QuotaGuardService.checkAndIncrementWrite();
       if (!canWrite) {
@@ -188,6 +273,13 @@ class RaidAdminService {
     int minutes, {
     required String roomId,
   }) async {
+    if (isLanActive) {
+      return _sendLanAdminCommand(roomId, {
+        'command': 'add_minutes',
+        'minutes': minutes,
+      });
+    }
+
     try {
       bool canWrite = await QuotaGuardService.checkAndIncrementWrite();
       if (!canWrite) {
@@ -222,6 +314,13 @@ class RaidAdminService {
     int minutes, {
     required String roomId,
   }) async {
+    if (isLanActive) {
+      return _sendLanAdminCommand(roomId, {
+        'command': 'add_minutes',
+        'minutes': -minutes.abs(),
+      });
+    }
+
     try {
       bool canWrite = await QuotaGuardService.checkAndIncrementWrite();
       if (!canWrite) {
@@ -250,6 +349,17 @@ class RaidAdminService {
   }
 
   static Future<String?> resetToMidnight({required String roomId}) async {
+    if (isLanActive) {
+      final now = DateTime.now();
+      final midnight = DateTime(now.year, now.month, now.day, 23, 58, 0);
+      final int diffMinutes =
+          midnight.difference(now).inMinutes.clamp(1, 1440);
+      return _sendLanAdminCommand(roomId, {
+        'command': 'add_minutes',
+        'minutes': diffMinutes,
+      });
+    }
+
     try {
       bool canWrite = await QuotaGuardService.checkAndIncrementWrite();
       if (!canWrite) {
@@ -273,6 +383,12 @@ class RaidAdminService {
   }
 
   static Future<String?> expireRaidNow({required String roomId}) async {
+    if (isLanActive) {
+      return _sendLanAdminCommand(roomId, {
+        'command': 'expire_now',
+      });
+    }
+
     try {
       bool canWrite = await QuotaGuardService.checkAndIncrementWrite(
         isCriticalClosure: true,
