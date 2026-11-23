@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'lan_socket_service.dart';
@@ -35,6 +36,49 @@ class RaidAdminService {
     _activeLanRoomId = null;
   }
 
+  static Future<void> _connectLanIfNeeded(
+    String wsUrl,
+    String targetRoom,
+  ) async {
+    if (_lanSocket.isConnected) return;
+
+    final String clientId = 'admin_${DateTime.now().millisecondsSinceEpoch}';
+    final String name = 'MONARQUE (LAN)';
+
+    // Tente d'abord l'appel avec paramètres nommés compatibles, sinon positionnel
+    try {
+      await (_lanSocket as dynamic).connect(
+        wsUrl,
+        room: targetRoom,
+        role: 'admin',
+        clientId: clientId,
+        name: name,
+      );
+    } on NoSuchMethodError {
+      await (_lanSocket as dynamic).connect(wsUrl);
+    }
+  }
+
+  static Future<void> _emitLanPayload(Map<String, dynamic> payload) async {
+    final String encoded = jsonEncode(payload);
+    final dynamic sock = _lanSocket;
+
+    try {
+      final dynamic res = sock.sendJson(payload);
+      if (res is Future) {
+        await res;
+      }
+      return;
+    } on NoSuchMethodError {
+      // Fallback vers send(String)
+    }
+
+    final dynamic sendRes = sock.send(encoded);
+    if (sendRes is Future) {
+      await sendRes;
+    }
+  }
+
   static Future<String?> _sendLanAdminCommand(
     String roomId,
     Map<String, dynamic> payload,
@@ -48,17 +92,9 @@ class RaidAdminService {
     }
 
     try {
-      if (!_lanSocket.isConnected) {
-        await _lanSocket.connect(
-          wsUrl,
-          roomId: targetRoom,
-          role: 'admin',
-          clientId: 'admin_${DateTime.now().millisecondsSinceEpoch}',
-          name: 'MONARQUE (LAN)',
-        );
-      }
+      await _connectLanIfNeeded(wsUrl, targetRoom);
 
-      await _lanSocket.sendJson({
+      await _emitLanPayload({
         'type': 'admin',
         'role': 'admin',
         'room': targetRoom,
