@@ -351,7 +351,7 @@ class _ProfileScreenState extends State<ProfileScreen>
 
     if (mounted) {
       setState(() {
-  List<Map<String, String>> _lanIpCandidates = <Map<String, String>>[];
+        _lanIpCandidates = candidates;
         _lanHostIp = resolvedIp;
         _lanDetectedSource = detectedSource;
         _lanWsUrl = wsUrl;
