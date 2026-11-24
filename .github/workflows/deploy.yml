@@ -24,6 +24,11 @@ jobs:
       - name: Install Dependencies
         run: flutter pub get
 
+      - name: Repair Android NDK 27.0.12077973
+        run: |
+          rm -rf "$ANDROID_HOME/ndk/27.0.12077973" /usr/local/lib/android/sdk/ndk/27.0.12077973
+          yes | sdkmanager --sdk_root="${ANDROID_HOME:-/usr/local/lib/android/sdk}" --install "ndk;27.0.12077973"
+
       - name: Build Android APK Release
         run: flutter build apk --release
 
