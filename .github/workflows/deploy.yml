@@ -26,8 +26,13 @@ jobs:
 
       - name: Repair Android NDK 27.0.12077973
         run: |
-          rm -rf "$ANDROID_HOME/ndk/27.0.12077973" /usr/local/lib/android/sdk/ndk/27.0.12077973
-          yes | sdkmanager --sdk_root="${ANDROID_HOME:-/usr/local/lib/android/sdk}" --install "ndk;27.0.12077973"
+          SDK_ROOT="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          rm -rf "$SDK_ROOT/ndk/27.0.12077973"
+          SDKMANAGER="$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMANAGER" ]; then
+            SDKMANAGER=$(find "$SDK_ROOT/cmdline-tools" -name sdkmanager -type f 2>/dev/null | head -n 1)
+          fi
+          yes | "$SDKMANAGER" --sdk_root="$SDK_ROOT" --install "ndk;27.0.12077973"
 
       - name: Build Android APK Release
         run: flutter build apk --release
