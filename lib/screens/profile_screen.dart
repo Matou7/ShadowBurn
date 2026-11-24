@@ -1,4 +1,4 @@
-// lib/screens/profile_screen.dart
+﻿// lib/screens/profile_screen.dart
 
 import 'dart:async';
 import 'dart:convert';
@@ -24,7 +24,7 @@ import '../utils/admin_utils.dart';
 import '../services/raid_admin_service.dart';
 import '../services/lan_socket_service.dart';
 
-const String kDefaultLanHostIp = '192.0.0.4';
+const String kDefaultLanHostIp = '192.168.1.1';
 const int kDefaultLanWsPort = 8765;
 const int kDefaultLanWebPort = 8080;
 
@@ -76,6 +76,8 @@ class _ProfileScreenState extends State<ProfileScreen>
   final ValueNotifier<String> _lanPackStatusNotifier =
       ValueNotifier<String>('');
   String _lanHostIp = kDefaultLanHostIp;
+  String _lanDetectedSource = '';
+  List<Map<String, String>> _lanIpCandidates = <Map<String, String>>[];
   String _lanWsUrl = 'ws://$kDefaultLanHostIp:$kDefaultLanWsPort';
   String _lanTvUrl = '';
   final LanSocketService _lanSocket = LanSocketService();
@@ -201,31 +203,167 @@ class _ProfileScreenState extends State<ProfileScreen>
     return 'LAN_${tail}_$suffix';
   }
 
-  Future<void> _loadSavedLanHost() async {
+  bool _isExcludedInterface(String ifaceName) {
+    final lower = ifaceName.toLowerCase();
+    return lower.startsWith("rmnet") ||
+        lower.startsWith("ccmni") ||
+        lower.contains("ccmni") ||
+        lower.startsWith("pdp") ||
+        lower.startsWith("tun") ||
+        lower.startsWith("ppp") ||
+        lower == "dummy0" ||
+        lower == "lo";
+  }
+
+  bool _isExcludedIp(String ip) {
+    return ip.isEmpty ||
+        ip == "192.0.0.4" ||
+        ip.startsWith("192.0.0.") ||
+        ip.startsWith("127.") ||
+        ip.startsWith("169.254.");
+  }
+
+  int _scoreInterfaceName(String ifaceName, InternetAddress addr) {
+    final lower = ifaceName.toLowerCase();
+    if (lower.startsWith('ap') ||
+        lower.startsWith('swlan') ||
+        lower.startsWith('rndis') ||
+        lower.startsWith('softap') ||
+        lower == 'wlan1') {
+      return 1;
+    }
+    if (lower.startsWith('wlan') || lower.startsWith('eth')) {
+      return 2;
+    }
+    if (addr.address.startsWith('192.168.') ||
+        addr.address.startsWith('10.') ||
+        RegExp(r'^172\.(1[6-9]|2[0-9]|3[0-1])\.').hasMatch(addr.address)) {
+      return 3;
+    }
+    return 4;
+  }
+
+  String _labelForInterface(String ifaceName, int priority) {
+    if (priority == 1) return "Hotspot 4G ($ifaceName)";
+    if (priority == 2) return "Wi-Fi ($ifaceName)";
+    return "LAN ($ifaceName)";
+  }
+
+  Future<List<Map<String, String>>> _detectAllLocalLanIps() async {
+    if (kIsWeb) {
+      final host = Uri.base.host;
+      if (host.isNotEmpty &&
+          host != 'localhost' &&
+          !_isExcludedIp(host)) {
+        return <Map<String, String>>[<String, String>{'ip': host, 'label': 'Navigateur (' + host + ')'}];
+      }
+      return <Map<String, String>>[];
+    }
+
+    final List<Map<String, String>> detected = <Map<String, String>>[];
+
+    if (Platform.isAndroid) {
+      try {
+        final List<dynamic>? rawList =
+            await _intentChannel.invokeMethod<List<dynamic>>('getLocalNetworkIps');
+        if (rawList != null) {
+          for (final item in rawList) {
+            if (item is Map) {
+              final ip = (item['ip'] ?? '').toString().trim();
+              final label = (item['label'] ?? 'LAN').toString().trim();
+              if (!_isExcludedIp(ip) &&
+                  !label.toLowerCase().contains('ccmni')) {
+                detected.add(<String, String>{'ip': ip, 'label': label});
+              }
+            }
+          }
+        }
+      } catch (e) {
+        debugPrint("[LAN IP NATIVE] $e");
+      }
+    }
+
+    try {
+      final interfaces = await NetworkInterface.list(
+        includeLoopback: false,
+        type: InternetAddressType.IPv4,
+      );
+      final List<MapEntry<int, Map<String, String>>> ranked =
+          <MapEntry<int, Map<String, String>>>[];
+      for (final iface in interfaces) {
+        if (_isExcludedInterface(iface.name)) {
+          continue;
+        }
+        for (final addr in iface.addresses) {
+          if (addr.isLoopback ||
+              addr.isLinkLocal ||
+              _isExcludedIp(addr.address)) {
+            continue;
+          }
+          final prio = _scoreInterfaceName(iface.name, addr);
+          if (prio == 4 &&
+              !addr.address.startsWith('192.168.') &&
+              !addr.address.startsWith('10.')) {
+            continue;
+          }
+          ranked.add(MapEntry<int, Map<String, String>>(prio, <String, String>{
+            'ip': addr.address,
+            'label': _labelForInterface(iface.name, prio),
+          }));
+        }
+      }
+      ranked.sort((a, b) => a.key.compareTo(b.key));
+      for (final entry in ranked) {
+        if (!detected.any((d) => d['ip'] == entry.value['ip'])) {
+          detected.add(entry.value);
+        }
+      }
+    } catch (e) {
+      debugPrint("[LAN IP DART] $e");
+    }
+
+    return detected;
+  }
+
+  Future<String> _refreshAutoDetectedLanIp() async {
     final prefs = await SharedPreferences.getInstance();
     final String? savedIp = prefs.getString('shadow_lan_host_ip');
-    final String webHost = (kIsWeb &&
-            Uri.base.host.isNotEmpty &&
-            Uri.base.host != 'localhost' &&
-            Uri.base.host != '127.0.0.1')
-        ? Uri.base.host
-        : '';
-    final String resolvedIp = webHost.isNotEmpty
-        ? webHost
-        : ((savedIp != null && savedIp.trim().isNotEmpty)
-            ? savedIp.trim()
-            : kDefaultLanHostIp);
+    final List<Map<String, String>> candidates = await _detectAllLocalLanIps();
+
+    String resolvedIp;
+    String detectedSource;
+
+    if (candidates.isNotEmpty) {
+      resolvedIp = candidates.first['ip']!;
+      detectedSource = candidates.first['label']!;
+    } else if (savedIp != null &&
+        savedIp.trim().isNotEmpty &&
+        !_isExcludedIp(savedIp.trim())) {
+      resolvedIp = savedIp.trim();
+      detectedSource = "Derniere IP enregistree";
+    } else {
+      resolvedIp = kDefaultLanHostIp;
+      detectedSource = "Aucune interface active detectee";
+    }
 
     final String autoRoom = _activeRoom ?? _generateUniqueLanRoomId();
     final String wsUrl = 'ws://$resolvedIp:$kDefaultLanWsPort';
 
-    if (!mounted) return;
-    setState(() {
-      _lanHostIp = resolvedIp;
-      _lanWsUrl = wsUrl;
-      _lanTvUrl =
-          'http://$resolvedIp:$kDefaultLanWebPort/?mode=lan&room=$autoRoom&ws=${Uri.encodeComponent(wsUrl)}';
-    });
+    if (mounted) {
+      setState(() {
+  List<Map<String, String>> _lanIpCandidates = <Map<String, String>>[];
+        _lanHostIp = resolvedIp;
+        _lanDetectedSource = detectedSource;
+        _lanWsUrl = wsUrl;
+        _lanTvUrl =
+            'http://$resolvedIp:$kDefaultLanWebPort/?mode=lan&room=$autoRoom&ws=${Uri.encodeComponent(wsUrl)}';
+      });
+    }
+    return resolvedIp;
+  }
+
+  Future<void> _loadSavedLanHost() async {
+    await _refreshAutoDetectedLanIp();
   }
 
   bool _isLanPackInstalledLocally() {
@@ -239,20 +377,13 @@ class _ProfileScreenState extends State<ProfileScreen>
     }
   }
 
-  Future<bool> _ensureAndroidStorageAccess() async {
+  Future<bool> _hasStoragePermissionNow() async {
     if (kIsWeb || !Platform.isAndroid) return true;
     try {
       if (await Permission.manageExternalStorage.isGranted) {
         return true;
       }
-      final PermissionStatus manageStatus =
-          await Permission.manageExternalStorage.request();
-      if (manageStatus.isGranted) {
-        return true;
-      }
-      final PermissionStatus legacyStatus =
-          await Permission.storage.request();
-      if (legacyStatus.isGranted) {
+      if (await Permission.storage.isGranted) {
         return true;
       }
       final Directory testDir = Directory(kLanTargetDir);
@@ -266,13 +397,38 @@ class _ProfileScreenState extends State<ProfileScreen>
     }
   }
 
+  Future<bool> _ensureAndroidStorageAccess({bool promptIfMissing = true}) async {
+    if (kIsWeb || !Platform.isAndroid) return true;
+    if (await _hasStoragePermissionNow()) {
+      return true;
+    }
+    if (!promptIfMissing) {
+      return false;
+    }
+    try {
+      final PermissionStatus manageStatus =
+          await Permission.manageExternalStorage.request();
+      if (manageStatus.isGranted) {
+        return true;
+      }
+      final PermissionStatus legacyStatus =
+          await Permission.storage.request();
+      if (legacyStatus.isGranted) {
+        return true;
+      }
+      return await _hasStoragePermissionNow();
+    } catch (_) {
+      return await _hasStoragePermissionNow();
+    }
+  }
+
   Future<void> _launchLanServerAutomatically() async {
     if (kIsWeb) return;
     try {
       await _intentChannel.invokeMethod<bool>('runTermuxLanScript', {
         'scriptPath': '$kLanTargetDir/start_lan.sh',
         'executable': '/data/data/com.termux/files/usr/bin/bash',
-        'arguments': ['$kLanTargetDir/start_lan.sh'],
+        'arguments': <String>['$kLanTargetDir/start_lan.sh'],
         'workdir': kLanTargetDir,
       });
     } catch (e) {
@@ -467,6 +623,7 @@ class _ProfileScreenState extends State<ProfileScreen>
 
   Future<void> _ensureLanPackInstalledInBackground({
     bool force = false,
+    bool promptStoragePermission = true,
     void Function(String status)? onProgress,
   }) async {
     if (kIsWeb) return;
@@ -484,7 +641,7 @@ class _ProfileScreenState extends State<ProfileScreen>
 
     _isDownloadingLanPack = true;
     _updateLanPackStatus(
-      "Connexion a Google Drive pour le pack LAN...",
+      "Verification de l'acces aux fichiers pour le mode AUTO...",
       onProgress: onProgress,
     );
 
@@ -492,13 +649,20 @@ class _ProfileScreenState extends State<ProfileScreen>
         Directory('${Directory.systemTemp.path}/shadowburn_lan_pack_staging');
 
     try {
-      final bool hasStorage = await _ensureAndroidStorageAccess();
+      final bool hasStorage = await _ensureAndroidStorageAccess(
+        promptIfMissing: promptStoragePermission,
+      );
       if (!hasStorage) {
         throw const FileSystemException(
-          "Permission 'Acces a tous les fichiers' requise pour ecrire dans Download/LAN/web",
+          "Permission 'Acces a tous les fichiers' requise pour le mode AUTO",
           kLanTargetDir,
         );
       }
+
+      _updateLanPackStatus(
+        "Connexion a Google Drive pour le pack LAN...",
+        onProgress: onProgress,
+      );
 
       final Uint8List bytes =
           await _downloadDriveZipBytes(onProgress: onProgress);
@@ -660,18 +824,36 @@ class _ProfileScreenState extends State<ProfileScreen>
     );
   }
 
+  Future<void> _activateAutoLanPackFlow({bool force = false}) async {
+    if (kIsWeb) return;
+    final bool granted =
+        await _ensureAndroidStorageAccess(promptIfMissing: true);
+    if (!granted) {
+      _updateLanPackStatus(
+        "Stockage bloque : permission fichiers requise pour le mode AUTO.",
+      );
+      return;
+    }
+    unawaited(_ensureLanPackInstalledInBackground(
+      force: force,
+      promptStoragePermission: true,
+    ));
+    unawaited(_launchLanServerAutomatically());
+  }
+
   Future<void> _promptAndActivateLanMode({
     String? prefilledWsUrl,
     String? prefilledRoom,
   }) async {
+    final String detectedIp = await _refreshAutoDetectedLanIp();
+
     if (_isLanPackInstalledLocally()) {
       _updateLanPackStatus("Pack LAN pret dans Download/LAN/web");
     } else if (!_isDownloadingLanPack) {
-      _updateLanPackStatus("Telechargement automatique du pack LAN en cours...");
+      _updateLanPackStatus(
+        "Choisissez le mode AUTO (avec acces fichiers) ou MANUEL ci-dessous.",
+      );
     }
-
-    unawaited(_ensureLanPackInstalledInBackground());
-    unawaited(_launchLanServerAutomatically());
 
     final String uniqueRoom =
         (prefilledRoom != null && prefilledRoom.trim().isNotEmpty)
@@ -681,7 +863,7 @@ class _ProfileScreenState extends State<ProfileScreen>
     if (prefilledWsUrl != null && prefilledWsUrl.trim().isNotEmpty) {
       final Uri? parsed = Uri.tryParse(prefilledWsUrl.trim());
       final String host =
-          (parsed != null && parsed.host.isNotEmpty) ? parsed.host : _lanHostIp;
+          (parsed != null && parsed.host.isNotEmpty) ? parsed.host : detectedIp;
       await _connectLanAdminWithHost(
         hostIp: host,
         customWsUrl: prefilledWsUrl.trim(),
@@ -690,224 +872,368 @@ class _ProfileScreenState extends State<ProfileScreen>
       return;
     }
 
-    final ipController = TextEditingController(text: _lanHostIp);
+    if (!mounted) return;
+    final ipController = TextEditingController(text: detectedIp);
+    bool autoModeSelected = true;
 
     SystemDialog.show(
       context,
       title: "SERVEUR LAN LOCAL",
       color: const Color(0xFF00FF66),
-      content: ValueListenableBuilder<String>(
-        valueListenable: _lanPackStatusNotifier,
-        builder: (dialogCtx, livePackStatus, _) {
-          return SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  "Salle auto-attribuee : $uniqueRoom",
-                  style: const TextStyle(
-                    color: Color(0xFF00FF66),
-                    fontFamily: 'monospace',
-                    fontSize: 10.5,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const SizedBox(height: 10),
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF00FF66).withOpacity(0.07),
-                    border: Border.all(
-                        color: const Color(0xFF00FF66).withOpacity(0.45)),
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                  child: const Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        "MODE AUTO (recommande)",
-                        style: TextStyle(
-                          color: Color(0xFF00FF66),
-                          fontFamily: 'monospace',
-                          fontSize: 10,
-                          fontWeight: FontWeight.bold,
-                        ),
+      content: StatefulBuilder(
+        builder: (dialogCtx, setDialogState) {
+          return ValueListenableBuilder<String>(
+            valueListenable: _lanPackStatusNotifier,
+            builder: (_, livePackStatus, __) {
+              return SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      "Salle auto-attribuee : $uniqueRoom",
+                      style: const TextStyle(
+                        color: Color(0xFF00FF66),
+                        fontFamily: 'monospace',
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.bold,
                       ),
-                      SizedBox(height: 4),
-                      Text(
-                        "- ShadowBurn telecharge et extrait le pack dans Download/LAN/web puis lance le serveur automatiquement.\n"
-                        "- A faire 1 fois dans Termux : autoriser les commandes externes puis installer stockage + Python + websockets.",
-                        style: TextStyle(
-                            color: Colors.white70, fontSize: 10.5, height: 1.35),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 8),
-                const Text(
-                  "Auto (1 fois dans Termux) - autoriser commandes externes :",
-                  style: TextStyle(color: Colors.white70, fontSize: 10.5),
-                ),
-                const SizedBox(height: 4),
-                _buildCopyBox(
-                  value: kTermuxAutoAllowCommand,
-                  accentColor: const Color(0xFF00FF66),
-                  toastLabel: "Commande autorisation Termux",
-                ),
-                const SizedBox(height: 8),
-                const Text(
-                  "Auto & Manuel (1 fois dans Termux) - stockage + Python + websockets :",
-                  style: TextStyle(color: Colors.white70, fontSize: 10.5),
-                ),
-                const SizedBox(height: 4),
-                _buildCopyBox(
-                  value: kTermuxDepsCommand,
-                  accentColor: const Color(0xFF00E5FF),
-                  toastLabel: "Commande prerequis Termux",
-                ),
-                const SizedBox(height: 12),
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFFF9100).withOpacity(0.07),
-                    border: Border.all(
-                        color: const Color(0xFFFF9100).withOpacity(0.45)),
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                  child: const Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        "MODE MANUEL (sans lancement auto)",
-                        style: TextStyle(
-                          color: Color(0xFFFF9100),
-                          fontFamily: 'monospace',
-                          fontSize: 10,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      SizedBox(height: 4),
-                      Text(
-                        "- Telecharge le pack via le lien Drive ci-dessous et extrais-le dans Download/LAN/web.\n"
-                        "- Lance ensuite la commande de demarrage directement dans Termux.",
-                        style: TextStyle(
-                            color: Colors.white70, fontSize: 10.5, height: 1.35),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 8),
-                const Text(
-                  "Manuel - lien du pack LAN (Drive) :",
-                  style: TextStyle(color: Colors.white70, fontSize: 10.5),
-                ),
-                const SizedBox(height: 4),
-                _buildCopyBox(
-                  value: kLanPackDriveViewUrl,
-                  accentColor: const Color(0xFF00E5FF),
-                  toastLabel: "Lien Drive",
-                  underline: true,
-                ),
-                const SizedBox(height: 8),
-                const Text(
-                  "Manuel - lancer le serveur dans Termux :",
-                  style: TextStyle(color: Colors.white70, fontSize: 10.5),
-                ),
-                const SizedBox(height: 4),
-                _buildCopyBox(
-                  value: kTermuxManualStartCommand,
-                  accentColor: const Color(0xFFFF9100),
-                  toastLabel: "Commande demarrage manuel",
-                ),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: ipController,
-                  keyboardType: TextInputType.url,
-                  style: const TextStyle(
-                      color: Colors.white,
-                      fontFamily: 'monospace',
-                      fontSize: 13),
-                  decoration: const InputDecoration(
-                    labelText: "IP Wi-Fi ou Hotspot Termux (ex: 192.168.1.48)",
-                    labelStyle: TextStyle(color: Colors.white54),
-                    enabledBorder: UnderlineInputBorder(
-                        borderSide: BorderSide(color: Color(0xFF00FF66))),
-                    focusedBorder: UnderlineInputBorder(
-                        borderSide: BorderSide(color: Color(0xFF00FF66))),
-                  ),
-                ),
-                const SizedBox(height: 10),
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: Colors.black45,
-                    border: Border.all(color: Colors.white12),
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        livePackStatus.isNotEmpty
-                            ? livePackStatus
-                            : "Pret a verifier le pack LAN.",
-                        style: const TextStyle(
-                          color: Color(0xFF00E5FF),
-                          fontFamily: 'monospace',
-                          fontSize: 10,
-                        ),
-                      ),
-                      if (!kIsWeb) ...[
-                        const SizedBox(height: 6),
-                        InkWell(
-                          onTap: _isDownloadingLanPack
-                              ? null
-                              : () {
-                                  unawaited(
-                                    _ensureLanPackInstalledInBackground(
-                                      force: true,
-                                    ),
-                                  );
-                                },
-                          child: Text(
-                            _isDownloadingLanPack
-                                ? "[TELECHARGEMENT EN COURS...]"
-                                : "[FORCER TELECHARGEMENT AUTO PACK LAN]",
-                            style: TextStyle(
-                              color: _isDownloadingLanPack
-                                  ? Colors.white38
-                                  : const Color(0xFFFF9100),
-                              fontFamily: 'monospace',
-                              fontSize: 9,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ),
-                        if (livePackStatus.contains("Stockage bloque")) ...[
-                          const SizedBox(height: 6),
-                          InkWell(
-                            onTap: () => openAppSettings(),
-                            child: const Text(
-                              "[OUVRIR PARAMETRES STOCKAGE ANDROID]",
+                    ),
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: CheckboxListTile(
+                            dense: true,
+                            contentPadding: EdgeInsets.zero,
+                            value: autoModeSelected,
+                            activeColor: const Color(0xFF00FF66),
+                            checkColor: Colors.black,
+                            title: const Text(
+                              "AUTO",
                               style: TextStyle(
                                 color: Color(0xFF00FF66),
                                 fontFamily: 'monospace',
-                                fontSize: 9,
+                                fontSize: 10.5,
                                 fontWeight: FontWeight.bold,
                               ),
                             ),
+                            onChanged: (bool? checked) async {
+                              final bool nextAuto = checked ?? true;
+                              setDialogState(() => autoModeSelected = nextAuto);
+                              if (nextAuto && !kIsWeb) {
+                                await _activateAutoLanPackFlow(force: false);
+                              }
+                            },
+                          ),
+                        ),
+                        Expanded(
+                          child: CheckboxListTile(
+                            dense: true,
+                            contentPadding: EdgeInsets.zero,
+                            value: !autoModeSelected,
+                            activeColor: const Color(0xFFFF9100),
+                            checkColor: Colors.black,
+                            title: const Text(
+                              "MANUEL",
+                              style: TextStyle(
+                                color: Color(0xFFFF9100),
+                                fontFamily: 'monospace',
+                                fontSize: 10.5,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            onChanged: (bool? checked) {
+                              final bool manual = checked ?? false;
+                              setDialogState(() => autoModeSelected = !manual);
+                            },
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF00FF66).withOpacity(0.07),
+                        border: Border.all(
+                            color: const Color(0xFF00FF66).withOpacity(0.45)),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: const Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            "MODE AUTO (recommande)",
+                            style: TextStyle(
+                              color: Color(0xFF00FF66),
+                              fontFamily: 'monospace',
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          SizedBox(height: 4),
+                          Text(
+                            "- Demande l'acces aux fichiers si non accorde, telecharge et extrait le pack dans Download/LAN/web puis lance le serveur.\n"
+                            "- A faire 1 fois dans Termux : autoriser les commandes externes puis installer stockage + Python + websockets.",
+                            style: TextStyle(
+                                color: Colors.white70,
+                                fontSize: 10.5,
+                                height: 1.35),
                           ),
                         ],
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      "Auto (1 fois dans Termux) - autoriser commandes externes :",
+                      style: TextStyle(color: Colors.white70, fontSize: 10.5),
+                    ),
+                    const SizedBox(height: 4),
+                    _buildCopyBox(
+                      value: kTermuxAutoAllowCommand,
+                      accentColor: const Color(0xFF00FF66),
+                      toastLabel: "Commande autorisation Termux",
+                    ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      "Auto & Manuel (1 fois dans Termux) - stockage + Python + websockets :",
+                      style: TextStyle(color: Colors.white70, fontSize: 10.5),
+                    ),
+                    const SizedBox(height: 4),
+                    _buildCopyBox(
+                      value: kTermuxDepsCommand,
+                      accentColor: const Color(0xFF00E5FF),
+                      toastLabel: "Commande prerequis Termux",
+                    ),
+                    const SizedBox(height: 12),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFF9100).withOpacity(0.07),
+                        border: Border.all(
+                            color: const Color(0xFFFF9100).withOpacity(0.45)),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: const Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            "MODE MANUEL (sans lancement auto)",
+                            style: TextStyle(
+                              color: Color(0xFFFF9100),
+                              fontFamily: 'monospace',
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          SizedBox(height: 4),
+                          Text(
+                            "- Telecharge le pack via le lien Drive ci-dessous et extrais-le dans Download/LAN/web.\n"
+                            "- Lance ensuite la commande de demarrage directement dans Termux.",
+                            style: TextStyle(
+                                color: Colors.white70,
+                                fontSize: 10.5,
+                                height: 1.35),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      "Manuel - lien du pack LAN (Drive) :",
+                      style: TextStyle(color: Colors.white70, fontSize: 10.5),
+                    ),
+                    const SizedBox(height: 4),
+                    _buildCopyBox(
+                      value: kLanPackDriveViewUrl,
+                      accentColor: const Color(0xFF00E5FF),
+                      toastLabel: "Lien Drive",
+                      underline: true,
+                    ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      "Manuel - lancer le serveur dans Termux :",
+                      style: TextStyle(color: Colors.white70, fontSize: 10.5),
+                    ),
+                    const SizedBox(height: 4),
+                    _buildCopyBox(
+                      value: kTermuxManualStartCommand,
+                      accentColor: const Color(0xFFFF9100),
+                      toastLabel: "Commande demarrage manuel",
+                    ),
+                    const SizedBox(height: 10),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: ipController,
+                            keyboardType: TextInputType.url,
+                            style: const TextStyle(
+                                color: Colors.white,
+                                fontFamily: 'monospace',
+                                fontSize: 13),
+                            decoration: InputDecoration(
+                              labelText: _lanDetectedSource.isNotEmpty
+                                  ? "IP auto : $_lanDetectedSource"
+                                  : "IP Wi-Fi ou Hotspot 4G",
+                              labelStyle: const TextStyle(
+                                  color: Color(0xFF00FF66), fontSize: 11),
+                              enabledBorder: const UnderlineInputBorder(
+                                  borderSide:
+                                      BorderSide(color: Color(0xFF00FF66))),
+                              focusedBorder: const UnderlineInputBorder(
+                                  borderSide:
+                                      BorderSide(color: Color(0xFF00FF66))),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        IconButton(
+                          tooltip: "Actualiser l'IP Wi-Fi / Hotspot 4G",
+                          icon: const Icon(Icons.refresh,
+                              color: Color(0xFF00E5FF), size: 20),
+                          onPressed: () async {
+                            final freshIp = await _refreshAutoDetectedLanIp();
+                            setDialogState(() {
+                              ipController.text = freshIp;
+                            });
+                          },
+                        ),
                       ],
+                    ),
+                    if (_lanIpCandidates.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      const Text(
+                        "IP locales detectees (toucher pour selectionner) :",
+                        style: TextStyle(
+                          color: Colors.white54,
+                          fontFamily: 'monospace',
+                          fontSize: 9.5,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 6,
+                        children: _lanIpCandidates.map((cand) {
+                          final candIp = cand['ip'] ?? '';
+                          final candLabel = cand['label'] ?? candIp;
+                          final bool isSelected =
+                              ipController.text.trim() == candIp;
+                          return InkWell(
+                            onTap: () {
+                              setDialogState(() {
+                                ipController.text = candIp;
+                                _lanDetectedSource = candLabel;
+                              });
+                            },
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 8, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: isSelected
+                                    ? const Color(0xFF00FF66).withOpacity(0.18)
+                                    : const Color(0xFF00E5FF).withOpacity(0.08),
+                                border: Border.all(
+                                  color: isSelected
+                                      ? const Color(0xFF00FF66)
+                                      : const Color(0xFF00E5FF)
+                                          .withOpacity(0.5),
+                                ),
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Text(
+                                "$candLabel : $candIp",
+                                style: TextStyle(
+                                  color: isSelected
+                                      ? const Color(0xFF00FF66)
+                                      : const Color(0xFF00E5FF),
+                                  fontFamily: 'monospace',
+                                  fontSize: 9.5,
+                                  fontWeight: isSelected
+                                      ? FontWeight.bold
+                                      : FontWeight.normal,
+                                ),
+                              ),
+                            ),
+                          );
+                        }).toList(),
+                      ),
                     ],
-                  ),
+                    const SizedBox(height: 10),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: Colors.black45,
+                        border: Border.all(color: Colors.white12),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            livePackStatus.isNotEmpty
+                                ? livePackStatus
+                                : "Pret a verifier le pack LAN.",
+                            style: const TextStyle(
+                              color: Color(0xFF00E5FF),
+                              fontFamily: 'monospace',
+                              fontSize: 10,
+                            ),
+                          ),
+                          if (!kIsWeb) ...[
+                            const SizedBox(height: 6),
+                            InkWell(
+                              onTap: _isDownloadingLanPack
+                                  ? null
+                                  : () async {
+                                      setDialogState(
+                                          () => autoModeSelected = true);
+                                      await _activateAutoLanPackFlow(
+                                          force: true);
+                                    },
+                              child: Text(
+                                _isDownloadingLanPack
+                                    ? "[TELECHARGEMENT EN COURS...]"
+                                    : "[LANCER / FORCER AUTO PACK LAN]",
+                                style: TextStyle(
+                                  color: _isDownloadingLanPack
+                                      ? Colors.white38
+                                      : const Color(0xFFFF9100),
+                                  fontFamily: 'monospace',
+                                  fontSize: 9,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                            if (livePackStatus.contains("Stockage bloque")) ...[
+                              const SizedBox(height: 6),
+                              InkWell(
+                                onTap: () => openAppSettings(),
+                                child: const Text(
+                                  "[OUVRIR PARAMETRES STOCKAGE ANDROID]",
+                                  style: TextStyle(
+                                    color: Color(0xFF00FF66),
+                                    fontFamily: 'monospace',
+                                    fontSize: 9,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ],
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
-              ],
-            ),
+              );
+            },
           );
         },
       ),
@@ -923,12 +1249,16 @@ class _ProfileScreenState extends State<ProfileScreen>
             backgroundColor: const Color(0xFF00FF66).withOpacity(0.15),
           ),
           onPressed: () async {
+            if (autoModeSelected && !kIsWeb) {
+              await _activateAutoLanPackFlow(force: false);
+            }
             final String cleanIp = ipController.text
                 .trim()
                 .replaceAll('http://', '')
                 .replaceAll('ws://', '')
                 .split(':')
                 .first;
+            if (!context.mounted) return;
             Navigator.pop(context);
             if (cleanIp.isNotEmpty) {
               await _connectLanAdminWithHost(

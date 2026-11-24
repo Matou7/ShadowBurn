@@ -1,4 +1,4 @@
-package com.example.shadowburnv2
+﻿package com.example.shadowburnv2
 
 import android.app.AppOpsManager
 import android.content.Context
@@ -17,6 +17,9 @@ import androidx.core.content.ContextCompat
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
+import java.net.Inet4Address
+import java.net.NetworkInterface
+import java.util.Collections
 
 class MainActivity: FlutterActivity() {
     private val PRIMARY_CHANNEL = "com.shadowburn.app/lock"
@@ -111,6 +114,77 @@ class MainActivity: FlutterActivity() {
         }
     }
 
+    private fun isExcludedInterface(ifaceName: String): Boolean {
+        return ifaceName.startsWith("rmnet") ||
+            ifaceName.startsWith("ccmni") ||
+            ifaceName.contains("ccmni") ||
+            ifaceName.startsWith("pdp") ||
+            ifaceName.startsWith("tun") ||
+            ifaceName.startsWith("ppp") ||
+            ifaceName == "dummy0" ||
+            ifaceName == "lo"
+    }
+
+    private fun isExcludedIp(ip: String): Boolean {
+        return ip.isEmpty() ||
+            ip == "192.0.0.4" ||
+            ip.startsWith("192.0.0.") ||
+            ip.startsWith("127.") ||
+            ip.startsWith("169.254.")
+    }
+
+    private fun detectLocalLanCandidates(): List<Map<String, String>> {
+        val candidates = mutableListOf<Triple<Int, String, String>>()
+        try {
+            val rawInterfaces = NetworkInterface.getNetworkInterfaces() ?: return emptyList()
+            val interfaces = Collections.list(rawInterfaces)
+            for (nif in interfaces) {
+                if (!nif.isUp || nif.isLoopback) continue
+                val ifaceName = (nif.name ?: "").lowercase()
+                if (isExcludedInterface(ifaceName)) {
+                    continue
+                }
+
+                val addresses = Collections.list(nif.inetAddresses)
+                for (addr in addresses) {
+                    if (addr is Inet4Address && !addr.isLoopbackAddress && !addr.isLinkLocalAddress) {
+                        val ip = (addr.hostAddress ?: continue).substringBefore('%').trim()
+                        if (isExcludedIp(ip)) {
+                            continue
+                        }
+                        val priority = when {
+                            ifaceName.startsWith("ap") ||
+                            ifaceName.startsWith("swlan") ||
+                            ifaceName.startsWith("rndis") ||
+                            ifaceName.startsWith("softap") ||
+                            ifaceName == "wlan1" -> 1
+                            ifaceName.startsWith("wlan") ||
+                            ifaceName.startsWith("eth") -> 2
+                            addr.isSiteLocalAddress -> 3
+                            else -> 4
+                        }
+                        if (priority == 4 && !addr.isSiteLocalAddress) {
+                            continue
+                        }
+                        val label = when (priority) {
+                            1 -> "Hotspot 4G ($ifaceName)"
+                            2 -> "Wi-Fi ($ifaceName)"
+                            else -> "LAN ($ifaceName)"
+                        }
+                        candidates.add(Triple(priority, ip, label))
+                    }
+                }
+            }
+        } catch (_: Exception) {
+            return emptyList()
+        }
+
+        return candidates
+            .sortedBy { it.first }
+            .distinctBy { it.second }
+            .map { mapOf("ip" to it.second, "label" to it.third) }
+    }
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
 
@@ -120,6 +194,10 @@ class MainActivity: FlutterActivity() {
                     val url = lastIntentUrl
                     lastIntentUrl = null
                     result.success(url)
+                }
+
+                "getLocalNetworkIps" -> {
+                    result.success(detectLocalLanCandidates())
                 }
 
                 "lockScreen" -> {

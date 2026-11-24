@@ -26,6 +26,7 @@ class _PermissionGuideScreenState extends State<PermissionGuideScreen>
   bool _hasBatteryExemption = false;
   bool _hasTermuxRunCommand = false;
   bool _hasCamera = false;
+  bool _hasStorageAccess = false;
 
   @override
   void initState() {
@@ -92,6 +93,26 @@ class _PermissionGuideScreenState extends State<PermissionGuideScreen>
     return false;
   }
 
+  Future<bool> _checkStoragePermission() async {
+    if (!Platform.isAndroid) return true;
+    try {
+      if (await Permission.manageExternalStorage.isGranted) {
+        return true;
+      }
+      if (await Permission.storage.isGranted) {
+        return true;
+      }
+      final Directory dir = Directory('/storage/emulated/0/Download/LAN/web');
+      await dir.create(recursive: true);
+      final File probe = File('/storage/emulated/0/Download/LAN/web/.perm_ok');
+      await probe.writeAsString('1', flush: true);
+      await probe.delete();
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   Future<void> _checkAllPermissions() async {
     final PermissionStatus activity =
         await Permission.activityRecognition.status;
@@ -102,6 +123,7 @@ class _PermissionGuideScreenState extends State<PermissionGuideScreen>
     final bool usageOk = await _checkUsageStatsPermission();
     final bool batteryOk = await _checkBatteryPermission();
     final bool termuxOk = await _checkTermuxPermission();
+    final bool storageOk = await _checkStoragePermission();
 
     if (!mounted) return;
 
@@ -113,6 +135,7 @@ class _PermissionGuideScreenState extends State<PermissionGuideScreen>
       _hasBatteryExemption = batteryOk;
       _hasTermuxRunCommand = termuxOk;
       _hasCamera = camera.isGranted;
+      _hasStorageAccess = storageOk;
       _isChecking = false;
     });
 
@@ -191,6 +214,24 @@ class _PermissionGuideScreenState extends State<PermissionGuideScreen>
     setState(() => _isChecking = true);
     final status = await Permission.camera.request();
     if (!status.isGranted && status.isPermanentlyDenied) {
+      await openAppSettings();
+    }
+    await _checkAllPermissions();
+  }
+
+  Future<void> _handleStoragePermission() async {
+    setState(() => _isChecking = true);
+    try {
+      final PermissionStatus manageStatus =
+          await Permission.manageExternalStorage.request();
+      if (!manageStatus.isGranted) {
+        final PermissionStatus storageStatus =
+            await Permission.storage.request();
+        if (!storageStatus.isGranted) {
+          await openAppSettings();
+        }
+      }
+    } catch (_) {
       await openAppSettings();
     }
     await _checkAllPermissions();
@@ -453,7 +494,47 @@ class _PermissionGuideScreenState extends State<PermissionGuideScreen>
                       ),
                       const SizedBox(height: 12),
                       _buildSectorContainer(
-                        title: "5. Scanner QR Caméra (Optionnel)",
+                        title: "5. Accès Fichiers Pack LAN Auto (Optionnel)",
+                        subtitle: "MANAGE_EXTERNAL_STORAGE • DOWNLOAD/LAN/WEB",
+                        description:
+                            "Nécessaire uniquement si tu choisis le mode AUTO pour télécharger et extraire le pack LAN dans Download/LAN/web. Si tu ne l'accordes pas ici, elle te sera redemandée au clic sur AUTO.",
+                        isComplete: _hasStorageAccess,
+                        isOptional: true,
+                        actionButton: OutlinedButton.icon(
+                          style: OutlinedButton.styleFrom(
+                            side: BorderSide(
+                              color: _hasStorageAccess
+                                  ? const Color(0xFF00FF66)
+                                  : const Color(0xFFFF9100),
+                            ),
+                          ),
+                          onPressed: _handleStoragePermission,
+                          icon: Icon(
+                            _hasStorageAccess
+                                ? Icons.check
+                                : Icons.folder_open,
+                            color: _hasStorageAccess
+                                ? const Color(0xFF00FF66)
+                                : const Color(0xFFFF9100),
+                            size: 16,
+                          ),
+                          label: Text(
+                            _hasStorageAccess
+                                ? "ACCÈS FICHIERS LAN : AUTORISÉ"
+                                : "AUTORISER L'ACCÈS AUX FICHIERS (AUTO)",
+                            style: TextStyle(
+                              color: _hasStorageAccess
+                                  ? const Color(0xFF00FF66)
+                                  : const Color(0xFFFF9100),
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      _buildSectorContainer(
+                        title: "6. Scanner QR Caméra (Optionnel)",
                         subtitle: "CAMERA • SCAN QR SALLE UNIQUEMENT",
                         description:
                             "Utilisée uniquement pour lire les QR codes de salle (mode MULTI / LAN) en direct. Aucune vidéo n'est enregistrée ni sauvegardée, et la saisie manuelle reste toujours disponible.",
