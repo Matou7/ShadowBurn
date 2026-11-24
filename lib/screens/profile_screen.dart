@@ -24,7 +24,7 @@ const String kDefaultLanHostIp = '192.0.0.4';
 const int kDefaultLanWsPort = 8765;
 const int kDefaultLanWebPort = 8080;
 
-const String kLanPackDriveFileId = '1qhEJS5YLDMOn3fpLJxq7E8o63Qx2h8uI';
+const String kLanPackDriveFileId = '1XwHpNYysK0196tsZ-GDaumUSFmw2paJf';
 const String kLanPackDownloadUrl =
     'https://drive.google.com/uc?export=download&id=$kLanPackDriveFileId';
 const String kLanPackDriveViewUrl =
