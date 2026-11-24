@@ -8,6 +8,8 @@ import 'package:archive/archive.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:mobile_scanner/mobile_scanner.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -26,7 +28,7 @@ const String kDefaultLanHostIp = '192.0.0.4';
 const int kDefaultLanWsPort = 8765;
 const int kDefaultLanWebPort = 8080;
 
-const String kLanPackDriveFileId = '12D0qbeRLyCLfzMlJJNoD6tPYHWL73Ef6';
+const String kLanPackDriveFileId = '1loldoSNdsLWzL9whgJMOYmDoDlzoKYza';
 const String kLanPackDownloadUrl =
     'https://drive.google.com/uc?export=download&id=$kLanPackDriveFileId';
 const String kLanPackDriveViewUrl =
@@ -71,12 +73,15 @@ class _ProfileScreenState extends State<ProfileScreen>
   bool _isLanMode = false;
   bool _isDownloadingLanPack = false;
   String _lanPackStatus = '';
+  final ValueNotifier<String> _lanPackStatusNotifier =
+      ValueNotifier<String>('');
   String _lanHostIp = kDefaultLanHostIp;
   String _lanWsUrl = 'ws://$kDefaultLanHostIp:$kDefaultLanWsPort';
   String _lanTvUrl = '';
   final LanSocketService _lanSocket = LanSocketService();
   StreamSubscription? _lanSub;
   StreamSubscription<bool>? _lanConnSub;
+  Timer? _lanClockTimer;
   int _lanCurrentHp = 5000;
   int _lanMaxHp = 5000;
   String _lanStatus = 'waiting';
@@ -93,6 +98,22 @@ class _ProfileScreenState extends State<ProfileScreen>
     WidgetsBinding.instance.addObserver(this);
     _initDeviceAdminSecurity();
     _loadSavedLanHost();
+
+    _lanClockTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted) return;
+      if (_isLanMode &&
+          _lanStatus == 'active' &&
+          _lanRemainingSeconds > 0 &&
+          _lanCurrentHp > 0) {
+        setState(() {
+          _lanRemainingSeconds -= 1;
+          if (_lanRemainingSeconds <= 0) {
+            _lanRemainingSeconds = 0;
+            _lanStatus = 'failed';
+          }
+        });
+      }
+    });
 
     _lanConnSub = _lanSocket.connectionChanges.listen((_) {
       if (mounted) setState(() {});
@@ -156,6 +177,16 @@ class _ProfileScreenState extends State<ProfileScreen>
     });
   }
 
+  void _updateLanPackStatus(String message,
+      {void Function(String status)? onProgress}) {
+    _lanPackStatus = message;
+    _lanPackStatusNotifier.value = message;
+    if (mounted) {
+      setState(() {});
+    }
+    onProgress?.call(message);
+  }
+
   String _generateUniqueLanRoomId() {
     final rng = Random.secure();
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -208,15 +239,230 @@ class _ProfileScreenState extends State<ProfileScreen>
     }
   }
 
+  Future<bool> _ensureAndroidStorageAccess() async {
+    if (kIsWeb || !Platform.isAndroid) return true;
+    try {
+      if (await Permission.manageExternalStorage.isGranted) {
+        return true;
+      }
+      final PermissionStatus manageStatus =
+          await Permission.manageExternalStorage.request();
+      if (manageStatus.isGranted) {
+        return true;
+      }
+      final PermissionStatus legacyStatus =
+          await Permission.storage.request();
+      if (legacyStatus.isGranted) {
+        return true;
+      }
+      final Directory testDir = Directory(kLanTargetDir);
+      await testDir.create(recursive: true);
+      final File probe = File('$kLanTargetDir/.shadowburn_write_test');
+      await probe.writeAsString('ok', flush: true);
+      await probe.delete();
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   Future<void> _launchLanServerAutomatically() async {
     if (kIsWeb) return;
     try {
       await _intentChannel.invokeMethod<bool>('runTermuxLanScript', {
         'scriptPath': '$kLanTargetDir/start_lan.sh',
+        'executable': '/data/data/com.termux/files/usr/bin/bash',
+        'arguments': ['$kLanTargetDir/start_lan.sh'],
+        'workdir': kLanTargetDir,
       });
     } catch (e) {
       debugPrint("[LAN AUTO-START] $e");
     }
+  }
+
+  Future<Uint8List> _readResponseBytesWithTimeout(
+    HttpClientResponse response,
+    Duration totalTimeout,
+    void Function(int receivedBytes, int totalBytes)? onBytesProgress,
+  ) async {
+    final BytesBuilder builder = BytesBuilder(copy: false);
+    final int total = response.contentLength;
+    int received = 0;
+
+    await for (final List<int> chunk in response.timeout(totalTimeout)) {
+      builder.add(chunk);
+      received += chunk.length;
+      onBytesProgress?.call(received, total);
+    }
+    return builder.takeBytes();
+  }
+
+  Future<Uint8List> _downloadDriveZipBytes({
+    void Function(String status)? onProgress,
+  }) async {
+    const Duration connectTimeout = Duration(seconds: 25);
+    const Duration readTimeout = Duration(seconds: 90);
+    const String userAgent =
+        'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36';
+
+    final HttpClient ioClient = HttpClient()
+      ..connectionTimeout = connectTimeout
+      ..idleTimeout = const Duration(seconds: 30);
+
+    final List<Cookie> jar = <Cookie>[];
+
+    Future<Uint8List> fetchUrl(Uri uri, {int depth = 0}) async {
+      if (depth > 6) {
+        throw Exception("Trop de redirections Google Drive.");
+      }
+      final HttpClientRequest req =
+          await ioClient.getUrl(uri).timeout(connectTimeout);
+      req.followRedirects = false;
+      req.headers.set(HttpHeaders.userAgentHeader, userAgent);
+      req.headers.set(HttpHeaders.acceptHeader, '*/*');
+      if (jar.isNotEmpty) {
+        req.cookies.addAll(jar);
+      }
+
+      final HttpClientResponse res = await req.close().timeout(connectTimeout);
+      for (final Cookie c in res.cookies) {
+        jar.removeWhere((existing) => existing.name == c.name);
+        jar.add(c);
+      }
+
+      if (res.isRedirect ||
+          res.statusCode == 301 ||
+          res.statusCode == 302 ||
+          res.statusCode == 303 ||
+          res.statusCode == 307 ||
+          res.statusCode == 308) {
+        await res.drain<void>();
+        final String? loc = res.headers.value(HttpHeaders.locationHeader);
+        if (loc == null || loc.isEmpty) {
+          throw Exception("Redirection Google Drive vide (${res.statusCode}).");
+        }
+        return fetchUrl(uri.resolve(loc), depth: depth + 1);
+      }
+
+      if (res.statusCode >= 400) {
+        await res.drain<void>();
+        throw Exception("Erreur HTTP Google Drive (${res.statusCode}).");
+      }
+
+      return _readResponseBytesWithTimeout(res, readTimeout, (received, total) {
+        if (total > 0) {
+          final int pct = ((received / total) * 100).clamp(0, 100).toInt();
+          _updateLanPackStatus(
+            "Telechargement du pack LAN : $pct% (${(received / 1048576).toStringAsFixed(1)} Mo)...",
+            onProgress: onProgress,
+          );
+        } else if (received > 65536) {
+          _updateLanPackStatus(
+            "Telechargement du pack LAN : ${(received / 1048576).toStringAsFixed(1)} Mo recus...",
+            onProgress: onProgress,
+          );
+        }
+      });
+    }
+
+    try {
+      Uint8List bytes = await fetchUrl(Uri.parse(kLanPackDownloadUrl));
+      if (bytes.length >= 4 && bytes[0] == 0x50 && bytes[1] == 0x4B) {
+        return bytes;
+      }
+
+      final String html = utf8.decode(bytes, allowMalformed: true);
+      if (html.contains('accounts.google.com') ||
+          html.contains('ServiceLogin')) {
+        throw Exception(
+          "Fichier Drive prive : activez 'Tous les utilisateurs disposant du lien'.",
+        );
+      }
+
+      String actionUrl = 'https://drive.usercontent.google.com/download';
+      final RegExpMatch? formActionMatch = RegExp(
+        r'<form[^>]+id="download-form"[^>]+action="([^"]+)"',
+        caseSensitive: false,
+      ).firstMatch(html) ??
+          RegExp(
+            r'action="([^"]*drive\.usercontent\.google\.com/download[^"]*)"',
+            caseSensitive: false,
+          ).firstMatch(html);
+      if (formActionMatch != null) {
+        actionUrl = formActionMatch.group(1)!.replaceAll('&amp;', '&');
+      }
+
+      final Map<String, String> queryParams = <String, String>{
+        'id': kLanPackDriveFileId,
+        'export': 'download',
+        'confirm': 't',
+      };
+
+      final Iterable<RegExpMatch> hiddenInputs = RegExp(
+        r'<input[^>]+type="hidden"[^>]*>',
+        caseSensitive: false,
+      ).allMatches(html);
+
+      for (final RegExpMatch inputTag in hiddenInputs) {
+        final String tag = inputTag.group(0)!;
+        final RegExpMatch? nameM =
+            RegExp(r'name="([^"]+)"', caseSensitive: false).firstMatch(tag);
+        final RegExpMatch? valM =
+            RegExp(r'value="([^"]*)"', caseSensitive: false).firstMatch(tag);
+        if (nameM != null && valM != null) {
+          queryParams[nameM.group(1)!] = valM.group(1)!;
+        }
+      }
+
+      final RegExpMatch? confirmInline = RegExp(
+        r'confirm=([0-9A-Za-z_\-]+)',
+      ).firstMatch(html);
+      if (confirmInline != null) {
+        queryParams['confirm'] = confirmInline.group(1)!;
+      }
+
+      final RegExpMatch? uuidInline = RegExp(
+        r'uuid=([0-9A-Za-z_\-]+)',
+      ).firstMatch(html);
+      if (uuidInline != null) {
+        queryParams['uuid'] = uuidInline.group(1)!;
+      }
+
+      final Uri baseActionUri = Uri.parse(actionUrl);
+      final Map<String, String> mergedParams = <String, String>{
+        ...baseActionUri.queryParameters,
+        ...queryParams,
+      };
+      final Uri confirmUri =
+          baseActionUri.replace(queryParameters: mergedParams);
+
+      _updateLanPackStatus(
+        "Validation du telechargement Google Drive...",
+        onProgress: onProgress,
+      );
+
+      bytes = await fetchUrl(confirmUri);
+      if (bytes.length >= 4 && bytes[0] == 0x50 && bytes[1] == 0x4B) {
+        return bytes;
+      }
+
+      throw Exception(
+        "Archive ZIP non recue depuis Drive (${bytes.length} octets).",
+      );
+    } finally {
+      ioClient.close(force: true);
+    }
+  }
+
+  Future<void> _writeBytesSafely(String targetPath, List<int> data) async {
+    final File outFile = File(targetPath);
+    await outFile.parent.create(recursive: true);
+    if (await outFile.exists()) {
+      try {
+        await outFile.delete();
+      } catch (_) {}
+    }
+    await outFile.writeAsBytes(data, flush: true);
   }
 
   Future<void> _ensureLanPackInstalledInBackground({
@@ -224,121 +470,137 @@ class _ProfileScreenState extends State<ProfileScreen>
     void Function(String status)? onProgress,
   }) async {
     if (kIsWeb) return;
-    if (_isDownloadingLanPack) return;
+    if (_isDownloadingLanPack) {
+      onProgress?.call(_lanPackStatus);
+      return;
+    }
     if (!force && _isLanPackInstalledLocally()) {
-      const msg = "Pack LAN pret dans Download/LAN/web";
-      if (mounted) {
-        setState(() => _lanPackStatus = msg);
-      }
-      onProgress?.call(msg);
+      _updateLanPackStatus(
+        "Pack LAN pret dans Download/LAN/web",
+        onProgress: onProgress,
+      );
       return;
     }
 
     _isDownloadingLanPack = true;
-    const startMsg = "Telechargement automatique du pack LAN...";
-    if (mounted) {
-      setState(() => _lanPackStatus = startMsg);
-    }
-    onProgress?.call(startMsg);
+    _updateLanPackStatus(
+      "Connexion a Google Drive pour le pack LAN...",
+      onProgress: onProgress,
+    );
+
+    final Directory stagingDir =
+        Directory('${Directory.systemTemp.path}/shadowburn_lan_pack_staging');
 
     try {
-      final client = http.Client();
-      try {
-        http.Response response = await client
-            .get(Uri.parse(kLanPackDownloadUrl))
-            .timeout(const Duration(seconds: 30));
+      final bool hasStorage = await _ensureAndroidStorageAccess();
+      if (!hasStorage) {
+        throw const FileSystemException(
+          "Permission 'Acces a tous les fichiers' requise pour ecrire dans Download/LAN/web",
+          kLanTargetDir,
+        );
+      }
 
-        Uint8List bytes = response.bodyBytes;
+      final Uint8List bytes =
+          await _downloadDriveZipBytes(onProgress: onProgress);
 
-        final bool looksLikeZip =
-            bytes.length >= 2 && bytes[0] == 0x50 && bytes[1] == 0x4B;
-        if (!looksLikeZip) {
-          final html = utf8.decode(bytes, allowMalformed: true);
-          final confirmMatch =
-              RegExp(r'confirm=([0-9A-Za-z_\-]+)').firstMatch(html);
-          final uuidMatch = RegExp(r'uuid=([0-9A-Za-z_\-]+)').firstMatch(html);
-          if (confirmMatch != null) {
-            final confirmToken = confirmMatch.group(1)!;
-            final uuidPart =
-                uuidMatch != null ? '&uuid=${uuidMatch.group(1)}' : '';
-            final fallbackUrl =
-                'https://drive.usercontent.google.com/download?id=$kLanPackDriveFileId&export=download&confirm=$confirmToken$uuidPart';
-            response = await client
-                .get(Uri.parse(fallbackUrl))
-                .timeout(const Duration(seconds: 30));
-            bytes = response.bodyBytes;
-          }
+      _updateLanPackStatus(
+        "Extraction automatique vers Download/LAN/web...",
+        onProgress: onProgress,
+      );
+
+      if (await stagingDir.exists()) {
+        await stagingDir.delete(recursive: true);
+      }
+      await stagingDir.create(recursive: true);
+
+      final archive = ZipDecoder().decodeBytes(bytes);
+      int extractedCount = 0;
+
+      for (final file in archive) {
+        String entryName = file.name.replaceAll('\\', '/');
+        if (entryName.startsWith('build/web/')) {
+          entryName = entryName.substring('build/web/'.length);
+        } else if (entryName.startsWith('LAN/web/')) {
+          entryName = entryName.substring('LAN/web/'.length);
+        } else if (entryName.startsWith('web/')) {
+          entryName = entryName.substring('web/'.length);
         }
+        if (entryName.isEmpty || entryName.contains('..')) continue;
 
-        if (bytes.length < 4 || bytes[0] != 0x50 || bytes[1] != 0x4B) {
-          throw Exception("Archive ZIP invalide recuperee depuis Drive.");
+        final String stagedPath = '${stagingDir.path}/$entryName';
+        if (file.isFile) {
+          final outFile = File(stagedPath);
+          await outFile.parent.create(recursive: true);
+          await outFile.writeAsBytes(file.content as List<int>, flush: true);
+          extractedCount++;
+        } else {
+          await Directory(stagedPath).create(recursive: true);
         }
+      }
 
-        const extractMsg = "Extraction automatique vers Download/LAN/web...";
-        if (mounted) {
-          setState(() => _lanPackStatus = extractMsg);
-        }
-        onProgress?.call(extractMsg);
+      if (extractedCount == 0) {
+        throw Exception("Archive ZIP vide.");
+      }
 
-        final targetDir = Directory(kLanTargetDir);
-        if (force && await targetDir.exists()) {
-          try {
-            await for (final entity in targetDir.list()) {
-              final String baseName =
-                  entity.path.split('/').last.toLowerCase();
-              if (baseName != 'start_lan.sh' && baseName != 'server_lan.py') {
+      final Directory targetDir = Directory(kLanTargetDir);
+      if (!await targetDir.exists()) {
+        await targetDir.create(recursive: true);
+      }
+
+      if (force) {
+        try {
+          await for (final entity in targetDir.list()) {
+            final String baseName = entity.path.split('/').last.toLowerCase();
+            if (baseName != 'start_lan.sh' && baseName != 'server_lan.py') {
+              try {
                 await entity.delete(recursive: true);
-              }
+              } catch (_) {}
             }
-          } catch (_) {}
-        }
-        if (!await targetDir.exists()) {
-          await targetDir.create(recursive: true);
-        }
-
-        final archive = ZipDecoder().decodeBytes(bytes);
-        int extractedCount = 0;
-
-        for (final file in archive) {
-          String entryName = file.name.replaceAll('\\', '/');
-          if (entryName.startsWith('build/web/')) {
-            entryName = entryName.substring('build/web/'.length);
-          } else if (entryName.startsWith('LAN/web/')) {
-            entryName = entryName.substring('LAN/web/'.length);
-          } else if (entryName.startsWith('web/')) {
-            entryName = entryName.substring('web/'.length);
           }
-          if (entryName.isEmpty || entryName.contains('..')) continue;
-
-          final outPath = '$kLanTargetDir/$entryName';
-          if (file.isFile) {
-            final outFile = File(outPath);
-            await outFile.parent.create(recursive: true);
-            await outFile.writeAsBytes(file.content as List<int>, flush: true);
-            extractedCount++;
-          } else {
-            await Directory(outPath).create(recursive: true);
-          }
-        }
-
-        final doneMsg =
-            "Pack LAN installe ($extractedCount fichiers) dans Download/LAN/web";
-        if (mounted) {
-          setState(() => _lanPackStatus = doneMsg);
-        }
-        onProgress?.call(doneMsg);
-      } finally {
-        client.close();
+        } catch (_) {}
       }
+
+      await for (final entity in stagingDir.list(recursive: true)) {
+        final String relative = entity.path
+            .substring(stagingDir.path.length)
+            .replaceAll('\\', '/')
+            .replaceFirst(RegExp(r'^/'), '');
+        if (relative.isEmpty) continue;
+        final String destPath = '$kLanTargetDir/$relative';
+        if (entity is Directory) {
+          await Directory(destPath).create(recursive: true);
+        } else if (entity is File) {
+          await _writeBytesSafely(destPath, await entity.readAsBytes());
+        }
+      }
+
+      _updateLanPackStatus(
+        "Pack LAN installe ($extractedCount fichiers) dans Download/LAN/web",
+        onProgress: onProgress,
+      );
+    } on TimeoutException {
+      _updateLanPackStatus(
+        "Delai reseau depasse sur Google Drive. Verifiez la connexion ou utilisez le lien manuel.",
+        onProgress: onProgress,
+      );
+    } on FileSystemException catch (e) {
+      _updateLanPackStatus(
+        "Stockage bloque (${e.message}). Activez 'Autoriser la gestion de tous les fichiers' pour ShadowBurn.",
+        onProgress: onProgress,
+      );
     } catch (e) {
-      final errMsg = "Telechargement auto en attente : $e";
-      debugPrint("[LAN PACK] $errMsg");
-      if (mounted) {
-        setState(() => _lanPackStatus = errMsg);
-      }
-      onProgress?.call(errMsg);
+      debugPrint("[LAN PACK] $e");
+      _updateLanPackStatus(
+        "Telechargement auto en echec : $e",
+        onProgress: onProgress,
+      );
     } finally {
       _isDownloadingLanPack = false;
+      if (await stagingDir.exists()) {
+        try {
+          await stagingDir.delete(recursive: true);
+        } catch (_) {}
+      }
     }
   }
 
@@ -402,6 +664,12 @@ class _ProfileScreenState extends State<ProfileScreen>
     String? prefilledWsUrl,
     String? prefilledRoom,
   }) async {
+    if (_isLanPackInstalledLocally()) {
+      _updateLanPackStatus("Pack LAN pret dans Download/LAN/web");
+    } else if (!_isDownloadingLanPack) {
+      _updateLanPackStatus("Telechargement automatique du pack LAN en cours...");
+    }
+
     unawaited(_ensureLanPackInstalledInBackground());
     unawaited(_launchLanServerAutomatically());
 
@@ -423,18 +691,14 @@ class _ProfileScreenState extends State<ProfileScreen>
     }
 
     final ipController = TextEditingController(text: _lanHostIp);
-    String dialogPackStatus = _lanPackStatus.isNotEmpty
-        ? _lanPackStatus
-        : (_isLanPackInstalledLocally()
-            ? "Pack LAN pret dans Download/LAN/web"
-            : "Telechargement automatique du pack LAN en cours...");
 
     SystemDialog.show(
       context,
       title: "SERVEUR LAN LOCAL",
       color: const Color(0xFF00FF66),
-      content: StatefulBuilder(
-        builder: (dialogCtx, setDialogState) {
+      content: ValueListenableBuilder<String>(
+        valueListenable: _lanPackStatusNotifier,
+        builder: (dialogCtx, livePackStatus, _) {
           return SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -588,7 +852,9 @@ class _ProfileScreenState extends State<ProfileScreen>
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        dialogPackStatus,
+                        livePackStatus.isNotEmpty
+                            ? livePackStatus
+                            : "Pret a verifier le pack LAN.",
                         style: const TextStyle(
                           color: Color(0xFF00E5FF),
                           fontFamily: 'monospace',
@@ -598,27 +864,44 @@ class _ProfileScreenState extends State<ProfileScreen>
                       if (!kIsWeb) ...[
                         const SizedBox(height: 6),
                         InkWell(
-                          onTap: () {
-                            unawaited(_ensureLanPackInstalledInBackground(
-                              force: true,
-                              onProgress: (status) {
-                                if (dialogCtx.mounted) {
-                                  setDialogState(
-                                      () => dialogPackStatus = status);
-                                }
-                              },
-                            ));
-                          },
-                          child: const Text(
-                            "[FORCER TELECHARGEMENT AUTO PACK LAN]",
+                          onTap: _isDownloadingLanPack
+                              ? null
+                              : () {
+                                  unawaited(
+                                    _ensureLanPackInstalledInBackground(
+                                      force: true,
+                                    ),
+                                  );
+                                },
+                          child: Text(
+                            _isDownloadingLanPack
+                                ? "[TELECHARGEMENT EN COURS...]"
+                                : "[FORCER TELECHARGEMENT AUTO PACK LAN]",
                             style: TextStyle(
-                              color: Color(0xFFFF9100),
+                              color: _isDownloadingLanPack
+                                  ? Colors.white38
+                                  : const Color(0xFFFF9100),
                               fontFamily: 'monospace',
                               fontSize: 9,
                               fontWeight: FontWeight.bold,
                             ),
                           ),
                         ),
+                        if (livePackStatus.contains("Stockage bloque")) ...[
+                          const SizedBox(height: 6),
+                          InkWell(
+                            onTap: () => openAppSettings(),
+                            child: const Text(
+                              "[OUVRIR PARAMETRES STOCKAGE ANDROID]",
+                              style: TextStyle(
+                                color: Color(0xFF00FF66),
+                                fontFamily: 'monospace',
+                                fontSize: 9,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ],
                       ],
                     ],
                   ),
@@ -784,6 +1067,81 @@ class _ProfileScreenState extends State<ProfileScreen>
     });
   }
 
+  Future<bool> _handleScannedOrDeeplinkPayload(String rawInput) async {
+    final String cleaned = rawInput.trim();
+    if (cleaned.isEmpty) return false;
+
+    if (cleaned.contains('mode=lan') || cleaned.contains('ws=')) {
+      try {
+        final parsedUri = Uri.parse(cleaned);
+        String? wsParam = parsedUri.queryParameters['ws'];
+        String? roomId = parsedUri.queryParameters['room'];
+        if (wsParam == null && parsedUri.fragment.contains('?')) {
+          final fragParams =
+              Uri.splitQueryString(parsedUri.fragment.split('?').last);
+          wsParam = fragParams['ws'];
+          roomId = fragParams['room'] ?? roomId;
+        }
+        if (wsParam != null && wsParam.isNotEmpty) {
+          await _promptAndActivateLanMode(
+            prefilledWsUrl: Uri.decodeComponent(wsParam),
+            prefilledRoom: roomId,
+          );
+          return true;
+        }
+      } catch (e) {
+        debugPrint("Erreur analyse payload LAN: $e");
+      }
+    }
+
+    if (cleaned.contains('room=')) {
+      try {
+        final parsedUri = Uri.parse(cleaned);
+        String? roomId = parsedUri.queryParameters['room'];
+        String? key = parsedUri.queryParameters['key'];
+
+        if (roomId == null && parsedUri.fragment.contains('?')) {
+          final fragParams =
+              Uri.splitQueryString(parsedUri.fragment.split('?').last);
+          roomId = fragParams['room'];
+          key = fragParams['key'];
+        }
+
+        if (roomId != null && roomId.isNotEmpty) {
+          await _attemptSecureBinding(roomId, key ?? '');
+          return true;
+        }
+      } catch (e) {
+        debugPrint("Erreur analyse payload room: $e");
+      }
+    }
+
+    if (RegExp(r'^[a-zA-Z0-9_]{3,32}$').hasMatch(cleaned)) {
+      await _attemptSecureBinding(cleaned, '');
+      return true;
+    }
+
+    return false;
+  }
+
+  Future<void> _openEmbeddedMultiQrScanner() async {
+    final String? scannedValue = await Navigator.of(context).push<String>(
+      MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (_) => const _EmbeddedMultiQrScannerPage(),
+      ),
+    );
+
+    if (!mounted || scannedValue == null || scannedValue.trim().isEmpty) {
+      return;
+    }
+
+    final bool handled = await _handleScannedOrDeeplinkPayload(scannedValue);
+    if (!handled && mounted) {
+      _rejectIntrusionAttempt("QR Code non reconnu : format de salle invalide.");
+    }
+  }
+
   Future<void> _checkIncomingDeeplink() async {
     if (_isCheckingIntent || _isBindingInProgress) return;
     _isCheckingIntent = true;
@@ -803,48 +1161,10 @@ class _ProfileScreenState extends State<ProfileScreen>
         rawUrl = Uri.base.toString();
       }
 
-      if (rawUrl.contains('mode=lan') || rawUrl.contains('ws=')) {
-        try {
-          final parsedUri = Uri.parse(rawUrl);
-          String? wsParam = parsedUri.queryParameters['ws'];
-          String? roomId = parsedUri.queryParameters['room'];
-          if (wsParam == null && parsedUri.fragment.contains('?')) {
-            final fragParams =
-                Uri.splitQueryString(parsedUri.fragment.split('?').last);
-            wsParam = fragParams['ws'];
-            roomId = fragParams['room'] ?? roomId;
-          }
-          if (wsParam != null && wsParam.isNotEmpty) {
-            await _promptAndActivateLanMode(
-              prefilledWsUrl: Uri.decodeComponent(wsParam),
-              prefilledRoom: roomId,
-            );
-            return;
-          }
-        } catch (e) {
-          debugPrint("Erreur deeplink LAN: $e");
-        }
-      }
-
-      if (rawUrl.contains('room=')) {
-        try {
-          final parsedUri = Uri.parse(rawUrl);
-          String? roomId = parsedUri.queryParameters['room'];
-          String? key = parsedUri.queryParameters['key'];
-
-          if (roomId == null && parsedUri.fragment.contains('?')) {
-            final fragParams =
-                Uri.splitQueryString(parsedUri.fragment.split('?').last);
-            roomId = fragParams['room'];
-            key = fragParams['key'];
-          }
-
-          if (roomId != null && roomId.isNotEmpty) {
-            await _attemptSecureBinding(roomId, key ?? '');
-          }
-        } catch (e) {
-          debugPrint("Erreur analyse deeplink: $e");
-        }
+      if (rawUrl.contains('mode=lan') ||
+          rawUrl.contains('ws=') ||
+          rawUrl.contains('room=')) {
+        await _handleScannedOrDeeplinkPayload(rawUrl);
       }
     } finally {
       _isCheckingIntent = false;
@@ -1134,8 +1454,10 @@ class _ProfileScreenState extends State<ProfileScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _lanClockTimer?.cancel();
     _lanConnSub?.cancel();
     _lanSub?.cancel();
+    _lanPackStatusNotifier.dispose();
     _lanSocket.dispose();
     _scrollController.dispose();
     super.dispose();
@@ -1782,7 +2104,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                   ConstrainedBox(
                     constraints: const BoxConstraints(maxWidth: 320),
                     child: const Text(
-                      "Choisissez LAN (salle auto-isolee Wi-Fi local) ou MULTI (scan QR Code & Firestore).",
+                      "Choisissez LAN (salle auto-isolee Wi-Fi local) ou MULTI (camera QR Code & Firestore).",
                       textAlign: TextAlign.center,
                       style: TextStyle(
                         color: Colors.white54,
@@ -1842,7 +2164,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                               letterSpacing: 1.1,
                             ),
                           ),
-                          onPressed: _checkIncomingDeeplink,
+                          onPressed: _openEmbeddedMultiQrScanner,
                         ),
                       ),
                     ],
@@ -2154,22 +2476,56 @@ class _ProfileScreenState extends State<ProfileScreen>
             Row(
               children: [
                 Expanded(
-                  child: _compactButton("LANCER", const Color(0xFF00FF66), () {
-                    _runGuardedAdminCommand(
-                      actionKey: 'launch_raid',
-                      successLabel: "Raid lance sur [$effectiveRoom] !",
-                      lanPayload: {
-                        'type': 'admin',
-                        'command': 'start',
-                      },
-                      lanOptimisticUpdate: () =>
-                          setState(() => _lanStatus = 'active'),
-                      remoteCommand: () => RaidAdminService.setRaidStatus(
-                          'active',
-                          roomId: effectiveRoom),
-                    );
-                  }),
+                  child: _compactButton(
+                    (_isLanMode && _lanStatus == 'paused')
+                        ? "REPRENDRE"
+                        : "LANCER",
+                    const Color(0xFF00FF66),
+                    () {
+                      final bool resuming =
+                          _isLanMode && _lanStatus == 'paused';
+                      _runGuardedAdminCommand(
+                        actionKey: 'launch_raid',
+                        successLabel: resuming
+                            ? "Raid repris sur [$effectiveRoom] !"
+                            : "Raid lance sur [$effectiveRoom] !",
+                        lanPayload: {
+                          'type': 'admin',
+                          'command': resuming ? 'resume' : 'start',
+                          'remaining_seconds': _lanRemainingSeconds,
+                        },
+                        lanOptimisticUpdate: () =>
+                            setState(() => _lanStatus = 'active'),
+                        remoteCommand: () => RaidAdminService.setRaidStatus(
+                            'active',
+                            roomId: effectiveRoom),
+                      );
+                    },
+                  ),
                 ),
+                if (_isLanMode) ...[
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: _compactButton(
+                      "PAUSE",
+                      const Color(0xFFFFD700),
+                      () {
+                        _runGuardedAdminCommand(
+                          actionKey: 'pause_raid',
+                          successLabel: "Donjon mis en pause.",
+                          lanPayload: {
+                            'type': 'admin',
+                            'command': 'pause',
+                            'remaining_seconds': _lanRemainingSeconds,
+                          },
+                          lanOptimisticUpdate: () =>
+                              setState(() => _lanStatus = 'paused'),
+                          remoteCommand: () async => null,
+                        );
+                      },
+                    ),
+                  ),
+                ],
                 const SizedBox(width: 6),
                 Expanded(
                   child: _compactButton("-200 PV", const Color(0xFFFF9100), () {
@@ -2246,19 +2602,22 @@ class _ProfileScreenState extends State<ProfileScreen>
       height: 38,
       child: OutlinedButton(
         style: OutlinedButton.styleFrom(
-          padding: EdgeInsets.zero,
+          padding: const EdgeInsets.symmetric(horizontal: 2),
           side: BorderSide(color: color.withOpacity(0.6), width: 1.2),
           backgroundColor: color.withOpacity(0.08),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
         ),
         onPressed: onTap,
-        child: Text(
-          text,
-          textAlign: TextAlign.center,
-          style: GoogleFonts.orbitron(
-            color: color,
-            fontSize: 9,
-            fontWeight: FontWeight.bold,
+        child: FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Text(
+            text,
+            textAlign: TextAlign.center,
+            style: GoogleFonts.orbitron(
+              color: color,
+              fontSize: 9,
+              fontWeight: FontWeight.bold,
+            ),
           ),
         ),
       ),
@@ -3015,6 +3374,155 @@ class _ProfileScreenState extends State<ProfileScreen>
                   fontSize: 10,
                   fontWeight: FontWeight.bold)),
         ),
+      ),
+    );
+  }
+}
+
+class _EmbeddedMultiQrScannerPage extends StatefulWidget {
+  const _EmbeddedMultiQrScannerPage();
+
+  @override
+  State<_EmbeddedMultiQrScannerPage> createState() =>
+      _EmbeddedMultiQrScannerPageState();
+}
+
+class _EmbeddedMultiQrScannerPageState
+    extends State<_EmbeddedMultiQrScannerPage> {
+  final MobileScannerController _scannerController = MobileScannerController(
+    detectionSpeed: DetectionSpeed.noDuplicates,
+  );
+  final TextEditingController _manualController = TextEditingController();
+  bool _hasPopped = false;
+
+  void _completeWithValue(String value) {
+    if (_hasPopped) return;
+    final String clean = value.trim();
+    if (clean.isEmpty) return;
+    _hasPopped = true;
+    Navigator.of(context).pop(clean);
+  }
+
+  @override
+  void dispose() {
+    _scannerController.dispose();
+    _manualController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: const Color(0xFF04101E),
+        foregroundColor: const Color(0xFFFF9100),
+        title: Text(
+          "SCAN TELECOMMANDE MULTI",
+          style: GoogleFonts.orbitron(
+            fontSize: 13,
+            fontWeight: FontWeight.bold,
+            letterSpacing: 1.2,
+          ),
+        ),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.flash_on, color: Color(0xFF00E5FF)),
+            onPressed: () => _scannerController.toggleTorch(),
+          ),
+        ],
+      ),
+      body: Column(
+        children: [
+          Expanded(
+            flex: 3,
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                MobileScanner(
+                  controller: _scannerController,
+                  onDetect: (BarcodeCapture capture) {
+                    for (final barcode in capture.barcodes) {
+                      final String? raw = barcode.rawValue;
+                      if (raw != null && raw.trim().isNotEmpty) {
+                        _completeWithValue(raw);
+                        break;
+                      }
+                    }
+                  },
+                ),
+                Container(
+                  width: 230,
+                  height: 230,
+                  decoration: BoxDecoration(
+                    border: Border.all(
+                      color: const Color(0xFFFF9100),
+                      width: 2.5,
+                    ),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Container(
+            padding: const EdgeInsets.all(14),
+            color: const Color(0xFF04101E),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text(
+                  "Visez le QR Code TELECOMMANDE sur l'ecran TV, ou collez le lien / ID de salle ci-dessous :",
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: Colors.white70,
+                    fontFamily: 'monospace',
+                    fontSize: 10.5,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _manualController,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontFamily: 'monospace',
+                          fontSize: 12,
+                        ),
+                        decoration: const InputDecoration(
+                          hintText: "shadowburn://admin?room=... ou room_1",
+                          hintStyle: TextStyle(color: Colors.white30),
+                          isDense: true,
+                          enabledBorder: OutlineInputBorder(
+                            borderSide: BorderSide(color: Color(0xFFFF9100)),
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderSide: BorderSide(color: Color(0xFF00E5FF)),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    OutlinedButton(
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: const Color(0xFF00FF66),
+                        side: const BorderSide(color: Color(0xFF00FF66)),
+                      ),
+                      onPressed: () =>
+                          _completeWithValue(_manualController.text),
+                      child: const Text(
+                        "OK",
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }

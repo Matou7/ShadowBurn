@@ -30,6 +30,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
   String _lanWsUrl = '';
   final LanSocketService _lanSocket = LanSocketService();
   StreamSubscription? _lanSub;
+  StreamSubscription<bool>? _lanConnSub;
 
   Timer? _localTickTimer;
   Timer? _queueRetryTimer;
@@ -111,6 +112,9 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
       if (!mounted) return;
 
       if (_isLanMode) {
+        if (_currentRaidStatus == 'paused') {
+          return;
+        }
         if (_targetEndTimeMs > 0 &&
             _currentRaidStatus == 'active' &&
             _currentBossHp > 0) {
@@ -188,6 +192,11 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
       _isQuotaExhausted = false;
     });
 
+    await _lanConnSub?.cancel();
+    _lanConnSub = _lanSocket.connectionChanges.listen((_) {
+      if (mounted) setState(() {});
+    });
+
     await _lanSub?.cancel();
     _lanSub = _lanSocket.messages.listen((msg) {
       if (!mounted) return;
@@ -198,6 +207,8 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
         final Map<String, dynamic> incoming = (msg['state'] is Map)
             ? Map<String, dynamic>.from(msg['state'] as Map)
             : Map<String, dynamic>.from(msg);
+        final String incomingStatus =
+            (incoming['status'] ?? _currentRaidStatus).toString();
         final int endMs = (incoming['target_end_time_ms'] as num?)?.toInt() ??
             (incoming['target_end_time'] as num?)?.toInt() ??
             0;
@@ -205,7 +216,13 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
             (incoming['remaining_seconds'] as num?)?.toInt() ?? -1;
 
         setState(() {
-          if (endMs > 0) {
+          if (incomingStatus == 'paused') {
+            if (remSec >= 0) {
+              _remainingSeconds = remSec;
+            }
+            _targetEndTimeMs =
+                DateTime.now().millisecondsSinceEpoch + (_remainingSeconds * 1000);
+          } else if (endMs > 0) {
             _targetEndTimeMs = endMs;
             final diff =
                 (endMs - DateTime.now().millisecondsSinceEpoch) ~/ 1000;
@@ -214,7 +231,13 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
             _remainingSeconds = remSec;
             _targetEndTimeMs =
                 DateTime.now().millisecondsSinceEpoch + (remSec * 1000);
+          } else if (_currentRaidStatus == 'paused' &&
+              incomingStatus == 'active') {
+            _targetEndTimeMs =
+                DateTime.now().millisecondsSinceEpoch + (_remainingSeconds * 1000);
           }
+
+          _currentRaidStatus = incomingStatus;
           _raidData = {
             ..._raidData,
             ...incoming,
@@ -751,6 +774,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _localTickTimer?.cancel();
+    _lanConnSub?.cancel();
     _lanSub?.cancel();
     _lanSocket.dispose();
     _markDormantAndStopAllTimers();
@@ -844,7 +868,8 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
                         letterSpacing: 1.4),
                   ),
                 ),
-                _buildTopHeader(currentHp, safeMax, true, false, presetLabel),
+                _buildTopHeader(
+                    currentHp, safeMax, true, false, false, presetLabel),
                 const SizedBox(height: 10),
                 Expanded(child: _buildCompleteMultiWayPodium(logs, hunters)),
               ],
@@ -980,10 +1005,12 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
       _syncTargetTime(data['target_end_time']);
     }
 
-    final bool isDefeat = (status == 'failed') ||
-        (_remainingSeconds == 0 &&
-            (status == 'active' || status == 'failed') &&
-            currentHp > 0);
+    final bool isPaused = _isLanMode && status == 'paused';
+    final bool isDefeat = !isPaused &&
+        ((status == 'failed') ||
+            (_remainingSeconds == 0 &&
+                (status == 'active' || status == 'failed') &&
+                currentHp > 0));
     final bool isVictory = (status == 'victory') || (currentHp <= 0);
 
     Widget innerContent;
@@ -991,6 +1018,8 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
       innerContent = _buildCompleteMultiWayPodium(logs, hunters);
     } else if (isDefeat) {
       innerContent = _buildDefeatScreen(currentHp, safeMax, logs, hunters);
+    } else if (isPaused) {
+      innerContent = _buildPausedScreen(currentHp, safeMax, hunters);
     } else {
       innerContent = status == 'waiting'
           ? _buildWaitingLobby(hunters)
@@ -1025,7 +1054,8 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
               if (_remainingSeconds > 0 &&
                   _remainingSeconds <= 600 &&
                   !isVictory &&
-                  !isDefeat)
+                  !isDefeat &&
+                  !isPaused)
                 Container(
                   width: double.infinity,
                   margin: const EdgeInsets.only(bottom: 8),
@@ -1046,8 +1076,8 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
                         letterSpacing: 1.1),
                   ),
                 ),
-              _buildTopHeader(
-                  currentHp, safeMax, isVictory, isDefeat, presetLabel),
+              _buildTopHeader(currentHp, safeMax, isVictory, isDefeat,
+                  isPaused, presetLabel),
               const SizedBox(height: 10),
               Expanded(child: mainContent),
             ],
@@ -1057,14 +1087,60 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
     );
   }
 
+  Widget _buildPausedScreen(double currentHp, double maxHp, List hunters) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: const Color(0xFF04101E),
+        border: Border.all(color: const Color(0xFFFF9100), width: 2),
+      ),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Icon(Icons.pause_circle_outline,
+              color: Color(0xFFFF9100), size: 64),
+          const SizedBox(height: 12),
+          const Text(
+            "⏸ DONJON EN PAUSE ⏸",
+            style: TextStyle(
+                color: Color(0xFFFF9100),
+                fontFamily: 'monospace',
+                fontSize: 22,
+                fontWeight: FontWeight.bold,
+                letterSpacing: 2),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            "Chronometre fige a ${_formatTimer(_remainingSeconds)} • En attente de reprise par le Monarque.",
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+                color: Colors.white70, fontFamily: 'monospace', fontSize: 12),
+          ),
+          const SizedBox(height: 20),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              _buildDefeatStatBox("PV RESTANTS", "${currentHp.toInt()} PV",
+                  const Color(0xFF00E5FF)),
+              const SizedBox(width: 12),
+              _buildDefeatStatBox(
+                  "CHASSEURS", "${hunters.length}", const Color(0xFF00FF66)),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildTopHeader(double currentHp, double maxHp, bool isVictory,
-      bool isDefeat, String presetLabel) {
+      bool isDefeat, bool isPaused, String presetLabel) {
     final double safeMax = maxHp > 0 ? maxHp : 5000.0;
     final double hpRatio = (currentHp / safeMax).clamp(0.0, 1.0);
 
     Color themeColor = const Color(0xFF00E5FF);
     String titleText = _isLanMode
-        ? 'DONJON LAN [SALLE : ${_roomId ?? "LAN_1"}] • ${_lanSocket.isConnected ? "WS OK" : "WS HORS-LIGNE"}'
+        ? 'DONJON LAN [SALLE : ${_roomId ?? "LAN_1"}] • ${_lanSocket.isConnected ? (isPaused ? "EN PAUSE" : "WS OK") : "WS HORS-LIGNE"}'
         : 'DONJON QUOTIDIEN [SALLE : ${_roomId ?? "HORS-LIGNE"}]';
 
     if (_isQuotaExhausted && !_isLanMode) {
@@ -1076,6 +1152,8 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
     } else if (isDefeat) {
       themeColor = const Color(0xFFFF2E56);
       titleText = 'SALLE [$_roomId] : ÉCHEC DU DONJON (TEMPS ÉCOULÉ)';
+    } else if (isPaused) {
+      themeColor = const Color(0xFFFF9100);
     }
 
     return Container(
@@ -1184,15 +1262,20 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
                     ),
                   ),
                   Text(
-                    'FIN : ${_formatTimer(_remainingSeconds)}',
+                    isPaused
+                        ? 'PAUSE : ${_formatTimer(_remainingSeconds)}'
+                        : 'FIN : ${_formatTimer(_remainingSeconds)}',
                     style: TextStyle(
-                      color: isDefeat || (_remainingSeconds <= 60 && !isVictory)
-                          ? const Color(0xFFFF2E56)
-                          : Colors.white70,
+                      color: isPaused
+                          ? const Color(0xFFFF9100)
+                          : (isDefeat || (_remainingSeconds <= 60 && !isVictory)
+                              ? const Color(0xFFFF2E56)
+                              : Colors.white70),
                       fontFamily: 'monospace',
                       fontSize: 12,
-                      fontWeight:
-                          isDefeat ? FontWeight.bold : FontWeight.normal,
+                      fontWeight: (isDefeat || isPaused)
+                          ? FontWeight.bold
+                          : FontWeight.normal,
                     ),
                   ),
                 ],
@@ -1215,10 +1298,15 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
                     width: constraints.maxWidth * hpRatio,
                     height: 18,
                     decoration: BoxDecoration(
-                      color: const Color(0xFFFF2E56),
+                      color: isPaused
+                          ? const Color(0xFFFF9100)
+                          : const Color(0xFFFF2E56),
                       boxShadow: [
                         BoxShadow(
-                          color: const Color(0xFFFF2E56).withOpacity(0.8),
+                          color: (isPaused
+                                  ? const Color(0xFFFF9100)
+                                  : const Color(0xFFFF2E56))
+                              .withOpacity(0.8),
                           blurRadius: 8,
                           spreadRadius: 1,
                         ),

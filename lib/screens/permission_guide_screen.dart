@@ -25,6 +25,7 @@ class _PermissionGuideScreenState extends State<PermissionGuideScreen>
   bool _hasUsageStats = false;
   bool _hasBatteryExemption = false;
   bool _hasTermuxRunCommand = false;
+  bool _hasCamera = false;
 
   @override
   void initState() {
@@ -95,6 +96,7 @@ class _PermissionGuideScreenState extends State<PermissionGuideScreen>
     final PermissionStatus activity =
         await Permission.activityRecognition.status;
     final PermissionStatus overlay = await Permission.systemAlertWindow.status;
+    final PermissionStatus camera = await Permission.camera.status;
 
     final bool notifsOk = await _checkAllNotifications();
     final bool usageOk = await _checkUsageStatsPermission();
@@ -110,6 +112,7 @@ class _PermissionGuideScreenState extends State<PermissionGuideScreen>
       _hasUsageStats = usageOk;
       _hasBatteryExemption = batteryOk;
       _hasTermuxRunCommand = termuxOk;
+      _hasCamera = camera.isGranted;
       _isChecking = false;
     });
 
@@ -179,6 +182,15 @@ class _PermissionGuideScreenState extends State<PermissionGuideScreen>
         await openAppSettings();
       }
     } catch (_) {
+      await openAppSettings();
+    }
+    await _checkAllPermissions();
+  }
+
+  Future<void> _handleCameraPermission() async {
+    setState(() => _isChecking = true);
+    final status = await Permission.camera.request();
+    if (!status.isGranted && status.isPermanentlyDenied) {
       await openAppSettings();
     }
     await _checkAllPermissions();
@@ -431,6 +443,44 @@ class _PermissionGuideScreenState extends State<PermissionGuideScreen>
                                 : "AUTORISER DANS LES PARAMÈTRES (LAN)",
                             style: TextStyle(
                               color: _hasTermuxRunCommand
+                                  ? const Color(0xFF00FF66)
+                                  : const Color(0xFFFF9100),
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      _buildSectorContainer(
+                        title: "5. Scanner QR Caméra (Optionnel)",
+                        subtitle: "CAMERA • SCAN QR SALLE UNIQUEMENT",
+                        description:
+                            "Utilisée uniquement pour lire les QR codes de salle (mode MULTI / LAN) en direct. Aucune vidéo n'est enregistrée ni sauvegardée, et la saisie manuelle reste toujours disponible.",
+                        isComplete: _hasCamera,
+                        isOptional: true,
+                        actionButton: OutlinedButton.icon(
+                          style: OutlinedButton.styleFrom(
+                            side: BorderSide(
+                              color: _hasCamera
+                                  ? const Color(0xFF00FF66)
+                                  : const Color(0xFFFF9100),
+                            ),
+                          ),
+                          onPressed: _handleCameraPermission,
+                          icon: Icon(
+                            _hasCamera ? Icons.check : Icons.qr_code_scanner,
+                            color: _hasCamera
+                                ? const Color(0xFF00FF66)
+                                : const Color(0xFFFF9100),
+                            size: 16,
+                          ),
+                          label: Text(
+                            _hasCamera
+                                ? "CAMÉRA QR : AUTORISÉE"
+                                : "AUTORISER LA CAMÉRA (QR)",
+                            style: TextStyle(
+                              color: _hasCamera
                                   ? const Color(0xFF00FF66)
                                   : const Color(0xFFFF9100),
                               fontSize: 11,
