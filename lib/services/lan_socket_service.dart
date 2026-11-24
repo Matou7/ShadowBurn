@@ -1,5 +1,3 @@
-// lib/services/lan_socket_service.dart
-
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
@@ -17,7 +15,8 @@ abstract class LanSocketTransport {
 
 class _PlatformLanTransport implements LanSocketTransport {
   final String url;
-  final StreamController<String> _controller = StreamController<String>.broadcast();
+  final StreamController<String> _controller =
+      StreamController<String>.broadcast();
   void Function(String data)? _sender;
 
   _PlatformLanTransport(this.url);
@@ -71,8 +70,10 @@ class _PlatformLanTransport implements LanSocketTransport {
 LanSocketTransport createLanTransport(String url) => _PlatformLanTransport(url);
 
 class LanSocketService {
-  final StreamController<Map<String, dynamic>> _messagesController = StreamController<Map<String, dynamic>>.broadcast();
-  final StreamController<bool> _statusController = StreamController<bool>.broadcast();
+  final StreamController<Map<String, dynamic>> _messagesController =
+      StreamController<Map<String, dynamic>>.broadcast();
+  final StreamController<bool> _statusController =
+      StreamController<bool>.broadcast();
 
   LanSocketTransport? _transport;
   StreamSubscription<String>? _rawSub;

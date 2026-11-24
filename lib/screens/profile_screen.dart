@@ -1,3 +1,5 @@
+// lib/screens/profile_screen.dart
+
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -24,7 +26,7 @@ const String kDefaultLanHostIp = '192.0.0.4';
 const int kDefaultLanWsPort = 8765;
 const int kDefaultLanWebPort = 8080;
 
-const String kLanPackDriveFileId = '1XwHpNYysK0196tsZ-GDaumUSFmw2paJf';
+const String kLanPackDriveFileId = '12D0qbeRLyCLfzMlJJNoD6tPYHWL73Ef6';
 const String kLanPackDownloadUrl =
     'https://drive.google.com/uc?export=download&id=$kLanPackDriveFileId';
 const String kLanPackDriveViewUrl =
@@ -36,7 +38,7 @@ const String kTermuxAutoAllowCommand =
 const String kTermuxDepsCommand =
     'termux-setup-storage && pkg update -y && pkg install -y python && pip install websockets';
 const String kTermuxManualStartCommand =
-    'cd /storage/emulated/0/Download/LAN/web && chmod +x start_lan.sh && ./start_lan.sh';
+    'cd /storage/emulated/0/Download/LAN/web && bash start_lan.sh';
 
 class ProfileScreen extends StatefulWidget {
   final String? initialRoomId;
@@ -74,6 +76,7 @@ class _ProfileScreenState extends State<ProfileScreen>
   String _lanTvUrl = '';
   final LanSocketService _lanSocket = LanSocketService();
   StreamSubscription? _lanSub;
+  StreamSubscription<bool>? _lanConnSub;
   int _lanCurrentHp = 5000;
   int _lanMaxHp = 5000;
   String _lanStatus = 'waiting';
@@ -90,6 +93,10 @@ class _ProfileScreenState extends State<ProfileScreen>
     WidgetsBinding.instance.addObserver(this);
     _initDeviceAdminSecurity();
     _loadSavedLanHost();
+
+    _lanConnSub = _lanSocket.connectionChanges.listen((_) {
+      if (mounted) setState(() {});
+    });
 
     _lanSub = _lanSocket.messages.listen((msg) {
       if (!mounted) return;
@@ -274,6 +281,17 @@ class _ProfileScreenState extends State<ProfileScreen>
         onProgress?.call(extractMsg);
 
         final targetDir = Directory(kLanTargetDir);
+        if (force && await targetDir.exists()) {
+          try {
+            await for (final entity in targetDir.list()) {
+              final String baseName =
+                  entity.path.split('/').last.toLowerCase();
+              if (baseName != 'start_lan.sh' && baseName != 'server_lan.py') {
+                await entity.delete(recursive: true);
+              }
+            }
+          } catch (_) {}
+        }
         if (!await targetDir.exists()) {
           await targetDir.create(recursive: true);
         }
@@ -283,7 +301,9 @@ class _ProfileScreenState extends State<ProfileScreen>
 
         for (final file in archive) {
           String entryName = file.name.replaceAll('\\', '/');
-          if (entryName.startsWith('LAN/web/')) {
+          if (entryName.startsWith('build/web/')) {
+            entryName = entryName.substring('build/web/'.length);
+          } else if (entryName.startsWith('LAN/web/')) {
             entryName = entryName.substring('LAN/web/'.length);
           } else if (entryName.startsWith('web/')) {
             entryName = entryName.substring('web/'.length);
@@ -547,7 +567,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                       fontFamily: 'monospace',
                       fontSize: 13),
                   decoration: const InputDecoration(
-                    labelText: "IP Wi-Fi affichee par Termux (ex: 192.0.0.4)",
+                    labelText: "IP Wi-Fi ou Hotspot Termux (ex: 192.168.1.48)",
                     labelStyle: TextStyle(color: Colors.white54),
                     enabledBorder: UnderlineInputBorder(
                         borderSide: BorderSide(color: Color(0xFF00FF66))),
@@ -1114,6 +1134,7 @@ class _ProfileScreenState extends State<ProfileScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _lanConnSub?.cancel();
     _lanSub?.cancel();
     _lanSocket.dispose();
     _scrollController.dispose();
