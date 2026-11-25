@@ -25,6 +25,7 @@ public class CoreWatcherService extends Service {
     private PowerManager.WakeLock wakeLock = null;
     private volatile boolean isRunning = false;
     private Thread patrolThread = null;
+    private long lastAlarmScheduledMs = 0L;
 
     public static volatile long emergencyGraceUntil = 0L;
 
@@ -67,7 +68,7 @@ public class CoreWatcherService extends Service {
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         String actionVal = (intent != null) ? intent.getAction() : null;
-        
+
         if ("ACTION_STOP_COREWATCHER".equals(actionVal)) {
             cancelAlarmResurrection();
             stopForeground(true);
@@ -89,7 +90,7 @@ public class CoreWatcherService extends Service {
 
         SharedPreferences prefs = getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE);
         boolean isPenal = prefs.getBoolean("flutter.cerberus_penalty_active", false) || prefs.getBoolean("cerberus_penalty_active", false);
-        
+
         if (!isPenal) {
             stopForeground(true);
             stopSelf();
@@ -98,14 +99,14 @@ public class CoreWatcherService extends Service {
 
         try {
             Intent notificationIntent = new Intent(this, MainActivity.class);
-            notificationIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | 
-                                        Intent.FLAG_ACTIVITY_SINGLE_TOP | 
+            notificationIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK |
+                                        Intent.FLAG_ACTIVITY_SINGLE_TOP |
                                         Intent.FLAG_ACTIVITY_REORDER_TO_FRONT |
-                                        0x00800000 | 
+                                        0x00800000 |
                                         0x00200000);
-            
-            int pendingFlags = (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) 
-                ? (PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT) 
+
+            int pendingFlags = (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M)
+                ? (PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT)
                 : PendingIntent.FLAG_UPDATE_CURRENT;
 
             PendingIntent pendingIntent = PendingIntent.getActivity(this, 0, notificationIntent, pendingFlags);
@@ -131,25 +132,32 @@ public class CoreWatcherService extends Service {
             wakeLock.acquire(60L * 60L * 1000L);
         }
 
-        scheduleAlarmResurrection();
+        scheduleAlarmResurrection(true);
         startWatchdogLoop();
 
         return START_STICKY;
     }
 
-    private void scheduleAlarmResurrection() {
+    private void scheduleAlarmResurrection(boolean forceImmediate) {
+        long now = System.currentTimeMillis();
+        // Évite de saturer AlarmManager (HyperOS/Android tue les apps qui reprogramment des alarmes en boucle < 5s)
+        if (!forceImmediate && (now - lastAlarmScheduledMs) < 5000L) {
+            return;
+        }
+        lastAlarmScheduledMs = now;
+
         try {
             Intent alarmIntent = new Intent(getApplicationContext(), BootReceiver.class);
             alarmIntent.setAction("ACTION_CERBERUS_RESURRECT");
-            int flags = (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) 
-                ? (PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT) 
+            int flags = (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M)
+                ? (PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT)
                 : PendingIntent.FLAG_UPDATE_CURRENT;
-            
+
             PendingIntent pi = PendingIntent.getBroadcast(getApplicationContext(), 9999, alarmIntent, flags);
             AlarmManager am = (AlarmManager) getSystemService(Context.ALARM_SERVICE);
-            
+
             if (am != null) {
-                long triggerTime = System.currentTimeMillis() + 50L;
+                long triggerTime = now + (forceImmediate ? 1500L : 5500L);
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                     am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerTime, pi);
                 } else {
@@ -165,10 +173,10 @@ public class CoreWatcherService extends Service {
         try {
             Intent alarmIntent = new Intent(getApplicationContext(), BootReceiver.class);
             alarmIntent.setAction("ACTION_CERBERUS_RESURRECT");
-            int flags = (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) 
-                ? (PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT) 
+            int flags = (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M)
+                ? (PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT)
                 : PendingIntent.FLAG_UPDATE_CURRENT;
-            
+
             PendingIntent pi = PendingIntent.getBroadcast(getApplicationContext(), 9999, alarmIntent, flags);
             AlarmManager am = (AlarmManager) getSystemService(Context.ALARM_SERVICE);
             if (am != null) {
@@ -186,7 +194,7 @@ public class CoreWatcherService extends Service {
             boolean isPrefRaw = prefs.getBoolean("cerberus_penalty_active", false);
 
             if (isPrefPrefixed || isPrefRaw) {
-                scheduleAlarmResurrection();
+                scheduleAlarmResurrection(true);
                 bringAppToFront();
 
                 Intent restartServiceIntent = new Intent(getApplicationContext(), CoreWatcherService.class);
@@ -206,11 +214,11 @@ public class CoreWatcherService extends Service {
             Intent launchIntent = new Intent(this, MainActivity.class);
             int showWhenLockedFlag = 0x00800000;
             int turnScreenOnFlag = 0x00200000;
-            launchIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | 
-                                    Intent.FLAG_ACTIVITY_SINGLE_TOP | 
+            launchIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK |
+                                    Intent.FLAG_ACTIVITY_SINGLE_TOP |
                                     Intent.FLAG_ACTIVITY_REORDER_TO_FRONT |
-                                    showWhenLockedFlag | 
-                                    turnScreenOnFlag | 
+                                    showWhenLockedFlag |
+                                    turnScreenOnFlag |
                                     Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
             startActivity(launchIntent);
         } catch (Exception ignored) {}
@@ -225,12 +233,12 @@ public class CoreWatcherService extends Service {
         patrolThread = new Thread(() -> {
             while (isRunning) {
                 try {
-                    // SEUIL ABSOLU : 20 millisecondes de battement pour saturer l'interception sans faire surchauffer le processeur
-                    Thread.sleep(20);
+                    // 150ms : réactivité instantanée tout en évitant le throttling CPU/batterie HyperOS
+                    Thread.sleep(150);
 
                     SharedPreferences prefs = getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE);
                     boolean isPenal = prefs.getBoolean("flutter.cerberus_penalty_active", false) || prefs.getBoolean("cerberus_penalty_active", false);
-                    
+
                     if (!isPenal) {
                         cancelAlarmResurrection();
                         stopForeground(true);
@@ -242,18 +250,17 @@ public class CoreWatcherService extends Service {
                         continue;
                     }
 
-                    scheduleAlarmResurrection();
+                    scheduleAlarmResurrection(false);
 
                     String currentPkg = getForegroundPackageName();
 
-                    if (currentPkg.equals(getPackageName()) || 
-                        currentPkg.equals(homeLauncherPkg) || 
-                        isPackageWhitelisted(currentPkg) || 
+                    if (currentPkg.equals(getPackageName()) ||
+                        currentPkg.equals(homeLauncherPkg) ||
+                        isPackageWhitelisted(currentPkg) ||
                         currentPkg.isEmpty()) {
                         continue;
                     }
 
-                    // Aspiration ultra-rapide (déclenché en ~20-40ms)
                     bringAppToFront();
 
                 } catch (InterruptedException e) {
@@ -279,10 +286,9 @@ public class CoreWatcherService extends Service {
         try {
             UsageStatsManager usm = (UsageStatsManager) getSystemService(Context.USAGE_STATS_SERVICE);
             if (usm == null) return "";
-            
+
             long time = System.currentTimeMillis();
-            // Fenêtre de requête réduite à 1000ms pour attraper l'événement au vol instantanément
-            UsageEvents events = usm.queryEvents(time - 1000L, time);
+            UsageEvents events = usm.queryEvents(time - 1500L, time);
             UsageEvents.Event event = new UsageEvents.Event();
             String lastPackage = "";
 
@@ -308,9 +314,9 @@ public class CoreWatcherService extends Service {
         try {
             SharedPreferences prefs = getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE);
             boolean isPenal = prefs.getBoolean("flutter.cerberus_penalty_active", false) || prefs.getBoolean("cerberus_penalty_active", false);
-            
+
             if (isPenal) {
-                scheduleAlarmResurrection();
+                scheduleAlarmResurrection(true);
                 Intent restartServiceIntent = new Intent(getApplicationContext(), CoreWatcherService.class);
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                     getApplicationContext().startForegroundService(restartServiceIntent);
