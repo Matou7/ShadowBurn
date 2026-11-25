@@ -1,3 +1,5 @@
+import com.android.build.api.dsl.LibraryExtension
+
 allprojects {
     repositories {
         google()
@@ -5,7 +7,6 @@ allprojects {
     }
 }
 
-// Force le dossier de build pour que Flutter ne soit pas perdu
 val newBuildDir = File(rootProject.projectDir, "../build")
 rootProject.layout.buildDirectory.set(newBuildDir)
 
@@ -15,7 +16,14 @@ subprojects {
 }
 
 subprojects {
-    project.evaluationDependsOn(":app")
+    afterEvaluate {
+        extensions.findByType<LibraryExtension>()?.apply {
+            compileSdk = 37
+        }
+    }
+    if (path != ":app") {
+        evaluationDependsOn(":app")
+    }
 }
 
 tasks.register<Delete>("clean") {

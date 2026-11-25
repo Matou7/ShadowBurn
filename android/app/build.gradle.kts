@@ -18,7 +18,7 @@ plugins {
 
 android {
     namespace = "com.example.shadowburnv2"
-    compileSdk = 36
+    compileSdk = 37
 
     sourceSets {
         getByName("main") {
