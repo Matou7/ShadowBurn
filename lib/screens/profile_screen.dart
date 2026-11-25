@@ -28,7 +28,7 @@ const String kDefaultLanHostIp = '192.168.1.1';
 const int kDefaultLanWsPort = 8765;
 const int kDefaultLanWebPort = 8080;
 
-const String kLanPackDriveFileId = '1loldoSNdsLWzL9whgJMOYmDoDlzoKYza';
+const String kLanPackDriveFileId = '1YN_yjtFJy6jUrvH45vU-tZK_BJKRPvft';
 const String kLanPackDownloadUrl =
     'https://drive.google.com/uc?export=download&id=$kLanPackDriveFileId';
 const String kLanPackDriveViewUrl =
@@ -1673,8 +1673,34 @@ class _ProfileScreenState extends State<ProfileScreen>
     _lastAdminActionMs[actionKey] = now;
 
     if (_isLanMode) {
-      lanOptimisticUpdate();
       final String room = _activeRoom ?? _generateUniqueLanRoomId();
+      if (!_lanSocket.isConnected) {
+        final bool reconnected = await _lanSocket.connect(_lanWsUrl);
+        if (!reconnected) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  "Serveur LAN hors-ligne ($_lanWsUrl). Lancez Termux puis reessayez.",
+                ),
+                backgroundColor: const Color(0xFFFF2E56),
+                duration: const Duration(seconds: 3),
+              ),
+            );
+          }
+          return;
+        }
+        _lanSocket.sendJson({
+          'type': 'join',
+          'role': 'admin',
+          'room': room,
+          'roomId': room,
+          'hunterId': _deviceAdminToken ?? 'admin_lan',
+          'name': 'Admin_LAN',
+        });
+      }
+
+      lanOptimisticUpdate();
       _lanSocket.sendJson({
         'room': room,
         'roomId': room,
@@ -1694,6 +1720,11 @@ class _ProfileScreenState extends State<ProfileScreen>
       return;
     }
 
+    // Sécurité : s'assure que RaidAdminService n'est pas bloqué sur une ancienne config LAN
+    if (RaidAdminService.isLanActive) {
+      await RaidAdminService.clearLan();
+    }
+
     final String? error = await remoteCommand();
     if (!mounted) return;
 
@@ -1702,7 +1733,7 @@ class _ProfileScreenState extends State<ProfileScreen>
         SnackBar(
           content: Text(error),
           backgroundColor: const Color(0xFFFF2E56),
-          duration: const Duration(seconds: 2),
+          duration: const Duration(seconds: 3),
         ),
       );
     } else {
@@ -1755,18 +1786,18 @@ class _ProfileScreenState extends State<ProfileScreen>
     );
   }
 
-  void _unbindFromRoom(String reason) {
+  Future<void> _unbindFromRoom(String reason) async {
     final wasLan = _isLanMode;
     final roomToRelease = _activeRoom;
     if (!wasLan && roomToRelease != null) {
-      _releaseAdminLease(roomToRelease);
+      await _releaseAdminLease(roomToRelease);
     }
+    await RaidAdminService.clearLan();
     if (wasLan) {
-      RaidAdminService.clearLan();
-      _lanSocket.disconnect();
+      await _lanSocket.disconnect();
     }
     if (!mounted) return;
-    Provider.of<GameProvider>(context, listen: false).unpairAdminRoom();
+    await Provider.of<GameProvider>(context, listen: false).unpairAdminRoom();
     setState(() {
       _isLanMode = false;
       _activeRoom = null;
