@@ -1,3 +1,5 @@
+// lib/screens/intro_awakening_screen.dart
+
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -321,10 +323,11 @@ class _IntroAwakeningScreenState extends State<IntroAwakeningScreen> {
                       color: const Color(0xFF090D16),
                       borderRadius: BorderRadius.circular(12),
                       border: Border.all(
-                          color: _systemCyan.withOpacity(0.8), width: 1.5),
+                          color: _systemCyan.withValues(alpha: 0.8),
+                          width: 1.5),
                       boxShadow: [
                         BoxShadow(
-                          color: _systemCyan.withOpacity(0.15),
+                          color: _systemCyan.withValues(alpha: 0.15),
                           blurRadius: 15,
                           spreadRadius: 1,
                         ),
@@ -406,7 +409,7 @@ class _IntroAwakeningScreenState extends State<IntroAwakeningScreen> {
                                       color: Colors.white24, fontSize: 13),
                                   enabledBorder: OutlineInputBorder(
                                     borderSide: BorderSide(
-                                        color: _systemCyan.withOpacity(0.5)),
+                                        color: _systemCyan.withValues(alpha: 0.5)),
                                   ),
                                   focusedBorder: OutlineInputBorder(
                                     borderSide: BorderSide(

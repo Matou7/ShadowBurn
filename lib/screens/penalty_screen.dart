@@ -1,7 +1,6 @@
 // lib/screens/penalty_screen.dart
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:vibration/vibration.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -46,8 +45,9 @@ class PenaltyScreen extends StatelessWidget {
         ),
         ElevatedButton(
           style: ElevatedButton.styleFrom(
-            backgroundColor: const Color(0xFF00E5FF).withOpacity(0.25),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            backgroundColor: const Color(0xFF00E5FF).withValues(alpha: 0.25),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             side: const BorderSide(color: Color(0xFF00E5FF)),
           ),
           onPressed: () async {
@@ -58,12 +58,14 @@ class PenaltyScreen extends StatelessWidget {
             messenger.showSnackBar(
               SnackBar(
                 content: Text(result),
-                backgroundColor: granted ? const Color(0xFF00FF66) : Colors.redAccent,
+                backgroundColor:
+                    granted ? const Color(0xFF00FF66) : Colors.redAccent,
                 duration: const Duration(seconds: 4),
               ),
             );
           },
-          child: const Text("EXÉCUTER L'AMNISTIE", style: TextStyle(color: Colors.white)),
+          child: const Text("EXÉCUTER L'AMNISTIE",
+              style: TextStyle(color: Colors.white)),
         ),
       ],
     );
@@ -95,7 +97,8 @@ class PenaltyScreen extends StatelessWidget {
           child: SafeArea(
             child: Center(
               child: SingleChildScrollView(
-                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   crossAxisAlignment: CrossAxisAlignment.center,
@@ -105,9 +108,10 @@ class PenaltyScreen extends StatelessWidget {
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
                         border: Border.all(color: penaltyRed, width: 2),
-                        color: penaltyRed.withOpacity(0.1),
+                        color: penaltyRed.withValues(alpha: 0.1),
                       ),
-                      child: const Icon(Icons.warning_amber_rounded, color: penaltyRed, size: 60),
+                      child: const Icon(Icons.warning_amber_rounded,
+                          color: penaltyRed, size: 60),
                     ),
                     const SizedBox(height: 16),
                     Text(
@@ -137,8 +141,9 @@ class PenaltyScreen extends StatelessWidget {
                       child: LinearProgressIndicator(
                         value: ratio,
                         minHeight: 14,
-                        backgroundColor: Colors.red.withOpacity(0.2),
-                        valueColor: const AlwaysStoppedAnimation<Color>(penaltyRed),
+                        backgroundColor: Colors.red.withValues(alpha: 0.2),
+                        valueColor:
+                            const AlwaysStoppedAnimation<Color>(penaltyRed),
                       ),
                     ),
                     const SizedBox(height: 20),
@@ -167,14 +172,19 @@ class PenaltyScreen extends StatelessWidget {
                             style: OutlinedButton.styleFrom(
                               foregroundColor: const Color(0xFF00FF66),
                               side: const BorderSide(color: Color(0xFF00FF66)),
-                              backgroundColor: const Color(0xFF00FF66).withOpacity(0.08),
+                              backgroundColor: const Color(0xFF00FF66)
+                                  .withValues(alpha: 0.08),
                               padding: const EdgeInsets.symmetric(vertical: 12),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                              shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12)),
                             ),
                             icon: const Icon(Icons.phone_outlined, size: 16),
                             label: Text(
                               "CANAL APPEL",
-                              style: GoogleFonts.orbitron(fontSize: 10, letterSpacing: 1, fontWeight: FontWeight.bold),
+                              style: GoogleFonts.orbitron(
+                                  fontSize: 10,
+                                  letterSpacing: 1,
+                                  fontWeight: FontWeight.bold),
                             ),
                             onPressed: () => _openEmergencyDialer(context),
                           ),
@@ -185,14 +195,19 @@ class PenaltyScreen extends StatelessWidget {
                             style: OutlinedButton.styleFrom(
                               foregroundColor: const Color(0xFF00E5FF),
                               side: const BorderSide(color: Color(0xFF00E5FF)),
-                              backgroundColor: const Color(0xFF00E5FF).withOpacity(0.08),
+                              backgroundColor: const Color(0xFF00E5FF)
+                                  .withValues(alpha: 0.08),
                               padding: const EdgeInsets.symmetric(vertical: 12),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                              shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12)),
                             ),
                             icon: const Icon(Icons.message_outlined, size: 16),
                             label: Text(
                               "CANAL SMS",
-                              style: GoogleFonts.orbitron(fontSize: 10, letterSpacing: 1, fontWeight: FontWeight.bold),
+                              style: GoogleFonts.orbitron(
+                                  fontSize: 10,
+                                  letterSpacing: 1,
+                                  fontWeight: FontWeight.bold),
                             ),
                             onPressed: () => _openEmergencySms(context),
                           ),
@@ -206,19 +221,25 @@ class PenaltyScreen extends StatelessWidget {
                         style: OutlinedButton.styleFrom(
                           foregroundColor: const Color(0xFF00E5FF),
                           side: const BorderSide(color: Color(0xFF00E5FF)),
-                          backgroundColor: const Color(0xFF00E5FF).withOpacity(0.08),
+                          backgroundColor: const Color(0xFF00E5FF)
+                              .withValues(alpha: 0.08),
                           padding: const EdgeInsets.symmetric(vertical: 12),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(12),
                           ),
                         ),
-                        icon: const Icon(Icons.shield_moon_outlined, size: 16),
+                        icon:
+                            const Icon(Icons.shield_moon_outlined, size: 16),
                         label: Text(
                           "RECOURS D'URGENCE (AMNISTIE 1/30J)",
                           textAlign: TextAlign.center,
-                          style: GoogleFonts.orbitron(fontSize: 11, letterSpacing: 1, fontWeight: FontWeight.bold),
+                          style: GoogleFonts.orbitron(
+                              fontSize: 11,
+                              letterSpacing: 1,
+                              fontWeight: FontWeight.bold),
                         ),
-                        onPressed: () => _showAmnestyConfirmDialog(context, game),
+                        onPressed: () =>
+                            _showAmnestyConfirmDialog(context, game),
                       ),
                     ),
                   ],
@@ -236,7 +257,8 @@ class _HoldSquatsButton extends StatefulWidget {
   final Color penaltyRed;
   final VoidCallback onValidated;
 
-  const _HoldSquatsButton({required this.penaltyRed, required this.onValidated});
+  const _HoldSquatsButton(
+      {required this.penaltyRed, required this.onValidated});
 
   @override
   State<_HoldSquatsButton> createState() => _HoldSquatsButtonState();
@@ -286,9 +308,12 @@ class _HoldSquatsButtonState extends State<_HoldSquatsButton> {
       height: 55,
       child: ElevatedButton(
         style: ElevatedButton.styleFrom(
-          backgroundColor: _isOnCooldown ? Colors.grey.shade900 : widget.penaltyRed,
+          backgroundColor:
+              _isOnCooldown ? Colors.grey.shade900 : widget.penaltyRed,
           foregroundColor: Colors.white,
-          side: BorderSide(color: _isOnCooldown ? Colors.grey.shade700 : widget.penaltyRed, width: 2),
+          side: BorderSide(
+              color: _isOnCooldown ? Colors.grey.shade700 : widget.penaltyRed,
+              width: 2),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(15),
           ),

@@ -1,3 +1,5 @@
+// lib/main.dart
+
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -971,7 +973,7 @@ class _MainScaffoldState extends State<MainScaffold> {
               Container(
                 width: double.infinity,
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                color: Colors.redAccent.withOpacity(0.85),
+                color: Colors.redAccent.withValues(alpha: 0.85),
                 child: const Text(
                   "BAC À SABLE : RIEN N'EST ENREGISTRÉ",
                   textAlign: TextAlign.center,

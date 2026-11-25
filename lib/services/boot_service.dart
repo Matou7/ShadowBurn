@@ -1,6 +1,7 @@
 // lib/services/boot_service.dart
 
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'notification_service.dart';
@@ -18,7 +19,7 @@ class BootService {
       });
       await checkPendingDungeonsOnBoot();
     } catch (e) {
-      print("Erreur BootService : $e");
+      debugPrint("Erreur BootService : $e");
     }
   }
 
@@ -26,7 +27,7 @@ class BootService {
     try {
       await _channel.invokeMethod('registerBootReceiver');
     } catch (e) {
-      print("Boot receiver non pris en charge sur cette plateforme : $e");
+      debugPrint("Boot receiver non pris en charge sur cette plateforme : $e");
     }
   }
 
@@ -34,7 +35,8 @@ class BootService {
     try {
       final prefs = await SharedPreferences.getInstance();
 
-      final bool isVolatile = prefs.getBool(StorageService.keySandboxVolatile) ?? false;
+      final bool isVolatile =
+          prefs.getBool(StorageService.keySandboxVolatile) ?? false;
       if (isVolatile) return;
 
       final String? rawSave = prefs.getString('save_v3');

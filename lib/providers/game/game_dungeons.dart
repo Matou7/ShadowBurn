@@ -19,37 +19,6 @@ mixin _DungeonLogic on _GameBase {
     }
   }
 
-  @override
-  void _rewardUrgentQuest() {
-    final u = _urgent;
-    if (u == null) return;
-
-    if (_isSurpassQuest) {
-      NotificationService.showNotification(
-        "SURPASSEMENT RÉUSSI",
-        "Bien joué $_username. Vous avez survécu à la pression.",
-        type: 'levelup',
-      );
-      AudioService.playVictory();
-      u.resetStatus();
-      _isSurpassQuest = false;
-      _saveNow();
-      _notify();
-      return;
-    }
-
-    final int finalXp = (_cfg.urgentReward * _vitality).toInt();
-    _xp += finalXp;
-    _coins += (20 * goldMultiplier).toInt();
-
-    _dungeonResult = {'status': 'VICTOIRE', 'xp': finalXp};
-    AudioService.playVictory();
-    u.resetStatus();
-    _checkRankUp();
-    _saveNow();
-    _notify();
-  }
-
   void fleeUrgentQuest({bool isTimeout = false}) {
     final u = _urgent;
     if (u != null && u.isActive) {
@@ -68,7 +37,8 @@ mixin _DungeonLogic on _GameBase {
 
   void _triggerHunterAlert() async {
     if (await Vibration.hasVibrator()) {
-      Vibration.vibrate(pattern: [0, 1500, 800, 1500], intensities: [0, 255, 0, 255]);
+      Vibration.vibrate(
+          pattern: [0, 1500, 800, 1500], intensities: [0, 255, 0, 255]);
     }
   }
 
@@ -109,7 +79,9 @@ mixin _DungeonLogic on _GameBase {
     }
   }
 
-  void enterDungeon(String k, {bool isThreat = false, Dungeon? threatInstance, bool isRed = false}) {
+  @override
+  void enterDungeon(String k,
+      {bool isThreat = false, Dungeon? threatInstance, bool isRed = false}) {
     if (_activeDungeon != null) return;
     if (!isThreat && (_inventoryKeys[k] ?? 0) <= 0) return;
 
@@ -126,7 +98,8 @@ mixin _DungeonLogic on _GameBase {
 
     var tasks = tasksRaw.map((e) => Map<String, dynamic>.from(e)).toList();
 
-    final Duration dungeonDuration = _sandbox ? const Duration(seconds: 10) : const Duration(hours: 2);
+    final Duration dungeonDuration =
+        _sandbox ? const Duration(seconds: 10) : const Duration(hours: 2);
 
     _activeDungeon = Dungeon(
       id: isThreat && threatInstance != null
@@ -146,7 +119,6 @@ mixin _DungeonLogic on _GameBase {
       _activeThreats.removeWhere((t) => t.id == threatInstance.id);
     }
 
-    _warningGiven = false;
     LockService.lockScreen(force: true);
     _notify();
     _startDungeonTimer();
@@ -165,7 +137,8 @@ mixin _DungeonLogic on _GameBase {
     if (_activeDungeon == null) return;
     bool allDone = true;
     for (int i = 0; i < _activeDungeon!.tasks.length; i++) {
-      if (_activeDungeon!.progress[i] < (_activeDungeon!.tasks[i]['amount'] as num)) {
+      if (_activeDungeon!.progress[i] <
+          (_activeDungeon!.tasks[i]['amount'] as num)) {
         allDone = false;
       }
     }
@@ -184,7 +157,9 @@ mixin _DungeonLogic on _GameBase {
     if (isTest) {
       // ⚡ Mode Test : Aucun XP gagné ou perdu, simple validation du verrouillage et synchronisation
       _dungeonResult = {
-        'status': victory ? 'DONJON DE TEST RÉUSSI\n(Aucun impact XP)' : 'TEST EXPIRÉ\n(Aucun malus)',
+        'status': victory
+            ? 'DONJON DE TEST RÉUSSI\n(Aucun impact XP)'
+            : 'TEST EXPIRÉ\n(Aucun malus)',
         'xp': 0,
       };
       AudioService.playVictory();
@@ -214,7 +189,10 @@ mixin _DungeonLogic on _GameBase {
             }
           }
         }
-        _dungeonResult = {'status': 'VICTOIRE$lootMsg\n(+ $dungeonHeal HP)', 'xp': finalXp};
+        _dungeonResult = {
+          'status': 'VICTOIRE$lootMsg\n(+$dungeonHeal HP)',
+          'xp': finalXp
+        };
         AudioService.playVictory();
         _checkRankUp();
         _checkTitles();
@@ -269,7 +247,8 @@ mixin _DungeonLogic on _GameBase {
 
   @override
   void debugForceSpawnThreat({bool isRed = false}) async {
-    final Duration threatDuration = _sandbox ? const Duration(seconds: 10) : const Duration(hours: 2);
+    final Duration threatDuration =
+        _sandbox ? const Duration(seconds: 10) : const Duration(hours: 2);
     final DateTime expiry = DateTime.now().add(threatDuration);
 
     final Dungeon d = Dungeon(
@@ -284,7 +263,8 @@ mixin _DungeonLogic on _GameBase {
     );
 
     final String timeLabel = _sandbox ? "10 secondes" : "2 heures";
-    final String title = isRed ? "👹 DONJON ROUGE ($_rank)" : "☠️ DONJON RANG $_rank";
+    final String title =
+        isRed ? "👹 DONJON ROUGE ($_rank)" : "☠️ DONJON RANG $_rank";
     final String body = isRed
         ? "PORTAIL APPARU ! $timeLabel avant l'aspiration automatique."
         : "Un donjon est apparu dans vos menaces ($timeLabel).";
@@ -363,7 +343,8 @@ mixin _DungeonLogic on _GameBase {
     _classChangeEndTime = null;
 
     _checkTitles(silent: true);
-    _equippedTitle = isMonarchTarget ? "Monarque des Ombres" : "Autorité Nationale";
+    _equippedTitle =
+        isMonarchTarget ? "Monarque des Ombres" : "Autorité Nationale";
     _lastRankUp = targetRank;
     _showLevelUpOverlay = true;
 

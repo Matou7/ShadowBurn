@@ -1,9 +1,10 @@
 // lib/services/lan_socket_web.dart
 
 import 'dart:async';
-import 'dart:html' as html;
+import 'dart:js_interop';
+import 'package:web/web.dart' as web;
 
-html.WebSocket? _activeWebSocket;
+web.WebSocket? _activeWebSocket;
 
 Future<void> platformConnectSocket(
   String url,
@@ -15,13 +16,13 @@ Future<void> platformConnectSocket(
   await platformCloseSocket();
 
   final Completer<void> completer = Completer<void>();
-  final html.WebSocket ws = html.WebSocket(url);
+  final web.WebSocket ws = web.WebSocket(url);
   _activeWebSocket = ws;
 
   ws.onOpen.first.then((_) {
     onReady((String data) {
-      if (ws.readyState == html.WebSocket.OPEN) {
-        ws.send(data);
+      if (ws.readyState == web.WebSocket.OPEN) {
+        ws.send(data.toJS);
       }
     });
     if (!completer.isCompleted) {
@@ -37,8 +38,8 @@ Future<void> platformConnectSocket(
     }
   });
 
-  ws.onMessage.listen((html.MessageEvent event) {
-    final dynamic data = event.data;
+  ws.onMessage.listen((web.MessageEvent event) {
+    final dynamic data = event.data.dartify();
     if (data is String) {
       onMessage(data);
     }

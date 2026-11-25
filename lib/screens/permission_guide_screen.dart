@@ -1,3 +1,5 @@
+// lib/screens/permission_guide_screen.dart
+
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -239,7 +241,6 @@ class _PermissionGuideScreenState extends State<PermissionGuideScreen>
 
   Future<void> _handleGlobalValidate() async {
     final bool s1Ok = _hasActivity && _hasNotifications;
-    final bool s2Ok = _hasOverlay && _hasUsageStats;
 
     if (!s1Ok) {
       await _handleSector1();
@@ -627,10 +628,10 @@ class _PermissionGuideScreenState extends State<PermissionGuideScreen>
     bool isOptional = false,
   }) {
     final Color borderColor = isComplete
-        ? const Color(0xFF00E5FF).withOpacity(0.6)
+        ? const Color(0xFF00E5FF).withValues(alpha: 0.6)
         : (isOptional
-            ? const Color(0xFFFF9100).withOpacity(0.45)
-            : Colors.redAccent.withOpacity(0.4));
+            ? const Color(0xFFFF9100).withValues(alpha: 0.45)
+            : Colors.redAccent.withValues(alpha: 0.4));
 
     return Container(
       padding: const EdgeInsets.all(14),

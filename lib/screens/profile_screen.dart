@@ -4,6 +4,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
+import 'dart:typed_data';
 import 'package:archive/archive.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -65,7 +66,6 @@ class _ProfileScreenState extends State<ProfileScreen>
   final GlobalKey _remoteConsoleKey = GlobalKey();
 
   String? _activeRoom;
-  String? _verifiedKey;
   int _selectedHpPreset = 5000;
   bool _isCheckingIntent = false;
   bool _isBindingInProgress = false;
@@ -159,6 +159,7 @@ class _ProfileScreenState extends State<ProfileScreen>
       if (pendingLanWs != null && pendingLanWs.trim().isNotEmpty) {
         await prefs.remove('shadow_lan_active_ws');
         await prefs.remove('shadow_lan_active_room');
+        if (!mounted) return;
         await _promptAndActivateLanMode(
           prefilledWsUrl: pendingLanWs.trim(),
           prefilledRoom: pendingLanRoom,
@@ -166,6 +167,7 @@ class _ProfileScreenState extends State<ProfileScreen>
         return;
       }
 
+      if (!mounted) return;
       if (widget.initialRoomId != null && widget.initialRoomId!.isNotEmpty) {
         await _attemptSecureBinding(
             widget.initialRoomId!, widget.initialKey ?? '');
@@ -252,9 +254,7 @@ class _ProfileScreenState extends State<ProfileScreen>
   Future _detectAllLocalLanIps() async {
     if (kIsWeb) {
       final host = Uri.base.host;
-      if (host.isNotEmpty &&
-          host != 'localhost' &&
-          !_isExcludedIp(host)) {
+      if (host.isNotEmpty && host != 'localhost' && !_isExcludedIp(host)) {
         return [
           {'ip': host, 'label': 'Navigateur ($host)'}
         ];
@@ -878,6 +878,7 @@ class _ProfileScreenState extends State<ProfileScreen>
       final Uri? parsed = Uri.tryParse(prefilledWsUrl.trim());
       final String host =
           (parsed != null && parsed.host.isNotEmpty) ? parsed.host : detectedIp;
+      if (!mounted) return;
       await _connectLanAdminWithHost(
         hostIp: host,
         customWsUrl: prefilledWsUrl.trim(),
@@ -1267,6 +1268,7 @@ class _ProfileScreenState extends State<ProfileScreen>
             backgroundColor: const Color(0xFF00FF66).withValues(alpha: 0.15),
           ),
           onPressed: () async {
+            final nav = Navigator.of(context);
             if (autoModeSelected && !kIsWeb) {
               await _activateAutoLanPackFlow(force: false);
             }
@@ -1276,8 +1278,8 @@ class _ProfileScreenState extends State<ProfileScreen>
                 .replaceAll('ws://', '')
                 .split(':')
                 .first;
-            if (!context.mounted) return;
-            Navigator.pop(context);
+            if (!mounted) return;
+            nav.pop();
             if (cleanIp.isNotEmpty) {
               await _connectLanAdminWithHost(
                 hostIp: cleanIp,
@@ -1329,7 +1331,6 @@ class _ProfileScreenState extends State<ProfileScreen>
       _lanHostIp = hostIp;
       _lanWsUrl = wsUrl;
       _activeRoom = resolvedRoom;
-      _verifiedKey = 'LAN';
       _lanTvUrl = tvUrl;
       _lanMaxHp = 5000;
       _lanCurrentHp = 5000;
@@ -1339,6 +1340,7 @@ class _ProfileScreenState extends State<ProfileScreen>
 
     _scrollToRemoteConsole();
 
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(connected
@@ -1553,6 +1555,7 @@ class _ProfileScreenState extends State<ProfileScreen>
         await _initDeviceAdminSecurity();
       }
 
+      if (!mounted) return;
       final game = Provider.of<GameProvider>(context, listen: false);
       final bool isProVerified = await game.ensureProStatusLoaded();
       if (!mounted) return;
@@ -1628,10 +1631,10 @@ class _ProfileScreenState extends State<ProfileScreen>
       if (!mounted) return;
       RaidAdminService.clearLan();
       await _lanSocket.disconnect();
+      if (!mounted) return;
       setState(() {
         _isLanMode = false;
         _activeRoom = cleanRoomId;
-        _verifiedKey = cleanKey;
         _selectedHpPreset = presetExists ? rawMaxHp : 5000;
       });
 
@@ -1813,10 +1816,10 @@ class _ProfileScreenState extends State<ProfileScreen>
     }
     if (!mounted) return;
     await Provider.of<GameProvider>(context, listen: false).unpairAdminRoom();
+    if (!mounted) return;
     setState(() {
       _isLanMode = false;
       _activeRoom = null;
-      _verifiedKey = null;
       _lanStatus = 'waiting';
     });
 
@@ -2038,10 +2041,11 @@ class _ProfileScreenState extends State<ProfileScreen>
             if (formKey.currentState!.validate()) {
               final email = emailController.text.trim();
               final message = messageController.text.trim();
+              final messenger = ScaffoldMessenger.of(context);
 
               Navigator.pop(context);
 
-              ScaffoldMessenger.of(context).showSnackBar(
+              messenger.showSnackBar(
                 const SnackBar(
                     content: Text("Transmission du rapport au Systeme en cours..."),
                     duration: Duration(seconds: 2)),
@@ -2057,8 +2061,9 @@ class _ProfileScreenState extends State<ProfileScreen>
                     )
                     .timeout(const Duration(seconds: 10));
 
+                if (!mounted) return;
                 if (response.statusCode == 200) {
-                  ScaffoldMessenger.of(context).showSnackBar(
+                  messenger.showSnackBar(
                     const SnackBar(
                       content: Text(
                           "Rapport transmis avec succes ! Le Quartier General a recu votre message."),
@@ -2069,14 +2074,15 @@ class _ProfileScreenState extends State<ProfileScreen>
                   final errorData = jsonDecode(response.body);
                   final errorMsg = errorData['detail'] ??
                       "Echec de la transmission du rapport.";
-                  ScaffoldMessenger.of(context).showSnackBar(
+                  messenger.showSnackBar(
                     SnackBar(
                         content: Text(errorMsg),
                         backgroundColor: Colors.redAccent),
                   );
                 }
               } catch (e) {
-                ScaffoldMessenger.of(context).showSnackBar(
+                if (!mounted) return;
+                messenger.showSnackBar(
                   SnackBar(
                       content: Text("Erreur de connexion au serveur : $e"),
                       backgroundColor: Colors.redAccent),
@@ -2479,7 +2485,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                     ),
                     child: Text(
                       hasActiveLink
-                          ? effectiveRoom!.toUpperCase()
+                          ? effectiveRoom.toUpperCase()
                           : "NON JUMELE",
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
@@ -3683,7 +3689,8 @@ class _ProfileScreenState extends State<ProfileScreen>
           onPressed: () async {
             final messenger = ScaffoldMessenger.of(context);
             final bool ok = await game.importSaveCode(controller.text);
-            if (context.mounted) Navigator.pop(context);
+            if (!context.mounted) return;
+            Navigator.pop(context);
             messenger.showSnackBar(
               SnackBar(
                 content: Text(ok

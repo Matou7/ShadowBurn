@@ -1,9 +1,14 @@
+// lib/services/lock_service.dart
+
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 class LockService {
-  static const MethodChannel _primaryChannel = MethodChannel('com.shadowburn.app/lock');
-  static const MethodChannel _legacyChannel = MethodChannel('com.shadowburn.lock/channel');
+  static const MethodChannel _primaryChannel =
+      MethodChannel('com.shadowburn.app/lock');
+  static const MethodChannel _legacyChannel =
+      MethodChannel('com.shadowburn.lock/channel');
 
   static bool _isLocked = false;
   static bool get isLocked => _isLocked;
@@ -18,7 +23,7 @@ class LockService {
         await _legacyChannel.invokeMethod('lockScreen');
       } on PlatformException catch (e) {
         _isLocked = false;
-        print("Erreur LockService (lock) : ${e.message}");
+        debugPrint("Erreur LockService (lock) : ${e.message}");
       }
     }
   }
@@ -32,7 +37,7 @@ class LockService {
       try {
         await _legacyChannel.invokeMethod('unlockScreen');
       } on PlatformException catch (e) {
-        print("Erreur LockService (unlock) : ${e.message}");
+        debugPrint("Erreur LockService (unlock) : ${e.message}");
       }
     }
   }
@@ -44,7 +49,7 @@ class LockService {
       try {
         await _legacyChannel.invokeMethod('openEmergencyDialer');
       } on PlatformException catch (e) {
-        print("Erreur openEmergencyDialer : ${e.message}");
+        debugPrint("Erreur openEmergencyDialer : ${e.message}");
       }
     }
   }
@@ -56,7 +61,7 @@ class LockService {
       try {
         await _legacyChannel.invokeMethod('openEmergencySms');
       } on PlatformException catch (e) {
-        print("Erreur openEmergencySms : ${e.message}");
+        debugPrint("Erreur openEmergencySms : ${e.message}");
       }
     }
   }
@@ -68,7 +73,7 @@ class LockService {
       try {
         await _legacyChannel.invokeMethod('resetEmergencyExemption');
       } on PlatformException catch (e) {
-        print("Erreur startEmergencyExemption : ${e.message}");
+        debugPrint("Erreur startEmergencyExemption : ${e.message}");
       }
     }
   }

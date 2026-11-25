@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import '../services/auth_recovery_service.dart';
 
 class RestoreProScreen extends StatefulWidget {
-  const RestoreProScreen({Key? key}) : super(key: key);
+  const RestoreProScreen({super.key});
 
   @override
   State<RestoreProScreen> createState() => _RestoreProScreenState();
@@ -34,7 +34,8 @@ class _RestoreProScreenState extends State<RestoreProScreen> {
 
     bool success = false;
     try {
-      success = await AuthRecoveryService.sendOfficialRecoveryEmail(email).timeout(
+      success = await AuthRecoveryService.sendOfficialRecoveryEmail(email)
+          .timeout(
         const Duration(seconds: 15),
         onTimeout: () => false,
       );
@@ -55,14 +56,14 @@ class _RestoreProScreenState extends State<RestoreProScreen> {
     if (success) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text("[SYSTÈMES] Clé renvoyée ! Entrez-la pour activer le Pass Pro."),
+          content: Text(
+              "[SYSTÈMES] Clé renvoyée ! Entrez-la pour activer le Pass Pro."),
           backgroundColor: Color(0xFF00FF66),
           behavior: SnackBarBehavior.floating,
           duration: Duration(seconds: 4),
         ),
       );
 
-      // Ferme automatiquement la pop-up après 2 secondes pour revenir à l'écran principal
       Future.delayed(const Duration(seconds: 2), () {
         if (mounted) {
           Navigator.of(context).pop();
@@ -117,7 +118,8 @@ class _RestoreProScreenState extends State<RestoreProScreen> {
             const Text(
               "Saisissez l'e-mail de votre achat. Le système remet votre clé à disposition et vous l'envoie par e-mail.",
               textAlign: TextAlign.center,
-              style: TextStyle(color: Color(0xFFAAAAAA), fontSize: 13, height: 1.4),
+              style:
+                  TextStyle(color: Color(0xFFAAAAAA), fontSize: 13, height: 1.4),
             ),
             const SizedBox(height: 32),
             TextField(
@@ -129,18 +131,21 @@ class _RestoreProScreenState extends State<RestoreProScreen> {
                 fillColor: const Color(0xFF14141E),
                 hintText: "chasseur@domaine.com",
                 hintStyle: const TextStyle(color: Colors.white30),
-                prefixIcon: const Icon(Icons.email_outlined, color: Color(0xFF00E5FF)),
+                prefixIcon:
+                    const Icon(Icons.email_outlined, color: Color(0xFF00E5FF)),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(8),
                   borderSide: const BorderSide(color: Color(0xFF00E5FF)),
                 ),
                 enabledBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(8),
-                  borderSide: BorderSide(color: const Color(0xFF00E5FF).withOpacity(0.4)),
+                  borderSide: BorderSide(
+                      color: const Color(0xFF00E5FF).withValues(alpha: 0.4)),
                 ),
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(8),
-                  borderSide: const BorderSide(color: Color(0xFF00FF66), width: 1.5),
+                  borderSide:
+                      const BorderSide(color: Color(0xFF00FF66), width: 1.5),
                 ),
               ),
             ),
@@ -151,17 +156,20 @@ class _RestoreProScreenState extends State<RestoreProScreen> {
                 backgroundColor: const Color(0xFF00E5FF),
                 foregroundColor: Colors.black,
                 padding: const EdgeInsets.symmetric(vertical: 16),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8)),
               ),
               child: _isLoading
                   ? const SizedBox(
                       height: 20,
                       width: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black),
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: Colors.black),
                     )
                   : const Text(
                       "VÉRIFIER LA RESTAURATION",
-                      style: TextStyle(fontWeight: FontWeight.bold, letterSpacing: 1),
+                      style:
+                          TextStyle(fontWeight: FontWeight.bold, letterSpacing: 1),
                     ),
             ),
             if (_statusMessage != null) ...[
@@ -170,18 +178,22 @@ class _RestoreProScreenState extends State<RestoreProScreen> {
                 padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
                   color: _isSuccess
-                      ? const Color(0xFF00FF66).withOpacity(0.1)
-                      : Colors.redAccent.withOpacity(0.1),
+                      ? const Color(0xFF00FF66).withValues(alpha: 0.1)
+                      : Colors.redAccent.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(8),
                   border: Border.all(
-                    color: _isSuccess ? const Color(0xFF00FF66) : Colors.redAccent,
+                    color: _isSuccess
+                        ? const Color(0xFF00FF66)
+                        : Colors.redAccent,
                   ),
                 ),
                 child: Text(
                   _statusMessage!,
                   textAlign: TextAlign.center,
                   style: TextStyle(
-                    color: _isSuccess ? const Color(0xFF00FF66) : Colors.redAccent,
+                    color: _isSuccess
+                        ? const Color(0xFF00FF66)
+                        : Colors.redAccent,
                     fontSize: 13,
                     fontWeight: FontWeight.w500,
                   ),

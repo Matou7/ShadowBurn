@@ -199,8 +199,10 @@ class GameProvider extends _GameBase
   String _generateRandomInstallToken(String prefix) {
     final rng = Random.secure();
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-    final partA = List.generate(8, (_) => chars[rng.nextInt(chars.length)]).join();
-    final partB = List.generate(8, (_) => chars[rng.nextInt(chars.length)]).join();
+    final partA =
+        List.generate(8, (_) => chars[rng.nextInt(chars.length)]).join();
+    final partB =
+        List.generate(8, (_) => chars[rng.nextInt(chars.length)]).join();
     return "${prefix}_${partA}_$partB";
   }
 
@@ -217,16 +219,22 @@ class GameProvider extends _GameBase
       String prefix = "DEV";
       if (kIsWeb) {
         final webInfo = await deviceInfo.webBrowserInfo;
-        final rawTag = (webInfo.vendor ?? 'WEB').replaceAll(RegExp(r'[^A-Za-z0-9]'), '');
-        prefix = "WEB_${rawTag.isEmpty ? 'BROWSER' : rawTag.substring(0, min(8, rawTag.length))}";
+        final rawTag =
+            (webInfo.vendor ?? 'WEB').replaceAll(RegExp(r'[^A-Za-z0-9]'), '');
+        prefix =
+            "WEB_${rawTag.isEmpty ? 'BROWSER' : rawTag.substring(0, min(8, rawTag.length))}";
       } else if (Platform.isAndroid) {
         final androidInfo = await deviceInfo.androidInfo;
-        final rawModel = androidInfo.model.replaceAll(RegExp(r'[^A-Za-z0-9]'), '');
-        prefix = "AND_${rawModel.isEmpty ? 'DEVICE' : rawModel.substring(0, min(10, rawModel.length))}";
+        final rawModel =
+            androidInfo.model.replaceAll(RegExp(r'[^A-Za-z0-9]'), '');
+        prefix =
+            "AND_${rawModel.isEmpty ? 'DEVICE' : rawModel.substring(0, min(10, rawModel.length))}";
       } else if (Platform.isIOS) {
         final iosInfo = await deviceInfo.iosInfo;
-        final rawSys = (iosInfo.systemName ?? 'IOS').replaceAll(RegExp(r'[^A-Za-z0-9]'), '');
-        prefix = "IOS_${rawSys.isEmpty ? 'DEVICE' : rawSys.substring(0, min(8, rawSys.length))}";
+        final rawSys =
+            iosInfo.systemName.replaceAll(RegExp(r'[^A-Za-z0-9]'), '');
+        prefix =
+            "IOS_${rawSys.isEmpty ? 'DEVICE' : rawSys.substring(0, min(8, rawSys.length))}";
       }
 
       final String created = _generateRandomInstallToken(prefix.toUpperCase());
@@ -588,7 +596,8 @@ class GameProvider extends _GameBase
         } else if (['victory', 'failed'].contains(status)) {
           shouldDelete =
               lastSignalMs > 0 && (nowMs - lastSignalMs) > staleThresholdMs;
-        } else if (lastSignalMs > 0 && (nowMs - lastSignalMs) > staleThresholdMs) {
+        } else if (lastSignalMs > 0 &&
+            (nowMs - lastSignalMs) > staleThresholdMs) {
           shouldDelete = true;
         }
 
@@ -603,16 +612,16 @@ class GameProvider extends _GameBase
 
   @override
   void setUrgentQuestProvider(UrgentQuestProvider p) {
-    urgentQuestProvider = p;
-    urgentQuestProvider!.onTimeExpired = () {
+    _urgent = p;
+    _urgent!.onTimeExpired = () {
       triggerPenaltyState("Échec de la Quête Urgente.");
     };
-    urgentQuestProvider!.onChanged = () {
+    _urgent!.onChanged = () {
       persistGame();
     };
-    urgentQuestProvider!.onQuestSuccess = (double xp, int gold) {
+    _urgent!.onQuestSuccess = (double xp, int gold) {
       addXp(xp);
-      goldCoins += gold;
+      _coins += gold;
       persistGame();
     };
   }

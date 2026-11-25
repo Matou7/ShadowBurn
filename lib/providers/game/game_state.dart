@@ -34,7 +34,6 @@ abstract class _GameBase extends ChangeNotifier {
   int _dailyCyclesCompleted = 0;
   bool _recordBrokenToday = false;
   bool _isTracking = false;
-  bool _isAttacking = false;
   int _stepBufferForXp = 0;
   DateTime? _lastOngoingUpdate;
 
@@ -52,7 +51,15 @@ abstract class _GameBase extends ChangeNotifier {
 
   Map<String, dynamic> _calendarHistory = {};
   List<dynamic> _saveHistory = [];
-  Map<String, int> _inventoryKeys = {'E': 0, 'D': 0, 'C': 0, 'B': 0, 'A': 0, 'S': 0, 'NATION': 0};
+  Map<String, int> _inventoryKeys = {
+    'E': 0,
+    'D': 0,
+    'C': 0,
+    'B': 0,
+    'A': 0,
+    'S': 0,
+    'NATION': 0,
+  };
 
   bool _isInPenaltyZone = false;
   int _penaltySquatsDone = 0;
@@ -72,7 +79,6 @@ abstract class _GameBase extends ChangeNotifier {
   bool _isSurpassQuest = false;
   bool _showLevelUpOverlay = false;
   String _lastRankUp = "E";
-  bool _warningGiven = false;
 
   final Random _rng = Random();
   final StepService _steps = StepService();
@@ -89,9 +95,6 @@ abstract class _GameBase extends ChangeNotifier {
   int get maxHealth => _maxHp;
   double get currentXP => _xp;
   int get goldCoins => _coins;
-  set goldCoins(int val) {
-    _coins = val;
-  }
 
   int get totalSurpassement => _totalSurpassement;
   String get equippedTitle => _equippedTitle;
@@ -184,11 +187,6 @@ abstract class _GameBase extends ChangeNotifier {
   bool get canStartClassChange =>
       _rank == "S" && _xp >= Balance.classChangeXp && !_isClassChangeStarted;
 
-  UrgentQuestProvider? get urgentQuestProvider => _urgent;
-  set urgentQuestProvider(UrgentQuestProvider? provider) {
-    _urgent = provider;
-  }
-
   void _notify() => notifyListeners();
 
   Future<String> _getUniqueHardwareId() async {
@@ -196,7 +194,8 @@ abstract class _GameBase extends ChangeNotifier {
       final prefs = await SharedPreferences.getInstance();
       String? hw = prefs.getString('shadow_hardware_fingerprint');
       if (hw == null || hw.isEmpty) {
-        hw = "hw_${DateTime.now().millisecondsSinceEpoch}_${_rng.nextInt(999999)}";
+        hw =
+            "hw_${DateTime.now().millisecondsSinceEpoch}_${_rng.nextInt(999999)}";
         await prefs.setString('shadow_hardware_fingerprint', hw);
       }
       return hw;
@@ -342,7 +341,6 @@ abstract class _GameBase extends ChangeNotifier {
   void _updateOngoingSystem({bool force = false});
   void _loseXp(num amount);
   void _checkRankUp();
-  void _rewardUrgentQuest();
   void _startDungeonTimer();
   void _checkDungeonStatus();
   void _checkCycleCompletion();
@@ -354,5 +352,6 @@ abstract class _GameBase extends ChangeNotifier {
   void addReps(String type, int count);
   void incrementExercise(String type);
   void trainAllManualExercises();
-  void enterDungeon(String k, {bool isThreat = false, Dungeon? threatInstance, bool isRed = false});
+  void enterDungeon(String k,
+      {bool isThreat = false, Dungeon? threatInstance, bool isRed = false});
 }

@@ -8,7 +8,6 @@ import '../widgets/system_dialog.dart';
 
 // 1. Fenêtre pour entrer le mot de passe (Login)
 void showAdminAuthDialog(BuildContext context, GameProvider game) {
-  // Strictement interdit d'ouvrir l'auth admin en release
   if (!kDebugMode) return;
 
   final TextEditingController controller = TextEditingController();
@@ -34,8 +33,10 @@ void showAdminAuthDialog(BuildContext context, GameProvider game) {
           decoration: const InputDecoration(
             hintText: "CODE D'ACCÈS",
             hintStyle: TextStyle(color: Colors.white24),
-            enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.grey)),
-            focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: Color(0xFF00E5FF))),
+            enabledBorder: UnderlineInputBorder(
+                borderSide: BorderSide(color: Colors.grey)),
+            focusedBorder: UnderlineInputBorder(
+                borderSide: BorderSide(color: Color(0xFF00E5FF))),
           ),
           onSubmitted: (_) {
             _executeLogin(context, game, controller.text);
@@ -46,24 +47,29 @@ void showAdminAuthDialog(BuildContext context, GameProvider game) {
     actions: [
       TextButton(
         onPressed: () => Navigator.pop(context),
-        child: Text("ANNULER", style: GoogleFonts.rajdhani(color: Colors.grey, fontWeight: FontWeight.bold)),
+        child: Text("ANNULER",
+            style: GoogleFonts.rajdhani(
+                color: Colors.grey, fontWeight: FontWeight.bold)),
       ),
       ElevatedButton(
         style: ElevatedButton.styleFrom(
-          backgroundColor: const Color(0xFF00E5FF).withOpacity(0.2),
+          backgroundColor: const Color(0xFF00E5FF).withValues(alpha: 0.2),
           side: const BorderSide(color: Color(0xFF00E5FF)),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
         ),
         onPressed: () {
           _executeLogin(context, game, controller.text);
         },
-        child: Text("INITIALISER", style: GoogleFonts.orbitron(color: Colors.white, fontWeight: FontWeight.bold)),
+        child: Text("INITIALISER",
+            style: GoogleFonts.orbitron(
+                color: Colors.white, fontWeight: FontWeight.bold)),
       ),
     ],
   );
 }
 
-void _executeLogin(BuildContext context, GameProvider game, String enteredPassword) {
+void _executeLogin(
+    BuildContext context, GameProvider game, String enteredPassword) {
   if (!kDebugMode) return;
   final messenger = ScaffoldMessenger.of(context);
   final bool success = game.toggleAdminMode(enteredPassword);
@@ -71,7 +77,9 @@ void _executeLogin(BuildContext context, GameProvider game, String enteredPasswo
 
   if (success) {
     messenger.showSnackBar(SnackBar(
-      content: Text("GOD MODE ACTIVÉ : bac à sable, rien n'est enregistré.", style: GoogleFonts.orbitron(fontSize: 11)),
+      content: Text(
+          "GOD MODE ACTIVÉ : bac à sable, rien n'est enregistré.",
+          style: GoogleFonts.orbitron(fontSize: 11)),
       backgroundColor: const Color(0xFF00E5FF),
     ));
   } else {
@@ -106,41 +114,59 @@ void showExitGodModeDialog(BuildContext context, GameProvider game) {
             backgroundColor: Colors.grey[900],
             side: const BorderSide(color: Colors.white30),
             minimumSize: const Size(double.infinity, 40),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
           ),
           onPressed: () => Navigator.pop(context),
-          child: Text("RESTER", style: GoogleFonts.orbitron(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
+          child: Text("RESTER",
+              style: GoogleFonts.orbitron(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 12)),
         ),
         const SizedBox(height: 8),
         ElevatedButton(
           style: ElevatedButton.styleFrom(
             backgroundColor: Colors.red[900]!,
             minimumSize: const Size(double.infinity, 40),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
           ),
           onPressed: () {
             final messenger = ScaffoldMessenger.of(context);
             Navigator.pop(context);
             game.exitGodMode(keepChanges: false);
-            messenger.showSnackBar(const SnackBar(content: Text("Modifications abandonnées : état d'avant restauré.")));
+            messenger.showSnackBar(const SnackBar(
+                content: Text(
+                    "Modifications abandonnées : état d'avant restauré.")));
           },
-          child: Text("ABANDONNER", style: GoogleFonts.orbitron(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
+          child: Text("ABANDONNER",
+              style: GoogleFonts.orbitron(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 12)),
         ),
         const SizedBox(height: 8),
         ElevatedButton(
           style: ElevatedButton.styleFrom(
-            backgroundColor: const Color(0xFF00E5FF).withOpacity(0.2),
+            backgroundColor: const Color(0xFF00E5FF).withValues(alpha: 0.2),
             side: const BorderSide(color: Color(0xFF00E5FF)),
             minimumSize: const Size(double.infinity, 40),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
           ),
           onPressed: () {
             final messenger = ScaffoldMessenger.of(context);
             Navigator.pop(context);
             game.exitGodMode(keepChanges: true);
-            messenger.showSnackBar(const SnackBar(content: Text("Modifications sauvegardées.")));
+            messenger.showSnackBar(const SnackBar(
+                content: Text("Modifications sauvegardées.")));
           },
-          child: Text("SAUVEGARDER", style: GoogleFonts.orbitron(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
+          child: Text("SAUVEGARDER",
+              style: GoogleFonts.orbitron(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 12)),
         ),
       ],
     ),
@@ -172,8 +198,10 @@ void showChangePasswordDialog(BuildContext context, GameProvider game) {
           decoration: const InputDecoration(
             hintText: "NOUVEAU CODE",
             hintStyle: TextStyle(color: Colors.white24),
-            enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.grey)),
-            focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.orangeAccent)),
+            enabledBorder: UnderlineInputBorder(
+                borderSide: BorderSide(color: Colors.grey)),
+            focusedBorder: UnderlineInputBorder(
+                borderSide: BorderSide(color: Colors.orangeAccent)),
           ),
         ),
       ],
@@ -181,11 +209,13 @@ void showChangePasswordDialog(BuildContext context, GameProvider game) {
     actions: [
       TextButton(
         onPressed: () => Navigator.pop(context),
-        child: Text("ANNULER", style: GoogleFonts.rajdhani(color: Colors.grey, fontWeight: FontWeight.bold)),
+        child: Text("ANNULER",
+            style: GoogleFonts.rajdhani(
+                color: Colors.grey, fontWeight: FontWeight.bold)),
       ),
       ElevatedButton(
         style: ElevatedButton.styleFrom(
-          backgroundColor: Colors.orangeAccent.withOpacity(0.2),
+          backgroundColor: Colors.orangeAccent.withValues(alpha: 0.2),
           side: const BorderSide(color: Colors.orangeAccent),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
         ),
@@ -194,19 +224,24 @@ void showChangePasswordDialog(BuildContext context, GameProvider game) {
             final messenger = ScaffoldMessenger.of(context);
             game.setAdminPassword(controller.text);
             Navigator.pop(context);
-            messenger.showSnackBar(const SnackBar(content: Text("Code d'accès mis à jour.")));
+            messenger.showSnackBar(
+                const SnackBar(content: Text("Code d'accès mis à jour.")));
           }
         },
-        child: Text("VALIDER", style: GoogleFonts.orbitron(color: Colors.white, fontWeight: FontWeight.bold)),
+        child: Text("VALIDER",
+            style: GoogleFonts.orbitron(
+                color: Colors.white, fontWeight: FontWeight.bold)),
       ),
     ],
   );
 }
 
 // 4. Fenêtre pour modifier une stat en God Mode
-void showGodModeStatDialog(BuildContext context, GameProvider game, String statName, int currentVal) {
+void showGodModeStatDialog(BuildContext context, GameProvider game,
+    String statName, int currentVal) {
   if (!kDebugMode || !game.isGodMode) return;
-  final TextEditingController controller = TextEditingController(text: currentVal.toString());
+  final TextEditingController controller =
+      TextEditingController(text: currentVal.toString());
 
   SystemDialog.show(
     context,
@@ -222,8 +257,10 @@ void showGodModeStatDialog(BuildContext context, GameProvider game, String statN
           decoration: const InputDecoration(
             labelText: "Nouvelle valeur",
             labelStyle: TextStyle(color: Colors.white54),
-            enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.grey)),
-            focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: Color(0xFF00E5FF))),
+            enabledBorder: UnderlineInputBorder(
+                borderSide: BorderSide(color: Colors.grey)),
+            focusedBorder: UnderlineInputBorder(
+                borderSide: BorderSide(color: Color(0xFF00E5FF))),
           ),
         ),
       ],
@@ -231,11 +268,13 @@ void showGodModeStatDialog(BuildContext context, GameProvider game, String statN
     actions: [
       TextButton(
         onPressed: () => Navigator.pop(context),
-        child: Text("ANNULER", style: GoogleFonts.rajdhani(color: Colors.grey, fontWeight: FontWeight.bold)),
+        child: Text("ANNULER",
+            style: GoogleFonts.rajdhani(
+                color: Colors.grey, fontWeight: FontWeight.bold)),
       ),
       ElevatedButton(
         style: ElevatedButton.styleFrom(
-          backgroundColor: const Color(0xFF00E5FF).withOpacity(0.2),
+          backgroundColor: const Color(0xFF00E5FF).withValues(alpha: 0.2),
           side: const BorderSide(color: Color(0xFF00E5FF)),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
         ),
@@ -246,16 +285,20 @@ void showGodModeStatDialog(BuildContext context, GameProvider game, String statN
           }
           Navigator.pop(context);
         },
-        child: Text("VALIDER", style: GoogleFonts.orbitron(color: Colors.white, fontWeight: FontWeight.bold)),
+        child: Text("VALIDER",
+            style: GoogleFonts.orbitron(
+                color: Colors.white, fontWeight: FontWeight.bold)),
       ),
     ],
   );
 }
 
 // 5. Fenêtre pour modifier la course en God Mode
-void showGodModeKmDialog(BuildContext context, GameProvider game, double currentKm) {
+void showGodModeKmDialog(
+    BuildContext context, GameProvider game, double currentKm) {
   if (!kDebugMode || !game.isGodMode) return;
-  final TextEditingController controller = TextEditingController(text: currentKm.toStringAsFixed(1));
+  final TextEditingController controller =
+      TextEditingController(text: currentKm.toStringAsFixed(1));
 
   SystemDialog.show(
     context,
@@ -271,8 +314,10 @@ void showGodModeKmDialog(BuildContext context, GameProvider game, double current
           decoration: const InputDecoration(
             labelText: "Distance (KM)",
             labelStyle: TextStyle(color: Colors.white54),
-            enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.grey)),
-            focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: Color(0xFF00E5FF))),
+            enabledBorder: UnderlineInputBorder(
+                borderSide: BorderSide(color: Colors.grey)),
+            focusedBorder: UnderlineInputBorder(
+                borderSide: BorderSide(color: Color(0xFF00E5FF))),
           ),
         ),
       ],
@@ -280,11 +325,13 @@ void showGodModeKmDialog(BuildContext context, GameProvider game, double current
     actions: [
       TextButton(
         onPressed: () => Navigator.pop(context),
-        child: Text("ANNULER", style: GoogleFonts.rajdhani(color: Colors.grey, fontWeight: FontWeight.bold)),
+        child: Text("ANNULER",
+            style: GoogleFonts.rajdhani(
+                color: Colors.grey, fontWeight: FontWeight.bold)),
       ),
       ElevatedButton(
         style: ElevatedButton.styleFrom(
-          backgroundColor: const Color(0xFF00E5FF).withOpacity(0.2),
+          backgroundColor: const Color(0xFF00E5FF).withValues(alpha: 0.2),
           side: const BorderSide(color: Color(0xFF00E5FF)),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
         ),
@@ -295,7 +342,9 @@ void showGodModeKmDialog(BuildContext context, GameProvider game, double current
           }
           Navigator.pop(context);
         },
-        child: Text("VALIDER", style: GoogleFonts.orbitron(color: Colors.white, fontWeight: FontWeight.bold)),
+        child: Text("VALIDER",
+            style: GoogleFonts.orbitron(
+                color: Colors.white, fontWeight: FontWeight.bold)),
       ),
     ],
   );

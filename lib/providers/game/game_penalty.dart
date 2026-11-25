@@ -11,6 +11,7 @@ mixin _PenaltyLogic on _GameBase {
     _notify();
   }
 
+  @override
   void triggerDailyPenalty() {
     if (!_isInPenaltyZone) {
       _isInPenaltyZone = true;
@@ -79,6 +80,7 @@ mixin _PenaltyLogic on _GameBase {
     _notify();
   }
 
+  @override
   void processPenaltySquats(int count) {
     if (_isProcessingSquats) return;
     _isProcessingSquats = true;
@@ -89,7 +91,8 @@ mixin _PenaltyLogic on _GameBase {
       }
 
       _penaltySquatsDone += count;
-      dlog("Squats de pénalité : +$count | Total : $_penaltySquatsDone / $_kPenaltyGoal");
+      dlog(
+          "Squats de pénalité : +$count | Total : $_penaltySquatsDone / $_kPenaltyGoal");
 
       if (_penaltySquatsDone >= _kPenaltyGoal) {
         _isInPenaltyZone = false;

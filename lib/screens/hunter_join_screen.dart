@@ -930,8 +930,7 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
     }
 
     final Map<String, dynamic> data = _raidData;
-    final int maxHp = (data['max_hp'] as num?)?.toInt() ?? 5000;
-    final int currentHp = (data['current_hp'] as num?)?.toInt() ?? maxHp;
+    final int currentHp = (data['current_hp'] as num?)?.toInt() ?? 5000;
     final bool isVictoryClosure = currentHp <= 0;
 
     bool canWrite = await QuotaGuardService.checkAndIncrementWrite(
@@ -1073,9 +1072,9 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
               color: const Color(0xFF04101E),
               border: Border.all(color: const Color(0xFFFF2E56), width: 2),
             ),
-            child: Column(
+            child: const Column(
               mainAxisSize: MainAxisSize.min,
-              children: const [
+              children: [
                 Icon(Icons.lock_clock, color: Color(0xFFFF2E56), size: 64),
                 SizedBox(height: 20),
                 Text(
@@ -1116,9 +1115,9 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
               color: const Color(0xFF04101E),
               border: Border.all(color: const Color(0xFFFF9100), width: 2),
             ),
-            child: Column(
+            child: const Column(
               mainAxisSize: MainAxisSize.min,
-              children: const [
+              children: [
                 CircularProgressIndicator(
                     color: Color(0xFFFF9100), strokeWidth: 3),
                 SizedBox(height: 24),
@@ -1264,10 +1263,11 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         color: const Color(0xFF04101E),
-        border: Border.all(color: kSystemBlue.withOpacity(0.5), width: 1.5),
+        border: Border.all(
+            color: kSystemBlue.withValues(alpha: 0.5), width: 1.5),
         boxShadow: [
           BoxShadow(
-              color: kSystemBlue.withOpacity(0.1),
+              color: kSystemBlue.withValues(alpha: 0.1),
               blurRadius: 15,
               spreadRadius: 2)
         ],
@@ -1301,7 +1301,8 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
               labelText: "NOM DU CHASSEUR",
               labelStyle: const TextStyle(color: kSystemBlue, fontSize: 12),
               enabledBorder: OutlineInputBorder(
-                  borderSide: BorderSide(color: kSystemBlue.withOpacity(0.5))),
+                  borderSide:
+                      BorderSide(color: kSystemBlue.withValues(alpha: 0.5))),
               focusedBorder: const OutlineInputBorder(
                   borderSide: BorderSide(color: kSystemBlue, width: 2)),
               prefixIcon: const Icon(Icons.person, color: kSystemBlue),
@@ -1309,7 +1310,7 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
           ),
           const SizedBox(height: 14),
           DropdownButtonFormField(
-            value: _selectedModeId,
+            initialValue: _selectedModeId,
             isExpanded: true,
             dropdownColor: const Color(0xFF04101E),
             style: const TextStyle(
@@ -1318,7 +1319,8 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
               labelText: "VOIE DE COMBAT (EXERCICES)",
               labelStyle: const TextStyle(color: kSystemBlue, fontSize: 12),
               enabledBorder: OutlineInputBorder(
-                  borderSide: BorderSide(color: kSystemBlue.withOpacity(0.5))),
+                  borderSide:
+                      BorderSide(color: kSystemBlue.withValues(alpha: 0.5))),
               focusedBorder: const OutlineInputBorder(
                   borderSide: BorderSide(color: kSystemBlue, width: 2)),
               prefixIcon: const Icon(Icons.fitness_center, color: kSystemBlue),
@@ -1451,8 +1453,8 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
                     const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                 decoration: BoxDecoration(
                   color: isCombatActive
-                      ? const Color(0xFF00FF66).withOpacity(0.1)
-                      : const Color(0xFFFF9100).withOpacity(0.1),
+                      ? const Color(0xFF00FF66).withValues(alpha: 0.1)
+                      : const Color(0xFFFF9100).withValues(alpha: 0.1),
                   border: Border.all(
                       color: isCombatActive
                           ? const Color(0xFF00FF66)
@@ -1527,7 +1529,7 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
                   padding:
                       const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFFF2E56).withOpacity(0.22),
+                    color: const Color(0xFFFF2E56).withValues(alpha: 0.22),
                     border: Border.all(
                         color: const Color(0xFFFF2E56), width: 1.5),
                     borderRadius: BorderRadius.circular(4),
@@ -1550,8 +1552,8 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
                       const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
                   decoration: BoxDecoration(
                     color: _comboStep == 2
-                        ? const Color(0xFFFF2E56).withOpacity(0.2)
-                        : const Color(0xFFFF9100).withOpacity(0.15),
+                        ? const Color(0xFFFF2E56).withValues(alpha: 0.2)
+                        : const Color(0xFFFF9100).withValues(alpha: 0.15),
                     border: Border.all(
                         color: _comboStep == 2
                             ? const Color(0xFFFF2E56)
@@ -1699,7 +1701,7 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
               color: (isQuotaExhausted
                       ? const Color(0xFFFF2E56)
                       : const Color(0xFFFFD700))
-                  .withOpacity(0.15),
+                  .withValues(alpha: 0.15),
               blurRadius: 25,
               spreadRadius: 2)
         ],
@@ -1713,7 +1715,7 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
               margin: const EdgeInsets.only(bottom: 16),
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: const Color(0xFFFF2E56).withOpacity(0.18),
+                color: const Color(0xFFFF2E56).withValues(alpha: 0.18),
                 border: Border.all(color: const Color(0xFFFF2E56), width: 1.5),
                 borderRadius: BorderRadius.circular(8),
               ),
@@ -1816,10 +1818,13 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
                   padding:
                       const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                   decoration: BoxDecoration(
-                    color:
-                        isMe ? kSystemBlue.withOpacity(0.12) : Colors.black38,
+                    color: isMe
+                        ? kSystemBlue.withValues(alpha: 0.12)
+                        : Colors.black38,
                     border: Border.all(
-                        color: isMe ? kSystemBlue : rankColor.withOpacity(0.5),
+                        color: isMe
+                            ? kSystemBlue
+                            : rankColor.withValues(alpha: 0.5),
                         width: isMe ? 2 : 1),
                     borderRadius: BorderRadius.circular(8),
                   ),
@@ -1980,12 +1985,12 @@ class _HunterJoinScreenState extends State<HunterJoinScreen>
               color: canPress
                   ? (hasButtonGlow ? glowColor : color)
                   : (isResting
-                      ? const Color(0xFFFF2E56).withOpacity(0.7)
+                      ? const Color(0xFFFF2E56).withValues(alpha: 0.7)
                       : Colors.white12),
               width: hasButtonGlow ? 2.5 : 1.5),
           backgroundColor: hasButtonGlow
-              ? glowColor.withOpacity(0.25)
-              : (canPress ? color.withOpacity(0.08) : Colors.black26),
+              ? glowColor.withValues(alpha: 0.25)
+              : (canPress ? color.withValues(alpha: 0.08) : Colors.black26),
         ),
         onPressed: canPress ? () => _handleExerciseTap(category, label) : null,
         child: Row(

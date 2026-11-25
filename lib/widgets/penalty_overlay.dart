@@ -16,6 +16,7 @@ class PenaltyOverlay extends StatelessWidget {
     try {
       await LockService.openEmergencyDialer();
     } catch (e) {
+      if (!context.mounted) return;
       _showError(context, "Erreur canal d'appel : $e");
     }
   }
@@ -24,6 +25,7 @@ class PenaltyOverlay extends StatelessWidget {
     try {
       await LockService.openEmergencySms();
     } catch (e) {
+      if (!context.mounted) return;
       _showError(context, "Erreur canal message : $e");
     }
   }
@@ -52,8 +54,9 @@ class PenaltyOverlay extends StatelessWidget {
         ),
         ElevatedButton(
           style: ElevatedButton.styleFrom(
-            backgroundColor: const Color(0xFF00E5FF).withOpacity(0.25),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            backgroundColor: const Color(0xFF00E5FF).withValues(alpha: 0.25),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             side: const BorderSide(color: Color(0xFF00E5FF)),
           ),
           onPressed: () async {
@@ -64,12 +67,14 @@ class PenaltyOverlay extends StatelessWidget {
             messenger.showSnackBar(
               SnackBar(
                 content: Text(result),
-                backgroundColor: granted ? const Color(0xFF00FF66) : Colors.redAccent,
+                backgroundColor:
+                    granted ? const Color(0xFF00FF66) : Colors.redAccent,
                 duration: const Duration(seconds: 4),
               ),
             );
           },
-          child: const Text("EXÉCUTER L'AMNISTIE", style: TextStyle(color: Colors.white)),
+          child: const Text("EXÉCUTER L'AMNISTIE",
+              style: TextStyle(color: Colors.white)),
         ),
       ],
     );
@@ -101,9 +106,10 @@ class PenaltyOverlay extends StatelessWidget {
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
                     border: Border.all(color: Colors.redAccent, width: 2),
-                    color: Colors.redAccent.withOpacity(0.1),
+                    color: Colors.redAccent.withValues(alpha: 0.1),
                   ),
-                  child: const Icon(Icons.error_outline, size: 60, color: Colors.redAccent),
+                  child: const Icon(Icons.error_outline,
+                      size: 60, color: Colors.redAccent),
                 ),
                 const SizedBox(height: 20),
                 Text(
@@ -133,7 +139,7 @@ class PenaltyOverlay extends StatelessWidget {
                   child: LinearProgressIndicator(
                     value: progressRatio,
                     color: Colors.redAccent,
-                    backgroundColor: Colors.red.withOpacity(0.2),
+                    backgroundColor: Colors.red.withValues(alpha: 0.2),
                     minHeight: 14,
                   ),
                 ),
@@ -167,11 +173,15 @@ class PenaltyOverlay extends StatelessWidget {
                           ),
                         ),
                         onPressed: () => _makeEmergencyCall(context),
-                        icon: const Icon(Icons.call, color: Colors.orange, size: 16),
+                        icon: const Icon(Icons.call,
+                            color: Colors.orange, size: 16),
                         label: Text(
                           "APPEL",
                           textAlign: TextAlign.center,
-                          style: GoogleFonts.orbitron(color: Colors.orange, fontSize: 12, fontWeight: FontWeight.bold),
+                          style: GoogleFonts.orbitron(
+                              color: Colors.orange,
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold),
                         ),
                       ),
                     ),
@@ -186,11 +196,15 @@ class PenaltyOverlay extends StatelessWidget {
                           ),
                         ),
                         onPressed: () => _sendEmergencySMS(context),
-                        icon: const Icon(Icons.message, color: Colors.orange, size: 16),
+                        icon: const Icon(Icons.message,
+                            color: Colors.orange, size: 16),
                         label: Text(
                           "MESSAGE",
                           textAlign: TextAlign.center,
-                          style: GoogleFonts.orbitron(color: Colors.orange, fontSize: 12, fontWeight: FontWeight.bold),
+                          style: GoogleFonts.orbitron(
+                              color: Colors.orange,
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold),
                         ),
                       ),
                     ),
@@ -203,17 +217,23 @@ class PenaltyOverlay extends StatelessWidget {
                     style: OutlinedButton.styleFrom(
                       foregroundColor: const Color(0xFF00E5FF),
                       side: const BorderSide(color: Color(0xFF00E5FF)),
-                      backgroundColor: const Color(0xFF00E5FF).withOpacity(0.08),
+                      backgroundColor:
+                          const Color(0xFF00E5FF).withValues(alpha: 0.08),
                       padding: const EdgeInsets.symmetric(vertical: 12),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(12),
                       ),
                     ),
-                    icon: const Icon(Icons.shield_moon_outlined, size: 16, color: Color(0xFF00E5FF)),
+                    icon: const Icon(Icons.shield_moon_outlined,
+                        size: 16, color: Color(0xFF00E5FF)),
                     label: Text(
                       "RECOURS D'URGENCE (AMNISTIE 1/30J)",
                       textAlign: TextAlign.center,
-                      style: GoogleFonts.orbitron(fontSize: 11, letterSpacing: 1, fontWeight: FontWeight.bold, color: const Color(0xFF00E5FF)),
+                      style: GoogleFonts.orbitron(
+                          fontSize: 11,
+                          letterSpacing: 1,
+                          fontWeight: FontWeight.bold,
+                          color: const Color(0xFF00E5FF)),
                     ),
                     onPressed: () => _showAmnestyConfirmDialog(context, game),
                   ),
@@ -227,7 +247,6 @@ class PenaltyOverlay extends StatelessWidget {
   }
 }
 
-// Bouton avec Cooldown anti-spam (2 secondes)
 class _HoldSquatsButton extends StatefulWidget {
   final VoidCallback onValidated;
 
@@ -244,7 +263,6 @@ class _HoldSquatsButtonState extends State<_HoldSquatsButton> {
 
   void _onTap() {
     final int now = DateTime.now().millisecondsSinceEpoch;
-    // Cooldown strict de 2 secondes
     if (now - _lastClickTime < 2000) {
       return;
     }
@@ -280,9 +298,12 @@ class _HoldSquatsButtonState extends State<_HoldSquatsButton> {
       height: 55,
       child: ElevatedButton(
         style: ElevatedButton.styleFrom(
-          backgroundColor: _isOnCooldown ? Colors.grey.shade900 : Colors.red.shade900,
+          backgroundColor:
+              _isOnCooldown ? Colors.grey.shade900 : Colors.red.shade900,
           foregroundColor: Colors.white,
-          side: BorderSide(color: _isOnCooldown ? Colors.grey.shade700 : Colors.redAccent, width: 2),
+          side: BorderSide(
+              color: _isOnCooldown ? Colors.grey.shade700 : Colors.redAccent,
+              width: 2),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(15),
           ),

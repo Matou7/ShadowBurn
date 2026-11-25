@@ -19,33 +19,34 @@ void callbackDispatcher() {
 
       final bool introDone = prefs.getBool('has_completed_intro') ?? false;
       if (!introDone) {
-        return Future.value(true);
+        return true;
       }
 
-      final bool isVolatile = prefs.getBool(StorageService.keySandboxVolatile) ?? false;
+      final bool isVolatile =
+          prefs.getBool(StorageService.keySandboxVolatile) ?? false;
       if (isVolatile) {
-        return Future.value(true);
+        return true;
       }
 
       final String? rawSave = prefs.getString('save_v3');
       if (rawSave == null || rawSave.isEmpty) {
-        return Future.value(true);
+        return true;
       }
 
       final dynamic decoded = jsonDecode(rawSave);
       if (decoded is! Map<String, dynamic>) {
-        return Future.value(true);
+        return true;
       }
 
       final String? lastReset = decoded['lastResetDate'] as String?;
       if (lastReset == null || lastReset.isEmpty) {
-        return Future.value(true);
+        return true;
       }
 
       final bool isSandbox = decoded['sandbox'] == true;
       final bool persistPenalty = decoded['godModePersistPenalty'] == true;
       if (isSandbox && !persistPenalty) {
-        return Future.value(true);
+        return true;
       }
 
       final now = DateTime.now();
@@ -56,7 +57,7 @@ void callbackDispatcher() {
       if (lastReset != todayStr) {
         final dynamic calendar = decoded['calendar'];
         bool isWhiteZone = false;
-        
+
         if (calendar is Map) {
           if (calendar[lastReset] is Map) {
             isWhiteZone = calendar[lastReset]['status'] == 'white_zone';
@@ -69,7 +70,8 @@ void callbackDispatcher() {
         final String rank = (decoded['rank'] as String?) ?? 'E';
         final RankConfig cfg = Balance.of(rank);
 
-        final int dailyCycles = (decoded['dailyCyclesCompleted'] as num?)?.toInt() ?? 0;
+        final int dailyCycles =
+            (decoded['dailyCyclesCompleted'] as num?)?.toInt() ?? 0;
         final int pompes = (decoded['pompes'] as num?)?.toInt() ?? 0;
         final int abdos = (decoded['abdos'] as num?)?.toInt() ?? 0;
         final int squats = (decoded['squats'] as num?)?.toInt() ?? 0;
@@ -87,7 +89,9 @@ void callbackDispatcher() {
 
           // Lecture du quota actuel de pénalité natif pour ajouter (et non empiler à l'infini)
           final penaltyState = await StorageService.readPenaltyState();
-          final int newGoal = penaltyState['active'] ? (penaltyState['squatsGoal'] + 100) : 100;
+          final int newGoal = penaltyState['active']
+              ? (penaltyState['squatsGoal'] + 100)
+              : 100;
           final int finalGoal = canOverlay ? newGoal : newGoal + 50;
 
           await StorageService.writePenaltyState(
@@ -95,7 +99,7 @@ void callbackDispatcher() {
             squatsDone: penaltyState['squatsDone'],
             squatsGoal: finalGoal,
           );
-          
+
           if (canOverlay) {
             await LockService.lockScreen(force: true);
           }
@@ -112,16 +116,16 @@ void callbackDispatcher() {
         decoded['squats'] = 0;
         decoded['dailyKm'] = 0.0;
         decoded['dailySteps'] = 0;
-        
+
         await prefs.setString('save_v3', jsonEncode(decoded));
       }
 
       // 2. PROTOCOLE ANTI-FLEMME : EXERCISE SNACKING
       await _checkAntiFlemmeSnacking(decoded, prefs, now);
 
-      return Future.value(true);
+      return true;
     } catch (_) {
-      return Future.value(false);
+      return false;
     }
   });
 }
@@ -137,10 +141,15 @@ Future<void> _checkAntiFlemmeSnacking(
   final String todayStr = now.toIso8601String().substring(0, 10);
 
   int currentTarget = -1;
-  if (now.hour >= 8 && now.hour < 10) currentTarget = 8;
-  else if (now.hour >= 12 && now.hour < 14) currentTarget = 12;
-  else if (now.hour >= 16 && now.hour < 18) currentTarget = 16;
-  else if (now.hour >= 20 && now.hour < 22) currentTarget = 20;
+  if (now.hour >= 8 && now.hour < 10) {
+    currentTarget = 8;
+  } else if (now.hour >= 12 && now.hour < 14) {
+    currentTarget = 12;
+  } else if (now.hour >= 16 && now.hour < 18) {
+    currentTarget = 16;
+  } else if (now.hour >= 20 && now.hour < 22) {
+    currentTarget = 20;
+  }
 
   if (currentTarget == -1) return;
 
@@ -151,26 +160,31 @@ Future<void> _checkAntiFlemmeSnacking(
   final Map<int, Map<String, String>> contextualQuotes = {
     8: {
       "title": "[ SNACKING 08:00 : RÉVEIL HARDWARE ]",
-      "body": "Les civils dorment encore. Enclenche le premier bloc : 10 pompes tempo 2-2-2."
+      "body":
+          "Les civils dorment encore. Enclenche le premier bloc : 10 pompes tempo 2-2-2."
     },
     12: {
       "title": "[ SNACKING 12:00 : RECHARGE INCINÉRATEUR ]",
-      "body": "Avant les munitions, paye ton tribut au Système. 15 squats explosifs maintenant."
+      "body":
+          "Avant les munitions, paye ton tribut au Système. 15 squats explosifs maintenant."
     },
     16: {
       "title": "[ SNACKING 16:00 : BRISE-INERTIE ]",
-      "body": "Baisse de tension détectée. Gainage vacuum et 10 abdos pour réveiller le Software."
+      "body":
+          "Baisse de tension détectée. Gainage vacuum et 10 abdos pour réveiller le Software."
     },
     20: {
       "title": "[ SNACKING 20:00 : DERNIÈRE LIGNE DROITE ]",
-      "body": "Minuit approche. La Zone de Pénalité attend les traînards. Boucle ton quota."
+      "body":
+          "Minuit approche. La Zone de Pénalité attend les traînards. Boucle ton quota."
     },
   };
 
-  final alert = contextualQuotes[currentTarget] ?? {
-    "title": "[ RAPPEL DE DISCIPLINE ]",
-    "body": "Validation des blocs exigée. Exécute tes répétitions."
-  };
+  final alert = contextualQuotes[currentTarget] ??
+      {
+        "title": "[ RAPPEL DE DISCIPLINE ]",
+        "body": "Validation des blocs exigée. Exécute tes répétitions."
+      };
 
   await NotificationService.init();
   await NotificationService.showAntiFlemmeAlert(
@@ -186,7 +200,8 @@ Future<void> _triggerPenaltyNotification() async {
   const androidDetails = AndroidNotificationDetails(
     'shadowburn_penalty_channel',
     'Zone de Pénalité',
-    channelDescription: 'Notifications critiques de non-accomplissement des quêtes',
+    channelDescription:
+        'Notifications critiques de non-accomplissement des quêtes',
     importance: Importance.max,
     priority: Priority.high,
     fullScreenIntent: true,
@@ -208,7 +223,6 @@ class MidnightExecutor {
   static Future<void> init() async {
     await Workmanager().initialize(
       callbackDispatcher,
-      isInDebugMode: false,
     );
 
     await Workmanager().registerPeriodicTask(

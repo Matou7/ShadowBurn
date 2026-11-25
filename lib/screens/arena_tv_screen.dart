@@ -9,7 +9,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import '../services/audio_service.dart';
 import '../services/quota_guard_service.dart';
 import '../services/lan_socket_service.dart';
-import 'arena_web_helper_stub.dart' if (dart.library.html) 'arena_web_helper_web.dart';
+import 'arena_web_helper_stub.dart'
+    if (dart.library.html) 'arena_web_helper_web.dart';
 
 class ArenaTvScreen extends StatefulWidget {
   const ArenaTvScreen({super.key});
@@ -44,13 +45,12 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
   bool _isWorldSaturated = false;
   bool _isNightLockActive = false;
   bool _isQuotaExhausted = false;
-  bool _isDespawnedForInactivity = false;
+  final bool _isDespawnedForInactivity = false;
   bool _isRadioPlaying = false;
 
   String _currentRaidStatus = 'waiting';
   double _currentBossHp = 5000.0;
 
-  int _lastRoomActivityMs = 0;
   int _lastKnownHunterCount = 0;
   double _lastKnownHp = 5000.0;
   String _lastKnownStatus = 'waiting';
@@ -99,7 +99,6 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _lastRoomActivityMs = DateTime.now().millisecondsSinceEpoch;
     _lanWsUrl = _resolveDefaultLanWsUrl();
 
     if (kIsWeb) {
@@ -262,10 +261,6 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
     if (mounted) setState(() {});
   }
 
-  void _recordActivity() {
-    _lastRoomActivityMs = DateTime.now().millisecondsSinceEpoch;
-  }
-
   void _markDormantAndStopAllTimers() {
     _queueRetryTimer?.cancel();
     _raidSubscription?.cancel();
@@ -406,8 +401,6 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
       }
     } catch (_) {}
 
-    _recordActivity();
-
     final fullUrl = Uri.decodeFull(Uri.base.toString());
     String? explicitRoom;
 
@@ -524,7 +517,6 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
     }
 
     _queueRetryTimer?.cancel();
-    _recordActivity();
 
     final ref =
         FirebaseFirestore.instance.collection('current_raids').doc(chosenRoom);
@@ -538,7 +530,6 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
       _raidRef = ref;
       _isAllocating = false;
       _isWorldSaturated = false;
-      _isDespawnedForInactivity = false;
     });
 
     _startListeningToRaid();
@@ -571,7 +562,6 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
         if (hunterCount != _lastKnownHunterCount ||
             hp != _lastKnownHp ||
             st != _lastKnownStatus) {
-          _recordActivity();
           _lastKnownHunterCount = hunterCount;
           _lastKnownHp = hp;
           _lastKnownStatus = st;
@@ -794,9 +784,9 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
               color: const Color(0xFF04101E),
               border: Border.all(color: const Color(0xFFFF2E56), width: 2),
             ),
-            child: Column(
+            child: const Column(
               mainAxisSize: MainAxisSize.min,
-              children: const [
+              children: [
                 Icon(Icons.lock_clock, color: Color(0xFFFF2E56), size: 64),
                 SizedBox(height: 20),
                 Text(
@@ -853,7 +843,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
                   padding:
                       const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFFF2E56).withOpacity(0.22),
+                    color: const Color(0xFFFF2E56).withValues(alpha: 0.22),
                     border:
                         Border.all(color: const Color(0xFFFF2E56), width: 1.5),
                   ),
@@ -890,9 +880,9 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
               color: const Color(0xFF04101E),
               border: Border.all(color: const Color(0xFFFF9100), width: 2),
             ),
-            child: Column(
+            child: const Column(
               mainAxisSize: MainAxisSize.min,
-              children: const [
+              children: [
                 CircularProgressIndicator(
                     color: Color(0xFFFF9100), strokeWidth: 3),
                 SizedBox(height: 24),
@@ -1062,7 +1052,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
                   padding:
                       const EdgeInsets.symmetric(vertical: 4, horizontal: 10),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFFF2E56).withOpacity(0.2),
+                    color: const Color(0xFFFF2E56).withValues(alpha: 0.2),
                     border: Border.all(color: const Color(0xFFFF2E56)),
                   ),
                   child: const Text(
@@ -1206,7 +1196,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
                         side: const BorderSide(
                             color: Color(0xFF00E5FF), width: 1.2),
                         backgroundColor:
-                            const Color(0xFF00E5FF).withOpacity(0.1),
+                            const Color(0xFF00E5FF).withValues(alpha: 0.1),
                         shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(4)),
                         padding: const EdgeInsets.symmetric(horizontal: 10),
@@ -1214,6 +1204,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
                       onPressed: (_isQuotaExhausted && !_isLanMode)
                           ? null
                           : () async {
+                              final messenger = ScaffoldMessenger.of(context);
                               if (!_isLanMode) {
                                 bool canWrite = await QuotaGuardService
                                     .checkAndIncrementWrite();
@@ -1235,18 +1226,17 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
                                       DateTime.now().millisecondsSinceEpoch,
                                 }).catchError((_) {});
                               }
+                              if (!mounted) return;
                               setState(() {});
-                              if (mounted) {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(
-                                    content: Text(playing
-                                        ? "[AUDIO] Lecture en cours..."
-                                        : "[AUDIO] Musique en pause."),
-                                    duration:
-                                        const Duration(milliseconds: 800),
-                                  ),
-                                );
-                              }
+                              messenger.showSnackBar(
+                                SnackBar(
+                                  content: Text(playing
+                                      ? "[AUDIO] Lecture en cours..."
+                                      : "[AUDIO] Musique en pause."),
+                                  duration:
+                                      const Duration(milliseconds: 800),
+                                ),
+                              );
                             },
                       icon: Icon(
                         AudioService.isPlaying ? Icons.pause : Icons.volume_up,
@@ -1306,7 +1296,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
                           color: (isPaused
                                   ? const Color(0xFFFF9100)
                                   : const Color(0xFFFF2E56))
-                              .withOpacity(0.8),
+                              .withValues(alpha: 0.8),
                           blurRadius: 8,
                           spreadRadius: 1,
                         ),
@@ -1393,7 +1383,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(
         color: Colors.black45,
-        border: Border.all(color: color.withOpacity(0.5)),
+        border: Border.all(color: color.withValues(alpha: 0.5)),
       ),
       child: Column(
         children: [
@@ -1444,8 +1434,8 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: const Color(0xFF04101E).withOpacity(0.8),
-        border: Border.all(color: const Color(0xFF00E5FF).withOpacity(0.5)),
+        color: const Color(0xFF04101E).withValues(alpha: 0.8),
+        border: Border.all(color: const Color(0xFF00E5FF).withValues(alpha: 0.5)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1455,7 +1445,8 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
             decoration: BoxDecoration(
               color: Colors.black54,
               border: Border.all(
-                  color: const Color(0xFFFFD700).withOpacity(0.6), width: 1.2),
+                  color: const Color(0xFFFFD700).withValues(alpha: 0.6),
+                  width: 1.2),
               borderRadius: BorderRadius.circular(4),
             ),
             child: Column(
@@ -1502,9 +1493,9 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
                           padding: const EdgeInsets.symmetric(
                               horizontal: 6, vertical: 4),
                           decoration: BoxDecoration(
-                            color: medalColor.withOpacity(0.08),
+                            color: medalColor.withValues(alpha: 0.08),
                             border: Border.all(
-                                color: medalColor.withOpacity(0.4)),
+                                color: medalColor.withValues(alpha: 0.4)),
                           ),
                           child: Row(
                             children: [
@@ -1715,7 +1706,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
             width: double.infinity,
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
             decoration: BoxDecoration(
-              color: const Color(0xFFFFD700).withOpacity(0.12),
+              color: const Color(0xFFFFD700).withValues(alpha: 0.12),
               border: Border.all(color: const Color(0xFFFFD700), width: 1),
             ),
             child: Text(
@@ -1761,7 +1752,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
                       decoration: BoxDecoration(
                         color: Colors.black45,
                         border: Border.all(
-                            color: const Color(0xFF00E5FF).withOpacity(0.5),
+                            color: const Color(0xFF00E5FF).withValues(alpha: 0.5),
                             width: 1),
                         borderRadius: BorderRadius.circular(4),
                       ),
@@ -1880,8 +1871,8 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: const Color(0xFF04101E).withOpacity(0.8),
-        border: Border.all(color: const Color(0xFF00E5FF).withOpacity(0.5)),
+        color: const Color(0xFF04101E).withValues(alpha: 0.8),
+        border: Border.all(color: const Color(0xFF00E5FF).withValues(alpha: 0.5)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1937,7 +1928,7 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
                         padding: const EdgeInsets.symmetric(
                             horizontal: 10, vertical: 6),
                         decoration: BoxDecoration(
-                          color: Colors.white.withOpacity(0.03),
+                          color: Colors.white.withValues(alpha: 0.03),
                           border: Border.all(color: Colors.white10),
                         ),
                         child: Row(
@@ -1998,9 +1989,9 @@ class _ArenaTvScreenState extends State<ArenaTvScreen>
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
       decoration: BoxDecoration(
-        color: const Color(0xFF04101E).withOpacity(0.9),
+        color: const Color(0xFF04101E).withValues(alpha: 0.9),
         border: Border.all(
-            color: const Color(0xFF00E5FF).withOpacity(0.6), width: 1.5),
+            color: const Color(0xFF00E5FF).withValues(alpha: 0.6), width: 1.5),
       ),
       child: LayoutBuilder(
         builder: (context, constraints) {

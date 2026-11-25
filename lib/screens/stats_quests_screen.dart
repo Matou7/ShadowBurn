@@ -81,7 +81,8 @@ class _StatsQuestsScreenState extends State<StatsQuestsScreen> {
     return "${hours.toString().padLeft(2, '0')}:${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}";
   }
 
-  void _showEditDailyStatDialog(BuildContext context, GameProvider game, String label, dynamic currentValue) {
+  void _showEditDailyStatDialog(BuildContext context, GameProvider game,
+      String label, dynamic currentValue) {
     final controller = TextEditingController(text: currentValue.toString());
     final String statKey = label.toLowerCase();
 
@@ -95,17 +96,22 @@ class _StatsQuestsScreenState extends State<StatsQuestsScreen> {
         decoration: const InputDecoration(
           labelText: "Nouvelle valeur",
           labelStyle: TextStyle(color: Colors.white54),
-          enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.redAccent)),
-          focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.red)),
+          enabledBorder: UnderlineInputBorder(
+              borderSide: BorderSide(color: Colors.redAccent)),
+          focusedBorder:
+              UnderlineInputBorder(borderSide: BorderSide(color: Colors.red)),
         ),
       ),
       color: Colors.redAccent,
       actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: const Text("ANNULER")),
+        TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text("ANNULER")),
         ElevatedButton(
           style: ElevatedButton.styleFrom(
             backgroundColor: Colors.redAccent,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
           ),
           onPressed: () {
             num? newVal = num.tryParse(controller.text.replaceAll(',', '.'));
@@ -118,23 +124,28 @@ class _StatsQuestsScreenState extends State<StatsQuestsScreen> {
             }
             Navigator.pop(context);
           },
-          child: const Text("MODIFIER", style: TextStyle(color: Colors.white)),
+          child:
+              const Text("MODIFIER", style: TextStyle(color: Colors.white)),
         ),
       ],
     );
   }
 
-  Future<void> _launchDynamicStripeCheckout(BuildContext context, GameProvider game) async {
+  Future<void> _launchDynamicStripeCheckout(
+      BuildContext context, GameProvider game) async {
     final messenger = ScaffoldMessenger.of(context);
     messenger.showSnackBar(
-      const SnackBar(content: Text("Génération du portail de paiement sécurisé..."), duration: Duration(seconds: 2)),
+      const SnackBar(
+          content: Text("Génération du portail de paiement sécurisé..."),
+          duration: Duration(seconds: 2)),
     );
 
     try {
       final String hardwareId = await game.getUniqueHardwareIdForCheckout();
 
       final response = await http.post(
-        Uri.parse('https://shadowburn-webhook.onrender.com/api/create-checkout-session'),
+        Uri.parse(
+            'https://shadowburn-webhook.onrender.com/api/create-checkout-session'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({'hardware_id': hardwareId}),
       );
@@ -150,12 +161,16 @@ class _StatsQuestsScreenState extends State<StatsQuestsScreen> {
         }
       } else {
         messenger.showSnackBar(
-          const SnackBar(content: Text("Erreur de connexion au serveur de paiement."), backgroundColor: Colors.redAccent),
+          const SnackBar(
+              content: Text("Erreur de connexion au serveur de paiement."),
+              backgroundColor: Colors.redAccent),
         );
       }
     } catch (e) {
       messenger.showSnackBar(
-        SnackBar(content: Text("Exception Stripe : $e"), backgroundColor: Colors.redAccent),
+        SnackBar(
+            content: Text("Exception Stripe : $e"),
+            backgroundColor: Colors.redAccent),
       );
     }
   }
@@ -180,8 +195,10 @@ class _StatsQuestsScreenState extends State<StatsQuestsScreen> {
             decoration: const InputDecoration(
               hintText: "Entrez votre clé Pro (ex: SHADOW-PRO-XXXX-YYYY)",
               hintStyle: TextStyle(color: Colors.white24, fontSize: 12),
-              enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Color(0xFFFFD700))),
-              focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: Color(0xFFFFD700))),
+              enabledBorder: UnderlineInputBorder(
+                  borderSide: BorderSide(color: Color(0xFFFFD700))),
+              focusedBorder: UnderlineInputBorder(
+                  borderSide: BorderSide(color: Color(0xFFFFD700))),
             ),
           ),
           const SizedBox(height: 20),
@@ -191,10 +208,12 @@ class _StatsQuestsScreenState extends State<StatsQuestsScreen> {
               style: OutlinedButton.styleFrom(
                 foregroundColor: const Color(0xFFFFD700),
                 side: const BorderSide(color: Color(0xFFFFD700)),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(4)),
               ),
               icon: const Icon(Icons.payment, size: 16),
-              label: const Text("COMMANDER LE PASS PRO (14,99 €)", style: TextStyle(fontFamily: 'monospace', fontSize: 11)),
+              label: const Text("COMMANDER LE PASS PRO (14,99 €)",
+                  style: TextStyle(fontFamily: 'monospace', fontSize: 11)),
               onPressed: () {
                 Navigator.pop(context);
                 _launchDynamicStripeCheckout(context, game);
@@ -209,18 +228,24 @@ class _StatsQuestsScreenState extends State<StatsQuestsScreen> {
             },
             child: const Text(
               "Déjà acheté ? Restaurer via l'empreinte de l'appareil",
-              style: TextStyle(color: Color(0xFF00E5FF), fontSize: 11, decoration: TextDecoration.underline),
+              style: TextStyle(
+                  color: Color(0xFF00E5FF),
+                  fontSize: 11,
+                  decoration: TextDecoration.underline),
             ),
           ),
         ],
       ),
       color: const Color(0xFFFFD700),
       actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: const Text("RETOUR")),
+        TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text("RETOUR")),
         ElevatedButton(
           style: ElevatedButton.styleFrom(
-            backgroundColor: const Color(0xFFFFD700).withOpacity(0.3),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+            backgroundColor: const Color(0xFFFFD700).withValues(alpha: 0.3),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
             side: const BorderSide(color: Color(0xFFFFD700)),
           ),
           onPressed: () async {
@@ -241,7 +266,9 @@ class _StatsQuestsScreenState extends State<StatsQuestsScreen> {
 
             messenger.showSnackBar(
               SnackBar(
-                content: Text(success ? "Éveil réussi ! Bienvenue, Monarque." : "Clé invalide, expirée ou déjà consommée."),
+                content: Text(success
+                    ? "Éveil réussi ! Bienvenue, Monarque."
+                    : "Clé invalide, expirée ou déjà consommée."),
                 backgroundColor: success ? Colors.green : Colors.redAccent,
               ),
             );
@@ -279,9 +306,13 @@ class _StatsQuestsScreenState extends State<StatsQuestsScreen> {
         child: Container(
           width: double.infinity,
           decoration: BoxDecoration(
-            border: Border.all(color: systemBlue.withOpacity(0.5), width: 2),
-            color: Colors.black.withOpacity(0.8),
-            boxShadow: [BoxShadow(color: systemBlue.withOpacity(0.15), blurRadius: 30)],
+            border:
+                Border.all(color: systemBlue.withValues(alpha: 0.5), width: 2),
+            color: Colors.black.withValues(alpha: 0.8),
+            boxShadow: [
+              BoxShadow(
+                  color: systemBlue.withValues(alpha: 0.15), blurRadius: 30)
+            ],
           ),
           child: Column(
             children: [
@@ -293,11 +324,13 @@ class _StatsQuestsScreenState extends State<StatsQuestsScreen> {
                     mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                     children: [
                       Container(
-                        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+                        padding: const EdgeInsets.symmetric(
+                            vertical: 8, horizontal: 16),
                         decoration: BoxDecoration(
-                          color: systemBlue.withOpacity(0.05),
+                          color: systemBlue.withValues(alpha: 0.05),
                           borderRadius: BorderRadius.circular(4),
-                          border: Border.all(color: systemBlue.withOpacity(0.2)),
+                          border: Border.all(
+                              color: systemBlue.withValues(alpha: 0.2)),
                         ),
                         child: Text(
                           _formatDuration(_secondsRemaining),
@@ -307,7 +340,9 @@ class _StatsQuestsScreenState extends State<StatsQuestsScreen> {
                             fontWeight: FontWeight.w500,
                             shadows: [
                               const Shadow(color: systemBlue, blurRadius: 15),
-                              Shadow(color: systemBlue.withOpacity(0.5), blurRadius: 30),
+                              Shadow(
+                                  color: systemBlue.withValues(alpha: 0.5),
+                                  blurRadius: 30),
                             ],
                           ),
                         ),
@@ -315,20 +350,31 @@ class _StatsQuestsScreenState extends State<StatsQuestsScreen> {
                       Text(
                         "[Quête Quotidienne : Préparation à la force.]",
                         textAlign: TextAlign.center,
-                        style: GoogleFonts.rajdhani(color: Colors.white70, fontSize: 14, fontStyle: FontStyle.italic),
+                        style: GoogleFonts.rajdhani(
+                            color: Colors.white70,
+                            fontSize: 14,
+                            fontStyle: FontStyle.italic),
                       ),
                       Column(
                         children: [
-                          Text("OBJECTIF", style: GoogleFonts.orbitron(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold, letterSpacing: 5)),
+                          Text("OBJECTIF",
+                              style: GoogleFonts.orbitron(
+                                  color: Colors.white,
+                                  fontSize: 20,
+                                  fontWeight: FontWeight.bold,
+                                  letterSpacing: 5)),
                           const SizedBox(height: 4),
                           Container(width: 60, height: 2, color: Colors.white38),
                         ],
                       ),
                       Column(
                         children: [
-                          _buildQuestGoal(context, game, "Pompes", game.pompesDone, game.goalPompes, systemBlue),
-                          _buildQuestGoal(context, game, "Abdos", game.abdosDone, game.goalAbdos, systemBlue),
-                          _buildQuestGoal(context, game, "Squats", game.squatsDone, game.goalSquats, systemBlue),
+                          _buildQuestGoal(context, game, "Pompes",
+                              game.pompesDone, game.goalPompes, systemBlue),
+                          _buildQuestGoal(context, game, "Abdos",
+                              game.abdosDone, game.goalAbdos, systemBlue),
+                          _buildQuestGoal(context, game, "Squats",
+                              game.squatsDone, game.goalSquats, systemBlue),
                           _buildQuestGoal(
                             context,
                             game,
@@ -345,21 +391,33 @@ class _StatsQuestsScreenState extends State<StatsQuestsScreen> {
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                         children: [
-                          _actionButton("POMPES", () => game.addReps("Pompes", 5), systemBlue),
-                          _actionButton("ABDOS", () => game.addReps("Abdos", 5), systemBlue),
-                          _actionButton("SQUATS", () => game.addReps("Squats", 5), systemBlue),
+                          _actionButton("POMPES",
+                              () => game.addReps("Pompes", 5), systemBlue),
+                          _actionButton("ABDOS",
+                              () => game.addReps("Abdos", 5), systemBlue),
+                          _actionButton("SQUATS",
+                              () => game.addReps("Squats", 5), systemBlue),
                         ],
                       ),
                       if (game.isClassChangeAvailable || game.isClassChangeActive)
                         _holoButton(
-                          game.isClassChangeActive ? "ÉPREUVE EN COURS" : "DÉFI DE CLASSE",
+                          game.isClassChangeActive
+                              ? "ÉPREUVE EN COURS"
+                              : "DÉFI DE CLASSE",
                           Colors.deepPurpleAccent,
-                          () => Navigator.push(context, MaterialPageRoute(builder: (context) => const ClassChangeQuestScreen())),
+                          () => Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                  builder: (context) =>
+                                      const ClassChangeQuestScreen())),
                         ),
                       Text(
                         "ATTENTION : L'échec de la quête entraînera une pénalité.",
                         textAlign: TextAlign.center,
-                        style: GoogleFonts.rajdhani(color: Colors.redAccent.withOpacity(0.8), fontSize: 12, fontWeight: FontWeight.bold),
+                        style: GoogleFonts.rajdhani(
+                            color: Colors.redAccent.withValues(alpha: 0.8),
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold),
                       ),
                       const SizedBox(height: 5),
                     ],
@@ -381,7 +439,8 @@ class _StatsQuestsScreenState extends State<StatsQuestsScreen> {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
-      decoration: BoxDecoration(border: Border(bottom: BorderSide(color: color.withOpacity(0.5)))),
+      decoration: BoxDecoration(
+          border: Border(bottom: BorderSide(color: color.withValues(alpha: 0.5)))),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
@@ -390,7 +449,12 @@ class _StatsQuestsScreenState extends State<StatsQuestsScreen> {
             children: [
               Icon(Icons.info_outline, color: color, size: 20),
               const SizedBox(width: 6),
-              Text("INFOS QUÊTE", style: GoogleFonts.orbitron(color: color, fontSize: 14, letterSpacing: 2, fontWeight: FontWeight.bold)),
+              Text("INFOS QUÊTE",
+                  style: GoogleFonts.orbitron(
+                      color: color,
+                      fontSize: 14,
+                      letterSpacing: 2,
+                      fontWeight: FontWeight.bold)),
             ],
           ),
           if (!game.isPro)
@@ -400,16 +464,22 @@ class _StatsQuestsScreenState extends State<StatsQuestsScreen> {
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
                   border: Border.all(color: const Color(0xFFFFD700)),
-                  color: const Color(0xFFFFD700).withOpacity(0.2),
+                  color: const Color(0xFFFFD700).withValues(alpha: 0.2),
                   borderRadius: BorderRadius.circular(4),
                 ),
-                child: Text("PASS PRO", style: GoogleFonts.orbitron(color: const Color(0xFFFFD700), fontSize: 9, fontWeight: FontWeight.bold)),
+                child: Text("PASS PRO",
+                    style: GoogleFonts.orbitron(
+                        color: const Color(0xFFFFD700),
+                        fontSize: 9,
+                        fontWeight: FontWeight.bold)),
               ),
             )
           else
             InkWell(
               onTap: () {
-                final fullKey = game.licenseKey.isNotEmpty ? game.licenseKey : _cachedShortKey;
+                final fullKey = game.licenseKey.isNotEmpty
+                    ? game.licenseKey
+                    : _cachedShortKey;
                 if (fullKey.isNotEmpty) {
                   Clipboard.setData(ClipboardData(text: fullKey));
                   ScaffoldMessenger.of(context).showSnackBar(
@@ -425,13 +495,14 @@ class _StatsQuestsScreenState extends State<StatsQuestsScreen> {
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
                   border: Border.all(color: Colors.amber),
-                  color: Colors.amber.withOpacity(0.18),
+                  color: Colors.amber.withValues(alpha: 0.18),
                   borderRadius: BorderRadius.circular(4),
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Icon(Icons.verified_user, color: Colors.amber, size: 12),
+                    const Icon(Icons.verified_user,
+                        color: Colors.amber, size: 12),
                     const SizedBox(width: 4),
                     Text(
                       displayKey,
@@ -463,8 +534,10 @@ class _StatsQuestsScreenState extends State<StatsQuestsScreen> {
     bool isTracking = false,
   }) {
     bool isDone = current >= goal;
-    String currentStr = isKm ? (current as double).toStringAsFixed(1) : current.toString();
-    String goalStr = isKm ? "${(goal as double).toStringAsFixed(1)}km" : goal.toString();
+    String currentStr =
+        isKm ? (current as double).toStringAsFixed(1) : current.toString();
+    String goalStr =
+        isKm ? "${(goal as double).toStringAsFixed(1)}km" : goal.toString();
 
     return GestureDetector(
       onLongPress: () {
@@ -492,7 +565,8 @@ class _StatsQuestsScreenState extends State<StatsQuestsScreen> {
                   if (game.isGodMode)
                     const Padding(
                       padding: EdgeInsets.only(left: 6),
-                      child: Icon(Icons.edit, size: 12, color: Colors.redAccent),
+                      child:
+                          Icon(Icons.edit, size: 12, color: Colors.redAccent),
                     ),
                   if (isKm) ...[
                     const SizedBox(width: 6),
@@ -502,7 +576,9 @@ class _StatsQuestsScreenState extends State<StatsQuestsScreen> {
                       child: Padding(
                         padding: const EdgeInsets.all(2),
                         child: Icon(
-                          isTracking ? Icons.pause_circle_filled : Icons.play_circle_fill,
+                          isTracking
+                              ? Icons.pause_circle_filled
+                              : Icons.play_circle_fill,
                           color: color,
                           size: 20,
                         ),
@@ -538,11 +614,13 @@ class _StatsQuestsScreenState extends State<StatsQuestsScreen> {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         decoration: BoxDecoration(
-          border: Border.all(color: color.withOpacity(0.5)),
+          border: Border.all(color: color.withValues(alpha: 0.5)),
           borderRadius: BorderRadius.circular(4),
-          color: color.withOpacity(0.1),
+          color: color.withValues(alpha: 0.1),
         ),
-        child: Text(label, style: GoogleFonts.orbitron(color: color, fontSize: 11, fontWeight: FontWeight.bold)),
+        child: Text(label,
+            style: GoogleFonts.orbitron(
+                color: color, fontSize: 11, fontWeight: FontWeight.bold)),
       ),
     );
   }
@@ -555,10 +633,16 @@ class _StatsQuestsScreenState extends State<StatsQuestsScreen> {
         padding: const EdgeInsets.symmetric(vertical: 10),
         decoration: BoxDecoration(
           border: Border.all(color: color),
-          color: color.withOpacity(0.2),
+          color: color.withValues(alpha: 0.2),
           borderRadius: BorderRadius.circular(4),
         ),
-        child: Center(child: Text(text, style: GoogleFonts.orbitron(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold, letterSpacing: 2))),
+        child: Center(
+            child: Text(text,
+                style: GoogleFonts.orbitron(
+                    color: Colors.white,
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 2))),
       ),
     );
   }

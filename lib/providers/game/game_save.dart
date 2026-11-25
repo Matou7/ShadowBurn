@@ -55,11 +55,13 @@ mixin _SaveLogic on _GameBase {
     int checkedDays = 0;
 
     for (int i = 0; i < 60; i++) {
-      final checkDate = DateTime.utc(now.year, now.month, now.day).subtract(Duration(days: i));
+      final checkDate =
+          DateTime.utc(now.year, now.month, now.day).subtract(Duration(days: i));
       final dateKey =
           "${checkDate.year}-${checkDate.month.toString().padLeft(2, '0')}-${checkDate.day.toString().padLeft(2, '0')}";
       final dynamic entry = _calendarHistory[dateKey];
-      final String? status = entry is Map ? entry['status']?.toString() : entry?.toString();
+      final String? status =
+          entry is Map ? entry['status']?.toString() : entry?.toString();
 
       if (status != 'gold') {
         allGold = false;
@@ -174,7 +176,15 @@ mixin _SaveLogic on _GameBase {
     final dynamic lr = j['lastResetDate'];
     _lastResetDateStr = (lr is String && lr.isNotEmpty) ? lr : null;
 
-    _inventoryKeys = {"E": 0, "D": 0, "C": 0, "B": 0, "A": 0, "S": 0, "NATION": 0};
+    _inventoryKeys = {
+      "E": 0,
+      "D": 0,
+      "C": 0,
+      "B": 0,
+      "A": 0,
+      "S": 0,
+      "NATION": 0
+    };
     asMap(j['keys']).forEach((k, v) => _inventoryKeys[k] = max(0, asInt(v)));
 
     _isPro = asBool(j['isPro']);
@@ -209,7 +219,11 @@ mixin _SaveLogic on _GameBase {
     _totalSquats = max(0, asInt(j['totalSquats']));
 
     final double rawTotalKm = max(0.0, asDouble(j['totalKm']));
-    if (rawTotalKm == 100.0 && _totalPompes == 0 && _totalAbdos == 0 && _totalSquats == 0 && _dailySteps == 0) {
+    if (rawTotalKm == 100.0 &&
+        _totalPompes == 0 &&
+        _totalAbdos == 0 &&
+        _totalSquats == 0 &&
+        _dailySteps == 0) {
       _totalKm = 0.0;
     } else {
       _totalKm = rawTotalKm;
@@ -257,7 +271,6 @@ mixin _SaveLogic on _GameBase {
       }
     }
     _isActiveDungeonRed = _activeDungeon != null && asBool(j['dungeonRed']);
-    _warningGiven = false;
 
     final DateTime nowT = DateTime.now();
     _activeThreats = [];
@@ -271,7 +284,8 @@ mixin _SaveLogic on _GameBase {
     _isSurpassQuest = asBool(j['surpassQuest']);
 
     final String loadedPwd = asString(j['adminPassword'], kMasterAdminPassword);
-    _adminPassword = loadedPwd.trim().isNotEmpty ? loadedPwd.trim() : kMasterAdminPassword;
+    _adminPassword =
+        loadedPwd.trim().isNotEmpty ? loadedPwd.trim() : kMasterAdminPassword;
 
     final dynamic urgentJson = j['urgent'];
     if (_urgent != null) {
@@ -282,7 +296,8 @@ mixin _SaveLogic on _GameBase {
         _urgent!.resetStatus();
       }
     } else {
-      _pendingUrgentJson = urgentJson is Map ? Map<String, dynamic>.from(urgentJson) : null;
+      _pendingUrgentJson =
+          urgentJson is Map ? Map<String, dynamic>.from(urgentJson) : null;
     }
 
     _syncStatsToRank();

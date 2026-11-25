@@ -1,8 +1,6 @@
 // lib/screens/system_check_screen.dart
 
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
-import '../providers/game_provider.dart';
 
 class SystemCheckScreen extends StatefulWidget {
   const SystemCheckScreen({super.key});
@@ -24,6 +22,7 @@ class _SystemCheckScreenState extends State<SystemCheckScreen> {
 
   Future<void> _auditSystem() async {
     await Future.delayed(const Duration(seconds: 1));
+    if (!mounted) return;
     setState(() {
       _hasOverlayPermission = true;
       _hasStepPermission = true;
@@ -57,11 +56,11 @@ class _SystemCheckScreenState extends State<SystemCheckScreen> {
                 style: TextStyle(color: Colors.white70, fontSize: 14),
               ),
               const SizedBox(height: 40),
-              
               _isLoading
                   ? const Expanded(
                       child: Center(
-                        child: CircularProgressIndicator(color: Colors.cyanAccent),
+                        child: CircularProgressIndicator(
+                            color: Colors.cyanAccent),
                       ),
                     )
                   : Expanded(
@@ -90,9 +89,10 @@ class _SystemCheckScreenState extends State<SystemCheckScreen> {
                                   borderRadius: BorderRadius.circular(12),
                                 ),
                               ),
-                              onPressed: (_hasOverlayPermission && _hasStepPermission)
-                                  ? () => Navigator.of(context).pop()
-                                  : null,
+                              onPressed:
+                                  (_hasOverlayPermission && _hasStepPermission)
+                                      ? () => Navigator.of(context).pop()
+                                      : null,
                               child: const Text(
                                 "SYNCHRONISATION TERMINÉE",
                                 style: TextStyle(
