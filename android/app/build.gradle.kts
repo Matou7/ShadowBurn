@@ -1,4 +1,5 @@
 import java.util.Properties
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 val localProperties = Properties()
 val localPropertiesFile = rootProject.file("local.properties")
@@ -20,12 +21,14 @@ android {
     compileSdk = 36
 
     sourceSets {
-        getByName("main").java.srcDirs("src/main/kotlin")
+        getByName("main") {
+            java.directories.add("src/main/kotlin")
+        }
     }
 
     defaultConfig {
         applicationId = "com.example.shadowburnv2"
-        minSdk = flutter.minSdkVersion 
+        minSdk = flutter.minSdkVersion
         targetSdk = 36
         versionCode = flutterVersionCode.toInt()
         versionName = flutterVersionName
@@ -38,10 +41,6 @@ android {
         isCoreLibraryDesugaringEnabled = true
     }
 
-    kotlinOptions {
-        jvmTarget = "17"
-    }
-
     buildTypes {
         getByName("release") {
             signingConfig = signingConfigs.getByName("debug")
@@ -49,6 +48,12 @@ android {
         getByName("debug") {
             signingConfig = signingConfigs.getByName("debug")
         }
+    }
+}
+
+kotlin {
+    compilerOptions {
+        jvmTarget.set(JvmTarget.JVM_17)
     }
 }
 
