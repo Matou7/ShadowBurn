@@ -33,7 +33,7 @@ dependencies:
   vibration: ^2.0.1
 
   # Arrière-plan natif
-  workmanager: ^0.9.3
+  workmanager: ^0.10.10
 
   # Audio
   audioplayers: ^5.2.1
