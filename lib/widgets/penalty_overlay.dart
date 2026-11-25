@@ -1,5 +1,3 @@
-// lib/widgets/penalty_overlay.dart
-
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -37,6 +35,7 @@ class PenaltyOverlay extends StatelessWidget {
   }
 
   void _showAmnestyConfirmDialog(BuildContext context, GameProvider game) {
+    LockService.grantEmergencyGrace();
     SystemDialog.show(
       context,
       title: "RECOURS D'URGENCE (AMNISTIE)",
@@ -88,8 +87,9 @@ class PenaltyOverlay extends StatelessWidget {
       return const IgnorePointer(child: SizedBox.shrink());
     }
 
-    const int goal = 100;
-    final double progressRatio = (game.penaltySquatsDone / goal).clamp(0.0, 1.0);
+    final int goal = game.penaltyGoal > 0 ? game.penaltyGoal : 100;
+    final double progressRatio =
+        (game.penaltySquatsDone / goal).clamp(0.0, 1.0);
 
     return Material(
       color: Colors.black,

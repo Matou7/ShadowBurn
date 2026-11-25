@@ -1,4 +1,3 @@
-// lib/providers/game/game_penalty.dart
 part of '../game_provider.dart';
 
 mixin _PenaltyLogic on _GameBase {
@@ -8,6 +7,12 @@ mixin _PenaltyLogic on _GameBase {
     _isInPenaltyZone = true;
     _penaltySquatsDone = squatsDone;
     _kPenaltyGoal = squatsGoal > 0 ? squatsGoal : 100;
+    StorageService.writePenaltyState(
+      active: true,
+      squatsDone: _penaltySquatsDone,
+      squatsGoal: _kPenaltyGoal,
+    );
+    LockService.lockScreen(force: true);
     _notify();
   }
 
@@ -62,13 +67,13 @@ mixin _PenaltyLogic on _GameBase {
   }
 
   void _applyPenaltyLockAndPersist() {
+    _isInPenaltyZone = true;
+
     StorageService.writePenaltyState(
       active: true,
       squatsDone: _penaltySquatsDone,
       squatsGoal: _kPenaltyGoal,
     );
-
-    _isInPenaltyZone = true;
 
     if (_sandbox && SandboxManager.persistPenalty) {
       SandboxManager.saveSandbox(_toJson());
@@ -109,9 +114,8 @@ mixin _PenaltyLogic on _GameBase {
           _saveNow();
         }
 
-        _notify();
-
         LockService.unlockScreen(force: true);
+        _notify();
 
         NotificationService.showNotification(
           "PÉNALITÉ PURGÉE",
@@ -132,6 +136,7 @@ mixin _PenaltyLogic on _GameBase {
             _saveNow();
           }
         }
+        LockService.lockScreen(force: true);
         _notify();
       }
     } catch (e) {

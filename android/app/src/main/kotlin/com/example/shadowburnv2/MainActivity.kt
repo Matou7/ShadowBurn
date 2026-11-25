@@ -21,13 +21,13 @@ import java.net.Inet4Address
 import java.net.NetworkInterface
 import java.util.Collections
 
-class MainActivity: FlutterActivity() {
-    private val PRIMARY_CHANNEL = "com.shadowburn.app/lock"
-    private val LEGACY_CHANNEL = "com.shadowburn.lock/channel"
-    private val INTENT_CHANNEL = "com.shadowburn.app/intents"
+class MainActivity : FlutterActivity() {
+    private val primaryChannelName = "com.shadowburn.app/lock"
+    private val legacyChannelName = "com.shadowburn.lock/channel"
+    private val intentChannelName = "com.shadowburn.app/intents"
 
-    private val TERMUX_RUN_COMMAND_PERMISSION = "com.termux.permission.RUN_COMMAND"
-    private val REQUEST_CODE_TERMUX_PERMISSION = 1042
+    private val termuxRunCommandPermission = "com.termux.permission.RUN_COMMAND"
+    private val requestCodeTermuxPermission = 1042
 
     private var lastIntentUrl: String? = null
     private var primaryMethodChannel: MethodChannel? = null
@@ -45,8 +45,8 @@ class MainActivity: FlutterActivity() {
         } else {
             window.addFlags(
                 WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
-                WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
-                WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+                    WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
+                    WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
             )
         }
 
@@ -57,14 +57,20 @@ class MainActivity: FlutterActivity() {
         checkAndEnforcePenaltyOnStartup()
     }
 
+    private fun setPenaltyFlag(active: Boolean) {
+        val prefs = getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
+        prefs.edit()
+            .putBoolean("flutter.cerberus_penalty_active", active)
+            .putBoolean("cerberus_penalty_active", active)
+            .commit()
+    }
+
     private fun checkAndEnforcePenaltyOnStartup() {
         try {
-            val prefs = getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
-            val isPrefPrefixed = prefs.getBoolean("flutter.cerberus_penalty_active", false)
-            val isPrefRaw = prefs.getBoolean("cerberus_penalty_active", false)
-
-            if (isPrefPrefixed || isPrefRaw) {
+            if (CoreWatcherService.isPenaltyActiveInPrefs(this)) {
                 startCoreWatcherService()
+            } else {
+                stopCoreWatcherService()
             }
         } catch (e: Exception) {
             e.printStackTrace()
@@ -104,7 +110,7 @@ class MainActivity: FlutterActivity() {
         grantResults: IntArray
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == REQUEST_CODE_TERMUX_PERMISSION) {
+        if (requestCode == requestCodeTermuxPermission) {
             val granted = grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED
             pendingTermuxPermissionResult?.success(granted)
             pendingTermuxPermissionResult = null
@@ -133,7 +139,7 @@ class MainActivity: FlutterActivity() {
             ip.startsWith("169.254.")
     }
 
-    private fun detectLocalLanCandidates(): List<Map<String, String>> {
+    private fun detectLocalLanCandidates(): List> {
         val candidates = mutableListOf<Triple<Int, String, String>>()
         try {
             val rawInterfaces = NetworkInterface.getNetworkInterfaces() ?: return emptyList()
@@ -154,12 +160,12 @@ class MainActivity: FlutterActivity() {
                         }
                         val priority = when {
                             ifaceName.startsWith("ap") ||
-                            ifaceName.startsWith("swlan") ||
-                            ifaceName.startsWith("rndis") ||
-                            ifaceName.startsWith("softap") ||
-                            ifaceName == "wlan1" -> 1
+                                ifaceName.startsWith("swlan") ||
+                                ifaceName.startsWith("rndis") ||
+                                ifaceName.startsWith("softap") ||
+                                ifaceName == "wlan1" -> 1
                             ifaceName.startsWith("wlan") ||
-                            ifaceName.startsWith("eth") -> 2
+                                ifaceName.startsWith("eth") -> 2
                             addr.isSiteLocalAddress -> 3
                             else -> 4
                         }
@@ -201,42 +207,33 @@ class MainActivity: FlutterActivity() {
                 }
 
                 "lockScreen" -> {
-                    startCoreWatcherService()
                     try {
-                        val prefs = getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
-                        prefs.edit()
-                            .putBoolean("flutter.cerberus_penalty_active", true)
-                            .putBoolean("cerberus_penalty_active", true)
-                            .apply()
+                        setPenaltyFlag(true)
+                        startCoreWatcherService()
                     } catch (_: Exception) {}
-
                     result.success(true)
                 }
 
                 "unlockScreen" -> {
-                    stopCoreWatcherService()
                     try {
-                        val prefs = getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
-                        prefs.edit()
-                            .putBoolean("flutter.cerberus_penalty_active", false)
-                            .putBoolean("cerberus_penalty_active", false)
-                            .apply()
+                        setPenaltyFlag(false)
+                        stopCoreWatcherService()
                     } catch (_: Exception) {}
+                    result.success(true)
+                }
 
+                "grantEmergencyGrace", "resetEmergencyExemption" -> {
+                    CoreWatcherService.grantEmergencyGrace(this)
                     result.success(true)
                 }
 
                 "openEmergencyDialer" -> {
-                    try {
-                        val graceIntent = Intent(this, CoreWatcherService::class.java).apply {
-                            action = "ACTION_EMERGENCY_GRACE"
-                        }
-                        startService(graceIntent)
-                    } catch (_: Exception) {}
-
+                    CoreWatcherService.grantEmergencyGrace(this)
                     try {
                         val intent = Intent(Intent.ACTION_DIAL).apply {
-                            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                            flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                                Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                                Intent.FLAG_ACTIVITY_SINGLE_TOP
                         }
                         startActivity(intent)
                         overridePendingTransition(0, 0)
@@ -245,16 +242,12 @@ class MainActivity: FlutterActivity() {
                 }
 
                 "openEmergencySms" -> {
-                    try {
-                        val graceIntent = Intent(this, CoreWatcherService::class.java).apply {
-                            action = "ACTION_EMERGENCY_GRACE"
-                        }
-                        startService(graceIntent)
-                    } catch (_: Exception) {}
-
+                    CoreWatcherService.grantEmergencyGrace(this)
                     try {
                         val intent = Intent(Intent.ACTION_VIEW, Uri.parse("sms:")).apply {
-                            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                            flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                                Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                                Intent.FLAG_ACTIVITY_SINGLE_TOP
                         }
                         startActivity(intent)
                         overridePendingTransition(0, 0)
@@ -268,16 +261,6 @@ class MainActivity: FlutterActivity() {
                             overridePendingTransition(0, 0)
                         } catch (_: Exception) {}
                     }
-                    result.success(true)
-                }
-
-                "resetEmergencyExemption" -> {
-                    try {
-                        val graceIntent = Intent(this, CoreWatcherService::class.java).apply {
-                            action = "ACTION_EMERGENCY_GRACE"
-                        }
-                        startService(graceIntent)
-                    } catch (_: Exception) {}
                     result.success(true)
                 }
 
@@ -320,8 +303,8 @@ class MainActivity: FlutterActivity() {
                         pendingTermuxPermissionResult = result
                         ActivityCompat.requestPermissions(
                             this,
-                            arrayOf(TERMUX_RUN_COMMAND_PERMISSION),
-                            REQUEST_CODE_TERMUX_PERMISSION
+                            arrayOf(termuxRunCommandPermission),
+                            requestCodeTermuxPermission
                         )
                     } else {
                         openAppDetailsFallback()
@@ -361,13 +344,13 @@ class MainActivity: FlutterActivity() {
             }
         }
 
-        primaryMethodChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, PRIMARY_CHANNEL).apply {
+        primaryMethodChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, primaryChannelName).apply {
             setMethodCallHandler(handler)
         }
-        legacyMethodChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, LEGACY_CHANNEL).apply {
+        legacyMethodChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, legacyChannelName).apply {
             setMethodCallHandler(handler)
         }
-        intentMethodChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, INTENT_CHANNEL).apply {
+        intentMethodChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, intentChannelName).apply {
             setMethodCallHandler(handler)
         }
     }
@@ -387,7 +370,7 @@ class MainActivity: FlutterActivity() {
 
     private fun isTermuxPermissionGranted(): Boolean {
         return try {
-            ContextCompat.checkSelfPermission(this, TERMUX_RUN_COMMAND_PERMISSION) ==
+            ContextCompat.checkSelfPermission(this, termuxRunCommandPermission) ==
                 PackageManager.PERMISSION_GRANTED
         } catch (_: Exception) {
             false

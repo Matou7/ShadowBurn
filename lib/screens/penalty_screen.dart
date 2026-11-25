@@ -1,4 +1,3 @@
-// lib/screens/penalty_screen.dart
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -28,6 +27,7 @@ class PenaltyScreen extends StatelessWidget {
   }
 
   void _showAmnestyConfirmDialog(BuildContext context, GameProvider game) {
+    LockService.grantEmergencyGrace();
     SystemDialog.show(
       context,
       title: "RECOURS D'URGENCE (AMNISTIE)",
@@ -77,8 +77,8 @@ class PenaltyScreen extends StatelessWidget {
     const Color penaltyRed = Color(0xFFFF2E56);
 
     final int done = game.penaltySquatsDone;
-    final int goal = game.penaltyGoal;
-    final double ratio = (goal > 0) ? (done / goal).clamp(0.0, 1.0) : 0.0;
+    final int goal = game.penaltyGoal > 0 ? game.penaltyGoal : 100;
+    final double ratio = (done / goal).clamp(0.0, 1.0);
 
     return PopScope(
       canPop: false,

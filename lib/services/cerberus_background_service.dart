@@ -1,5 +1,3 @@
-// lib/services/cerberus_background_service.dart
-
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:workmanager/workmanager.dart';
@@ -13,6 +11,8 @@ void cerberusCallbackDispatcher() {
       final penaltyState = await StorageService.readPenaltyState();
       if (penaltyState['active'] == true) {
         await LockService.lockScreen(force: true);
+      } else {
+        await LockService.unlockScreen(force: true);
       }
     } catch (_) {}
     return Future.value(true);
@@ -41,11 +41,14 @@ class CerberusBackgroundService {
       taskName,
       taskName,
       frequency: const Duration(minutes: 15),
+      existingWorkPolicy: ExistingPeriodicWorkPolicy.keep,
     );
   }
 
   static Future<void> stopPeriodicCheck() async {
-    await Workmanager().cancelByUniqueName(taskName);
+    try {
+      await Workmanager().cancelByUniqueName(taskName);
+    } catch (_) {}
     previousLevel = 1;
     currentLevel = 1;
     previousMaxHealth = 100;
@@ -65,7 +68,8 @@ class CerberusBackgroundService {
       final int currentMaxHealth =
           (data['maxHealth'] as num?)?.toInt() ?? previousMaxHealth;
 
-      if (currentLevel > previousLevel || currentMaxHealth != previousMaxHealth) {
+      if (currentLevel > previousLevel ||
+          currentMaxHealth != previousMaxHealth) {
         previousLevel = currentLevel;
         previousMaxHealth = currentMaxHealth;
         await FirebaseFirestore.instance

@@ -13,37 +13,50 @@ class BootReceiver : BroadcastReceiver() {
         if (currentAction == Intent.ACTION_BOOT_COMPLETED ||
             currentAction == Intent.ACTION_MY_PACKAGE_REPLACED ||
             currentAction == "android.intent.action.QUICKBOOT_POWERON" ||
-            currentAction == "ACTION_CERBERUS_RESURRECT") {
-
+            currentAction == "com.htc.intent.action.QUICKBOOT_POWERON" ||
+            currentAction == "ACTION_CERBERUS_RESURRECT"
+        ) {
             try {
-                val sharedPreferences = context.getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
-                val isPrefPrefixed = sharedPreferences.getBoolean("flutter.cerberus_penalty_active", false)
-                val isPrefRaw = sharedPreferences.getBoolean("cerberus_penalty_active", false)
-
-                if (isPrefPrefixed || isPrefRaw) {
+                if (CoreWatcherService.isPenaltyActiveInPrefs(context)) {
                     val resurrectionIntent = Intent(context, BootReceiver::class.java).apply {
-                        setAction("ACTION_CERBERUS_RESURRECT")
+                        action = "ACTION_CERBERUS_RESURRECT"
                     }
-                    
+
                     val pFlags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                         PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
                     } else {
                         PendingIntent.FLAG_UPDATE_CURRENT
                     }
-                    
-                    val broadcastPendingIntent = PendingIntent.getBroadcast(context, 9999, resurrectionIntent, pFlags)
-                    val alarmManagerService = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager
-                    
+
+                    val broadcastPendingIntent = PendingIntent.getBroadcast(
+                        context,
+                        9999,
+                        resurrectionIntent,
+                        pFlags
+                    )
+                    val alarmManagerService =
+                        context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager
+
                     if (alarmManagerService != null) {
-                        val triggerEpochTime = System.currentTimeMillis() + 10L // Résurrection en 10 ms
+                        val triggerEpochTime = System.currentTimeMillis() + 16000L
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                            alarmManagerService.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerEpochTime, broadcastPendingIntent)
+                            alarmManagerService.setExactAndAllowWhileIdle(
+                                AlarmManager.RTC_WAKEUP,
+                                triggerEpochTime,
+                                broadcastPendingIntent
+                            )
                         } else {
-                            alarmManagerService.setExact(AlarmManager.RTC_WAKEUP, triggerEpochTime, broadcastPendingIntent)
+                            alarmManagerService.setExact(
+                                AlarmManager.RTC_WAKEUP,
+                                triggerEpochTime,
+                                broadcastPendingIntent
+                            )
                         }
                     }
 
-                    val watcherServiceIntent = Intent(context, CoreWatcherService::class.java)
+                    val watcherServiceIntent = Intent(context, CoreWatcherService::class.java).apply {
+                        action = "ACTION_FORCE_BRING_TO_FRONT"
+                    }
                     try {
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                             context.startForegroundService(watcherServiceIntent)
@@ -53,14 +66,6 @@ class BootReceiver : BroadcastReceiver() {
                     } catch (e: Exception) {
                         e.printStackTrace()
                     }
-
-                    val mainActivityLaunchIntent = Intent(context, MainActivity::class.java).apply {
-                        flags = Intent.FLAG_ACTIVITY_NEW_TASK or 
-                                Intent.FLAG_ACTIVITY_SINGLE_TOP or 
-                                Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or
-                                0x00800000 or 0x00200000
-                    }
-                    context.startActivity(mainActivityLaunchIntent)
                 }
             } catch (exception: Exception) {
                 exception.printStackTrace()

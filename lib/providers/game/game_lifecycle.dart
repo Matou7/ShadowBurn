@@ -1,4 +1,3 @@
-// lib/providers/game/game_lifecycle.dart
 part of '../game_provider.dart';
 
 mixin _LifecycleLogic on _GameBase {
@@ -104,7 +103,13 @@ mixin _LifecycleLogic on _GameBase {
     if (!_isInPenaltyZone || (_sandbox && !_godModePersistPenalty)) {
       _isInPenaltyZone = false;
       _penaltySquatsDone = 0;
+      StorageService.writePenaltyState(
+        active: false,
+        squatsDone: 0,
+        squatsGoal: 100,
+      );
       await SandboxManager.clearNativePenalty();
+      await LockService.unlockScreen(force: true);
     }
 
     _steps.configure(baseline: baseline, onEvent: _onSteps);
@@ -119,7 +124,7 @@ mixin _LifecycleLogic on _GameBase {
 
     final DateTime now = DateTime.now();
     if (_activeDungeon != null) {
-      LockService.lockScreen();
+      await LockService.lockScreen(force: true);
     } else {
       final expiredThreatIndex =
           _activeThreats.indexWhere((t) => now.isAfter(t.expiresAt));
@@ -155,7 +160,12 @@ mixin _LifecycleLogic on _GameBase {
     }
 
     if (_isInPenaltyZone && (!_sandbox || _godModePersistPenalty)) {
-      Future.microtask(() => LockService.lockScreen());
+      StorageService.writePenaltyState(
+        active: true,
+        squatsDone: _penaltySquatsDone,
+        squatsGoal: _kPenaltyGoal,
+      );
+      await LockService.lockScreen(force: true);
     }
   }
 
@@ -213,7 +223,7 @@ mixin _LifecycleLogic on _GameBase {
 
       final DateTime now = DateTime.now();
       if (_activeDungeon != null) {
-        LockService.lockScreen();
+        LockService.lockScreen(force: true);
       } else {
         final expiredIndex =
             _activeThreats.indexWhere((t) => now.isAfter(t.expiresAt));
@@ -232,7 +242,14 @@ mixin _LifecycleLogic on _GameBase {
       }
 
       if (_isInPenaltyZone && (!_sandbox || _godModePersistPenalty)) {
-        LockService.lockScreen();
+        StorageService.writePenaltyState(
+          active: true,
+          squatsDone: _penaltySquatsDone,
+          squatsGoal: _kPenaltyGoal,
+        );
+        LockService.lockScreen(force: true);
+      } else {
+        LockService.unlockScreen(force: true);
       }
       _notify();
     } else if (state == AppLifecycleState.paused ||

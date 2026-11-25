@@ -1,5 +1,3 @@
-// lib/services/lock_service.dart
-
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -13,80 +11,83 @@ class LockService {
   static bool _isLocked = false;
   static bool get isLocked => _isLocked;
 
+  static Future<void> _invokeWithFallback(
+    String method, [
+    Map<String, dynamic>? arguments,
+  ]) async {
+    try {
+      await _primaryChannel.invokeMethod(method, arguments);
+    } on PlatformException catch (e) {
+      debugPrint("LockService [$method] primary error:${e.message}");
+      try {
+        await _legacyChannel.invokeMethod(method, arguments);
+      } on PlatformException catch (legacyError) {
+        debugPrint(
+            "LockService [$method] legacy error:${legacyError.message}");
+        rethrow;
+      }
+    } catch (_) {
+      await _legacyChannel.invokeMethod(method, arguments);
+    }
+  }
+
   static Future<void> lockScreen({bool force = false}) async {
     if (_isLocked && !force) return;
+    _isLocked = true;
     try {
-      _isLocked = true;
-      await _primaryChannel.invokeMethod('lockScreen');
+      await _invokeWithFallback('lockScreen');
     } catch (_) {
-      try {
-        await _legacyChannel.invokeMethod('lockScreen');
-      } on PlatformException catch (e) {
-        _isLocked = false;
-        debugPrint("Erreur LockService (lock) : ${e.message}");
-      }
+      _isLocked = false;
     }
   }
 
   static Future<void> unlockScreen({bool force = false}) async {
     if (!_isLocked && !force) return;
+    _isLocked = false;
     try {
-      _isLocked = false;
-      await _primaryChannel.invokeMethod('unlockScreen');
-    } catch (_) {
-      try {
-        await _legacyChannel.invokeMethod('unlockScreen');
-      } on PlatformException catch (e) {
-        debugPrint("Erreur LockService (unlock) : ${e.message}");
-      }
-    }
+      await _invokeWithFallback('unlockScreen');
+    } catch (_) {}
+  }
+
+  static Future<void> grantEmergencyGrace() async {
+    try {
+      await _invokeWithFallback('grantEmergencyGrace');
+    } catch (_) {}
   }
 
   static Future<void> openEmergencyDialer() async {
     try {
-      await _primaryChannel.invokeMethod('openEmergencyDialer');
-    } catch (_) {
-      try {
-        await _legacyChannel.invokeMethod('openEmergencyDialer');
-      } on PlatformException catch (e) {
-        debugPrint("Erreur openEmergencyDialer : ${e.message}");
-      }
+      await _invokeWithFallback('openEmergencyDialer');
+    } catch (e) {
+      debugPrint("Erreur openEmergencyDialer : $e");
     }
   }
 
   static Future<void> openEmergencySms() async {
     try {
-      await _primaryChannel.invokeMethod('openEmergencySms');
-    } catch (_) {
-      try {
-        await _legacyChannel.invokeMethod('openEmergencySms');
-      } on PlatformException catch (e) {
-        debugPrint("Erreur openEmergencySms : ${e.message}");
-      }
+      await _invokeWithFallback('openEmergencySms');
+    } catch (e) {
+      debugPrint("Erreur openEmergencySms : $e");
     }
   }
 
   static Future<void> startEmergencyExemption() async {
     try {
-      await _primaryChannel.invokeMethod('resetEmergencyExemption');
-    } catch (_) {
-      try {
-        await _legacyChannel.invokeMethod('resetEmergencyExemption');
-      } on PlatformException catch (e) {
-        debugPrint("Erreur startEmergencyExemption : ${e.message}");
-      }
+      await _invokeWithFallback('resetEmergencyExemption');
+    } catch (e) {
+      debugPrint("Erreur startEmergencyExemption : $e");
     }
   }
 
   static Future<void> cancelEmergencyExemption() async {
     try {
-      await _primaryChannel.invokeMethod('resetEmergencyExemption');
+      await _invokeWithFallback('resetEmergencyExemption');
     } catch (_) {}
   }
 
   static Future<void> requestOverlayPermission() async {
     try {
-      await _primaryChannel.invokeMethod('requestOverlayPermission');
+      await _invokeWithFallback('requestOverlayPermission');
     } catch (_) {}
   }
 }
