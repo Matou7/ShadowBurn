@@ -48,11 +48,14 @@ class GameProvider extends _GameBase
         _AdminLogic,
         _XpLogic,
         _LegacyUiCompat {
+  static const String _kPersistentHardwareIdPref = 'shadow_persistent_hw_id_v1';
+
   String _persistedLicenseKey = '';
   String _awakeningDate = '';
   String? _pairedAdminRoom;
   String? _pairedAdminKey;
   Future<void>? _licenseInitFuture;
+  bool _hasPurgedRaidsThisSession = false;
 
   String get licenseKey => _persistedLicenseKey;
   String get awakeningDate =>
@@ -152,9 +155,11 @@ class GameProvider extends _GameBase
       final saved = prefs.getString('shadow_user_license_key');
       if (saved != null && saved.trim().isNotEmpty) {
         final cleanKey = saved.trim().toUpperCase();
-        // Validation silencieuse au démarrage : autorise le cache hors-ligne,
-        // mais révoque immédiatement si le serveur indique que la clé est invalide ou transférée.
-        final bool stillValid = await _verifyLicenseWithBackend(cleanKey, allowOfflineCache: true);
+        final bool stillValid = await _verifyLicenseWithBackend(
+          cleanKey,
+          allowOfflineCache: true,
+          bindOnServer: false,
+        );
         if (stillValid) {
           _persistedLicenseKey = cleanKey;
           _isPro = true;
@@ -191,31 +196,45 @@ class GameProvider extends _GameBase
     } catch (_) {}
   }
 
+  String _generateRandomInstallToken(String prefix) {
+    final rng = Random.secure();
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    final partA = List.generate(8, (_) => chars[rng.nextInt(chars.length)]).join();
+    final partB = List.generate(8, (_) => chars[rng.nextInt(chars.length)]).join();
+    return "${prefix}_${partA}_$partB";
+  }
+
   @override
   Future<String> getUniqueHardwareIdForCheckout() async {
     try {
+      final prefs = await SharedPreferences.getInstance();
+      final String? existing = prefs.getString(_kPersistentHardwareIdPref);
+      if (existing != null && existing.trim().isNotEmpty) {
+        return existing.trim();
+      }
+
       final DeviceInfoPlugin deviceInfo = DeviceInfoPlugin();
+      String prefix = "DEV";
       if (kIsWeb) {
         final webInfo = await deviceInfo.webBrowserInfo;
-        return "WEB_${webInfo.vendor ?? 'unknown'}_${webInfo.userAgent ?? 'unknown'}"
-            .hashCode
-            .abs()
-            .toString();
+        final rawTag = (webInfo.vendor ?? 'WEB').replaceAll(RegExp(r'[^A-Za-z0-9]'), '');
+        prefix = "WEB_${rawTag.isEmpty ? 'BROWSER' : rawTag.substring(0, min(8, rawTag.length))}";
       } else if (Platform.isAndroid) {
         final androidInfo = await deviceInfo.androidInfo;
-        return "ANDROID_${androidInfo.id}_${androidInfo.model}"
-            .hashCode
-            .abs()
-            .toString();
+        final rawModel = androidInfo.model.replaceAll(RegExp(r'[^A-Za-z0-9]'), '');
+        prefix = "AND_${rawModel.isEmpty ? 'DEVICE' : rawModel.substring(0, min(10, rawModel.length))}";
       } else if (Platform.isIOS) {
         final iosInfo = await deviceInfo.iosInfo;
-        return "IOS_${iosInfo.identifierForVendor ?? 'unknown'}"
-            .hashCode
-            .abs()
-            .toString();
+        final rawSys = (iosInfo.systemName ?? 'IOS').replaceAll(RegExp(r'[^A-Za-z0-9]'), '');
+        prefix = "IOS_${rawSys.isEmpty ? 'DEVICE' : rawSys.substring(0, min(8, rawSys.length))}";
       }
-    } catch (_) {}
-    return "UNKNOWN_HARDWARE_ID";
+
+      final String created = _generateRandomInstallToken(prefix.toUpperCase());
+      await prefs.setString(_kPersistentHardwareIdPref, created);
+      return created;
+    } catch (_) {
+      return "UNKNOWN_HARDWARE_ID";
+    }
   }
 
   @override
@@ -226,74 +245,159 @@ class GameProvider extends _GameBase
   }) async {
     try {
       final String hwId = await getUniqueHardwareIdForCheckout();
-      final String? foundKey = await AuthRecoveryService.fetchKeyForHardware(hwId);
-      if (foundKey != null && foundKey.trim().isNotEmpty) {
-        await saveLicenseLocally(foundKey.trim());
-        return true;
+      String? foundKey = await AuthRecoveryService.fetchKeyForHardware(hwId);
+
+      if ((foundKey == null || foundKey.trim().isEmpty) &&
+          email != null &&
+          email.trim().isNotEmpty &&
+          proof != null &&
+          proof.trim().isNotEmpty) {
+        foundKey = await AuthRecoveryService.recoverKeySecurely(
+          email: email,
+          proof: proof,
+          newHardwareId: hwId,
+        );
       }
-    } catch (_) {}
+
+      if (foundKey != null && foundKey.trim().isNotEmpty) {
+        return await activateProKey(foundKey.trim().toUpperCase());
+      }
+    } catch (e) {
+      debugPrint("[AUTH_TRACE] Erreur lors de la récupération : $e");
+    }
     return false;
   }
 
   Future<bool> _verifyLicenseWithBackend(
     String cleanKey, {
     bool allowOfflineCache = false,
+    bool bindOnServer = false,
   }) async {
     final String hwId = await getUniqueHardwareIdForCheckout();
+    if (cleanKey.trim().isEmpty ||
+        hwId.trim().isEmpty ||
+        hwId == 'UNKNOWN_HARDWARE_ID') {
+      return false;
+    }
 
     try {
-      final docRef = FirebaseFirestore.instance
-          .collection('pro_licenses')
-          .doc(cleanKey);
-      final doc = await docRef.get().timeout(const Duration(seconds: 6));
+      final colRef = FirebaseFirestore.instance.collection('pro_licenses');
+      var targetDocRef = colRef.doc(cleanKey);
 
-      if (!doc.exists) {
-        return false;
+      final directCheck =
+          await targetDocRef.get().timeout(const Duration(seconds: 6));
+      if (!directCheck.exists) {
+        final querySnap =
+            await colRef.where('key', isEqualTo: cleanKey).limit(1).get();
+        if (querySnap.docs.isEmpty) {
+          return false;
+        }
+        targetDocRef = querySnap.docs.first.reference;
       }
 
-      final Map<String, dynamic> data =
-          Map<String, dynamic>.from(doc.data() as Map? ?? {});
+      if (!bindOnServer) {
+        final snap = await targetDocRef.get().timeout(const Duration(seconds: 6));
+        if (!snap.exists) {
+          return false;
+        }
+        final rawData = snap.data();
+        final Map<String, dynamic> data = rawData != null
+            ? Map<String, dynamic>.of(rawData)
+            : <String, dynamic>{};
 
-      if (data['revoked'] == true || data['active'] == false) {
-        return false;
+        if (data['revoked'] == true || data['active'] == false) {
+          return false;
+        }
+        if (data['used'] != true) {
+          return false;
+        }
+
+        final String boundHw = (data['hardware_id'] ?? '').toString().trim();
+        final String boundUsedBy = (data['used_by'] ?? '').toString().trim();
+        if (boundHw.isNotEmpty && boundHw != hwId) {
+          return false;
+        }
+        if (boundUsedBy.isNotEmpty && boundUsedBy != hwId) {
+          return false;
+        }
+        return true;
       }
 
-      final String boundHw = (data['hardware_id'] ?? '').toString().trim();
-      if (boundHw.isNotEmpty && boundHw != hwId) {
-        // Clé déjà liée à un autre appareil
-        return false;
-      }
+      await FirebaseFirestore.instance.runTransaction((transaction) async {
+        final snapshot = await transaction.get(targetDocRef);
+        if (!snapshot.exists) {
+          throw StateError('Licence introuvable.');
+        }
 
-      // Lier la licence à cet appareil lors de la première activation
-      await docRef.set({
-        'used': true,
-        'hardware_id': hwId,
-        'activated_at_ms': data['activated_at_ms'] ?? DateTime.now().millisecondsSinceEpoch,
-        'last_verified_ms': DateTime.now().millisecondsSinceEpoch,
-      }, SetOptions(merge: true)).timeout(const Duration(seconds: 6));
+        final rawData = snapshot.data();
+        final Map<String, dynamic> data = rawData != null
+            ? Map<String, dynamic>.of(rawData)
+            : <String, dynamic>{};
+
+        if (data['revoked'] == true || data['active'] == false) {
+          throw StateError('Licence révoquée ou inactive.');
+        }
+
+        final String boundHw = (data['hardware_id'] ?? '').toString().trim();
+        final String boundUsedBy = (data['used_by'] ?? '').toString().trim();
+
+        if (boundHw.isNotEmpty && boundHw != hwId) {
+          throw StateError('Licence déjà liée à un autre hardware_id.');
+        }
+        if (boundUsedBy.isNotEmpty && boundUsedBy != hwId) {
+          throw StateError('Licence déjà liée à un autre used_by.');
+        }
+
+        final int nowMs = DateTime.now().millisecondsSinceEpoch;
+        transaction.update(targetDocRef, {
+          'used': true,
+          'hardware_id': hwId,
+          'used_by': hwId,
+          'user_name': _username,
+          'used_at': data['used_at'] ?? FieldValue.serverTimestamp(),
+          'activated_at_ms': data['activated_at_ms'] ?? nowMs,
+          'last_verified_ms': nowMs,
+        });
+      }).timeout(const Duration(seconds: 8));
 
       return true;
     } on TimeoutException {
       return allowOfflineCache;
     } on FirebaseException catch (e) {
-      if (e.code == 'unavailable' || e.code == 'network-request-failed') {
-        return allowOfflineCache;
+      debugPrint('[PRO VALIDATION] Firebase ${e.code}: ${e.message}');
+      if (allowOfflineCache &&
+          (e.code == 'unavailable' ||
+              e.code == 'network-request-failed' ||
+              e.code == 'deadline-exceeded')) {
+        return true;
       }
       return false;
+    } on StateError catch (e) {
+      debugPrint('[PRO VALIDATION] Refus : ${e.message}');
+      return false;
     } catch (_) {
-      return allowOfflineCache;
+      return false;
     }
   }
 
   @override
   Future<bool> activateProKey(String rawKey) async {
-    final cleanKey = rawKey.trim().toUpperCase();
+    final String cleanKey = rawKey.trim().toUpperCase();
     if (cleanKey.isEmpty || cleanKey.length < 8) return false;
 
-    final bool isVerified =
-        await _verifyLicenseWithBackend(cleanKey, allowOfflineCache: false);
+    if (cleanKey == "FREE" || cleanKey == "RESET-PRO") {
+      await revokeProStatusLocally();
+      return false;
+    }
+
+    final bool isVerified = await _verifyLicenseWithBackend(
+      cleanKey,
+      allowOfflineCache: false,
+      bindOnServer: true,
+    );
     if (isVerified) {
       await saveLicenseLocally(cleanKey);
+      await _forceSaveRealDisk();
       return true;
     }
     return false;
@@ -301,66 +405,191 @@ class GameProvider extends _GameBase
 
   @override
   Future<void> showOtpRecoveryDialog(BuildContext context) async {
-    showDialog(
+    bool isLoading = false;
+    String feedback = "";
+    final emailController = TextEditingController();
+    final proofController = TextEditingController();
+
+    await showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF121217),
-        title: const Text(
-          "RESTAURATION MATÉRIELLE",
-          style: TextStyle(
-              color: Color(0xFF00E5FF), fontFamily: 'Orbitron', fontSize: 14),
-        ),
-        content: const Text(
-          "Tentative de récupération de la licence liée à cet appareil...",
-          style: TextStyle(color: Colors.white70, fontSize: 12),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () async {
-              final messenger = ScaffoldMessenger.of(context);
-              Navigator.pop(ctx);
-              final success = await requestHardwareAutoRecovery(silent: false);
-              messenger.showSnackBar(
-                SnackBar(
-                  content: Text(success
-                      ? "Licence restaurée avec succès !"
-                      : "Aucune licence trouvée pour cet appareil."),
-                  backgroundColor: success ? Colors.green : Colors.redAccent,
+      barrierDismissible: false,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (dialogCtx, setDialogState) {
+            return AlertDialog(
+              backgroundColor: const Color(0xFF121217),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+                side: const BorderSide(color: Color(0xFF00E5FF), width: 1.5),
+              ),
+              title: const Row(
+                children: [
+                  Icon(Icons.verified_user, color: Color(0xFF00E5FF)),
+                  SizedBox(width: 10),
+                  Flexible(
+                    child: Text(
+                      "RESTAURATION SÉCURISÉE",
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 1.2,
+                        fontSize: 13,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    const Text(
+                      "• Même appareil : cliquez directement sur Restaurer.\n• Nouvel appareil / Réinstallation : entrez votre e-mail Stripe ET votre clé (ou les 4 derniers chiffres de la carte).",
+                      style: TextStyle(
+                          color: Colors.white70, fontSize: 12, height: 1.4),
+                    ),
+                    const SizedBox(height: 14),
+                    TextField(
+                      controller: emailController,
+                      keyboardType: TextInputType.emailAddress,
+                      style: const TextStyle(color: Colors.white, fontSize: 13),
+                      decoration: const InputDecoration(
+                        labelText: "E-mail Stripe (si nouvel appareil)",
+                        labelStyle:
+                            TextStyle(color: Colors.white38, fontSize: 11),
+                        enabledBorder: UnderlineInputBorder(
+                            borderSide: BorderSide(color: Color(0xFF00E5FF))),
+                        focusedBorder: UnderlineInputBorder(
+                            borderSide: BorderSide(color: Color(0xFF00FF66))),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: proofController,
+                      textCapitalization: TextCapitalization.characters,
+                      style: const TextStyle(color: Colors.white, fontSize: 13),
+                      decoration: const InputDecoration(
+                        labelText: "Clé Pro OU 4 derniers chiffres carte",
+                        labelStyle:
+                            TextStyle(color: Colors.white38, fontSize: 11),
+                        enabledBorder: UnderlineInputBorder(
+                            borderSide: BorderSide(color: Color(0xFF00E5FF))),
+                        focusedBorder: UnderlineInputBorder(
+                            borderSide: BorderSide(color: Color(0xFF00FF66))),
+                      ),
+                    ),
+                    if (feedback.isNotEmpty) ...[
+                      const SizedBox(height: 15),
+                      Text(
+                        feedback,
+                        style: TextStyle(
+                          color: feedback.contains("SUCCÈS")
+                              ? Colors.greenAccent
+                              : Colors.redAccent,
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                    ],
+                  ],
                 ),
-              );
-            },
-            child: const Text("LANCER LA RESTAURATION",
-                style: TextStyle(color: Color(0xFF00E5FF))),
-          ),
-        ],
-      ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: isLoading ? null : () => Navigator.pop(ctx),
+                  child: const Text("ANNULER",
+                      style: TextStyle(color: Colors.white54)),
+                ),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF00E5FF),
+                    foregroundColor: Colors.black,
+                  ),
+                  onPressed: isLoading
+                      ? null
+                      : () async {
+                          setDialogState(() {
+                            isLoading = true;
+                            feedback = "Vérification cryptographique...";
+                          });
+
+                          final success = await requestHardwareAutoRecovery(
+                            email: emailController.text,
+                            proof: proofController.text,
+                          );
+
+                          if (!dialogCtx.mounted) return;
+                          setDialogState(() {
+                            isLoading = false;
+                            if (success) {
+                              feedback =
+                                  "SUCCÈS : Licence vérifiée et transférée !";
+                              Future.delayed(const Duration(seconds: 1), () {
+                                if (dialogCtx.mounted &&
+                                    Navigator.canPop(dialogCtx)) {
+                                  Navigator.pop(dialogCtx);
+                                }
+                              });
+                            } else {
+                              feedback =
+                                  "REFUSÉ : Vérifiez l'e-mail et la clé (ou 4 chiffres carte).";
+                            }
+                          });
+                        },
+                  child: isLoading
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2, color: Colors.black),
+                        )
+                      : const Text("RESTAURER"),
+                ),
+              ],
+            );
+          },
+        );
+      },
     );
   }
 
-  Future<void> purgeExpiredRaids() async {
+  Future<void> purgeExpiredRaids({bool force = false}) async {
+    if (!force && _hasPurgedRaidsThisSession) return;
+    _hasPurgedRaidsThisSession = true;
+
     try {
       final firestore = FirebaseFirestore.instance;
-      final now = DateTime.now();
+      final nowMs = DateTime.now().millisecondsSinceEpoch;
+      const int staleThresholdMs = 30 * 60 * 1000;
+      const int finishedGraceMs = 5 * 60 * 1000;
 
       final snapshot = await firestore.collection('current_raids').get();
       for (var doc in snapshot.docs) {
         final data = doc.data();
-        final dynamic rawLastSeen = data['arena_last_seen'];
-        final String status = data['status'] as String? ?? 'waiting';
+        final String status =
+            (data['status'] as String? ?? 'waiting').toLowerCase();
+
+        int lastSignalMs = (data['last_activity_ms'] as num?)?.toInt() ?? 0;
+        if (lastSignalMs == 0) {
+          final dynamic rawLastSeen = data['arena_last_seen'];
+          if (rawLastSeen is Timestamp) {
+            lastSignalMs = rawLastSeen.millisecondsSinceEpoch;
+          } else if (rawLastSeen is int) {
+            lastSignalMs = rawLastSeen;
+          }
+        }
 
         bool shouldDelete = false;
-        if (['finished', 'abandoned', 'closed', 'victory'].contains(status)) {
+        if (['finished', 'abandoned', 'closed'].contains(status)) {
+          shouldDelete =
+              lastSignalMs > 0 && (nowMs - lastSignalMs) > finishedGraceMs;
+        } else if (['victory', 'failed'].contains(status)) {
+          shouldDelete =
+              lastSignalMs > 0 && (nowMs - lastSignalMs) > staleThresholdMs;
+        } else if (lastSignalMs > 0 && (nowMs - lastSignalMs) > staleThresholdMs) {
           shouldDelete = true;
-        } else if (rawLastSeen is Timestamp) {
-          final difference = now.difference(rawLastSeen.toDate());
-          if (difference.inSeconds > 60) {
-            shouldDelete = true;
-          }
-        } else if (rawLastSeen is int && rawLastSeen > 0) {
-          final difference = now.millisecondsSinceEpoch - rawLastSeen;
-          if (difference > 60000) {
-            shouldDelete = true;
-          }
         }
 
         if (shouldDelete) {
@@ -373,8 +602,8 @@ class GameProvider extends _GameBase
   }
 
   @override
-  void setUrgentQuestProvider(UrgentQuestProvider provider) {
-    urgentQuestProvider = provider;
+  void setUrgentQuestProvider(UrgentQuestProvider p) {
+    urgentQuestProvider = p;
     urgentQuestProvider!.onTimeExpired = () {
       triggerPenaltyState("Échec de la Quête Urgente.");
     };

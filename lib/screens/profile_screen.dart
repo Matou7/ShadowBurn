@@ -77,7 +77,7 @@ class _ProfileScreenState extends State<ProfileScreen>
       ValueNotifier<String>('');
   String _lanHostIp = kDefaultLanHostIp;
   String _lanDetectedSource = '';
-  List<Map<String, String>> _lanIpCandidates = <Map<String, String>>[];
+  List<dynamic> _lanIpCandidates = [];
   String _lanWsUrl = 'ws://$kDefaultLanHostIp:$kDefaultLanWsPort';
   String _lanTvUrl = '';
   final LanSocketService _lanSocket = LanSocketService();
@@ -249,31 +249,33 @@ class _ProfileScreenState extends State<ProfileScreen>
     return "LAN ($ifaceName)";
   }
 
-  Future<List<Map<String, String>>> _detectAllLocalLanIps() async {
+  Future _detectAllLocalLanIps() async {
     if (kIsWeb) {
       final host = Uri.base.host;
       if (host.isNotEmpty &&
           host != 'localhost' &&
           !_isExcludedIp(host)) {
-        return <Map<String, String>>[<String, String>{'ip': host, 'label': 'Navigateur (' + host + ')'}];
+        return [
+          {'ip': host, 'label': 'Navigateur ($host)'}
+        ];
       }
-      return <Map<String, String>>[];
+      return [];
     }
 
-    final List<Map<String, String>> detected = <Map<String, String>>[];
+    final detected = [];
 
     if (Platform.isAndroid) {
       try {
-        final List<dynamic>? rawList =
-            await _intentChannel.invokeMethod<List<dynamic>>('getLocalNetworkIps');
-        if (rawList != null) {
+        final rawList =
+            await _intentChannel.invokeMethod('getLocalNetworkIps');
+        if (rawList is List) {
           for (final item in rawList) {
             if (item is Map) {
               final ip = (item['ip'] ?? '').toString().trim();
               final label = (item['label'] ?? 'LAN').toString().trim();
               if (!_isExcludedIp(ip) &&
                   !label.toLowerCase().contains('ccmni')) {
-                detected.add(<String, String>{'ip': ip, 'label': label});
+                detected.add({'ip': ip, 'label': label});
               }
             }
           }
@@ -288,8 +290,7 @@ class _ProfileScreenState extends State<ProfileScreen>
         includeLoopback: false,
         type: InternetAddressType.IPv4,
       );
-      final List<MapEntry<int, Map<String, String>>> ranked =
-          <MapEntry<int, Map<String, String>>>[];
+      final ranked = <MapEntry<int, Map<String, String>>>[];
       for (final iface in interfaces) {
         if (_isExcludedInterface(iface.name)) {
           continue;
@@ -306,7 +307,7 @@ class _ProfileScreenState extends State<ProfileScreen>
               !addr.address.startsWith('10.')) {
             continue;
           }
-          ranked.add(MapEntry<int, Map<String, String>>(prio, <String, String>{
+          ranked.add(MapEntry(prio, {
             'ip': addr.address,
             'label': _labelForInterface(iface.name, prio),
           }));
@@ -328,7 +329,18 @@ class _ProfileScreenState extends State<ProfileScreen>
   Future<String> _refreshAutoDetectedLanIp() async {
     final prefs = await SharedPreferences.getInstance();
     final String? savedIp = prefs.getString('shadow_lan_host_ip');
-    final List<Map<String, String>> candidates = await _detectAllLocalLanIps();
+    final rawCandidates = await _detectAllLocalLanIps();
+    final candidates = [];
+    if (rawCandidates is List) {
+      for (final item in rawCandidates) {
+        if (item is Map) {
+          candidates.add({
+            'ip': (item['ip'] ?? '').toString(),
+            'label': (item['label'] ?? '').toString(),
+          });
+        }
+      }
+    }
 
     String resolvedIp;
     String detectedSource;
@@ -425,10 +437,10 @@ class _ProfileScreenState extends State<ProfileScreen>
   Future<void> _launchLanServerAutomatically() async {
     if (kIsWeb) return;
     try {
-      await _intentChannel.invokeMethod<bool>('runTermuxLanScript', {
+      await _intentChannel.invokeMethod('runTermuxLanScript', {
         'scriptPath': '$kLanTargetDir/start_lan.sh',
         'executable': '/data/data/com.termux/files/usr/bin/bash',
-        'arguments': <String>['$kLanTargetDir/start_lan.sh'],
+        'arguments': ['$kLanTargetDir/start_lan.sh'],
         'workdir': kLanTargetDir,
       });
     } catch (e) {
@@ -445,7 +457,7 @@ class _ProfileScreenState extends State<ProfileScreen>
     final int total = response.contentLength;
     int received = 0;
 
-    await for (final List<int> chunk in response.timeout(totalTimeout)) {
+    await for (final chunk in response.timeout(totalTimeout)) {
       builder.add(chunk);
       received += chunk.length;
       onBytesProgress?.call(received, total);
@@ -465,7 +477,7 @@ class _ProfileScreenState extends State<ProfileScreen>
       ..connectionTimeout = connectTimeout
       ..idleTimeout = const Duration(seconds: 30);
 
-    final List<Cookie> jar = <Cookie>[];
+    final jar = <Cookie>[];
 
     Future<Uint8List> fetchUrl(Uri uri, {int depth = 0}) async {
       if (depth > 6) {
@@ -548,7 +560,7 @@ class _ProfileScreenState extends State<ProfileScreen>
         actionUrl = formActionMatch.group(1)!.replaceAll('&amp;', '&');
       }
 
-      final Map<String, String> queryParams = <String, String>{
+      final Map<String, String> queryParams = {
         'id': kLanPackDriveFileId,
         'export': 'download',
         'confirm': 't',
@@ -585,7 +597,7 @@ class _ProfileScreenState extends State<ProfileScreen>
       }
 
       final Uri baseActionUri = Uri.parse(actionUrl);
-      final Map<String, String> mergedParams = <String, String>{
+      final Map<String, String> mergedParams = {
         ...baseActionUri.queryParameters,
         ...queryParams,
       };
@@ -792,7 +804,7 @@ class _ProfileScreenState extends State<ProfileScreen>
         padding: const EdgeInsets.all(8),
         decoration: BoxDecoration(
           color: Colors.black,
-          border: Border.all(color: accentColor.withOpacity(0.5)),
+          border: Border.all(color: accentColor.withValues(alpha: 0.5)),
           borderRadius: BorderRadius.circular(4),
         ),
         child: Column(
@@ -958,9 +970,10 @@ class _ProfileScreenState extends State<ProfileScreen>
                       width: double.infinity,
                       padding: const EdgeInsets.all(8),
                       decoration: BoxDecoration(
-                        color: const Color(0xFF00FF66).withOpacity(0.07),
+                        color: const Color(0xFF00FF66).withValues(alpha: 0.07),
                         border: Border.all(
-                            color: const Color(0xFF00FF66).withOpacity(0.45)),
+                            color: const Color(0xFF00FF66)
+                                .withValues(alpha: 0.45)),
                         borderRadius: BorderRadius.circular(4),
                       ),
                       child: const Column(
@@ -1014,9 +1027,10 @@ class _ProfileScreenState extends State<ProfileScreen>
                       width: double.infinity,
                       padding: const EdgeInsets.all(8),
                       decoration: BoxDecoration(
-                        color: const Color(0xFFFF9100).withOpacity(0.07),
+                        color: const Color(0xFFFF9100).withValues(alpha: 0.07),
                         border: Border.all(
-                            color: const Color(0xFFFF9100).withOpacity(0.45)),
+                            color: const Color(0xFFFF9100)
+                                .withValues(alpha: 0.45)),
                         borderRadius: BorderRadius.circular(4),
                       ),
                       child: const Column(
@@ -1138,13 +1152,15 @@ class _ProfileScreenState extends State<ProfileScreen>
                                   horizontal: 8, vertical: 4),
                               decoration: BoxDecoration(
                                 color: isSelected
-                                    ? const Color(0xFF00FF66).withOpacity(0.18)
-                                    : const Color(0xFF00E5FF).withOpacity(0.08),
+                                    ? const Color(0xFF00FF66)
+                                        .withValues(alpha: 0.18)
+                                    : const Color(0xFF00E5FF)
+                                        .withValues(alpha: 0.08),
                                 border: Border.all(
                                   color: isSelected
                                       ? const Color(0xFF00FF66)
                                       : const Color(0xFF00E5FF)
-                                          .withOpacity(0.5),
+                                          .withValues(alpha: 0.5),
                                 ),
                                 borderRadius: BorderRadius.circular(4),
                               ),
@@ -1248,7 +1264,7 @@ class _ProfileScreenState extends State<ProfileScreen>
           style: OutlinedButton.styleFrom(
             foregroundColor: const Color(0xFF00FF66),
             side: const BorderSide(color: Color(0xFF00FF66)),
-            backgroundColor: const Color(0xFF00FF66).withOpacity(0.15),
+            backgroundColor: const Color(0xFF00FF66).withValues(alpha: 0.15),
           ),
           onPressed: () async {
             if (autoModeSelected && !kIsWeb) {
@@ -1720,7 +1736,6 @@ class _ProfileScreenState extends State<ProfileScreen>
       return;
     }
 
-    // Sécurité : s'assure que RaidAdminService n'est pas bloqué sur une ancienne config LAN
     if (RaidAdminService.isLanActive) {
       await RaidAdminService.clearLan();
     }
@@ -1912,7 +1927,7 @@ class _ProfileScreenState extends State<ProfileScreen>
         OutlinedButton(
           style: OutlinedButton.styleFrom(
             side: const BorderSide(color: Color(0xFFFF9100)),
-            backgroundColor: const Color(0xFFFF9100).withOpacity(0.2),
+            backgroundColor: const Color(0xFFFF9100).withValues(alpha: 0.2),
             shape:
                 RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
           ),
@@ -2015,7 +2030,7 @@ class _ProfileScreenState extends State<ProfileScreen>
         OutlinedButton(
           style: OutlinedButton.styleFrom(
             side: const BorderSide(color: Color(0xFF00E5FF)),
-            backgroundColor: const Color(0xFF00E5FF).withOpacity(0.2),
+            backgroundColor: const Color(0xFF00E5FF).withValues(alpha: 0.2),
             shape:
                 RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
           ),
@@ -2079,7 +2094,7 @@ class _ProfileScreenState extends State<ProfileScreen>
   Widget build(BuildContext context) {
     final game = context.watch<GameProvider>();
     const Color systemBlue = Color(0xFF00E5FF);
-    final Color borderBlue = systemBlue.withOpacity(0.5);
+    final Color borderBlue = systemBlue.withValues(alpha: 0.5);
     final Color rankColor = game.isGodMode ? Colors.redAccent : Colors.white;
 
     if (!_isLanMode &&
@@ -2121,10 +2136,11 @@ class _ProfileScreenState extends State<ProfileScreen>
                   width: double.infinity,
                   decoration: BoxDecoration(
                     border: Border.all(color: borderBlue, width: 2),
-                    color: Colors.black.withOpacity(0.7),
+                    color: Colors.black.withValues(alpha: 0.7),
                     boxShadow: [
                       BoxShadow(
-                          color: systemBlue.withOpacity(0.15), blurRadius: 20)
+                          color: systemBlue.withValues(alpha: 0.15),
+                          blurRadius: 20)
                     ],
                   ),
                   child: Column(
@@ -2146,7 +2162,8 @@ class _ProfileScreenState extends State<ProfileScreen>
                                   letterSpacing: 3,
                                   shadows: [
                                     Shadow(
-                                        color: systemBlue.withOpacity(0.5),
+                                        color:
+                                            systemBlue.withValues(alpha: 0.5),
                                         blurRadius: 10)
                                   ],
                                 ),
@@ -2180,8 +2197,8 @@ class _ProfileScreenState extends State<ProfileScreen>
                                                 color: systemBlue,
                                                 blurRadius: 10),
                                             Shadow(
-                                                color:
-                                                    systemBlue.withOpacity(0.8),
+                                                color: systemBlue
+                                                    .withValues(alpha: 0.8),
                                                 blurRadius: 30),
                                             if (game.isGodMode)
                                               const Shadow(
@@ -2289,10 +2306,10 @@ class _ProfileScreenState extends State<ProfileScreen>
                     padding:
                         const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                     decoration: BoxDecoration(
-                      border:
-                          Border.all(color: Colors.redAccent.withOpacity(0.5)),
+                      border: Border.all(
+                          color: Colors.redAccent.withValues(alpha: 0.5)),
                       borderRadius: BorderRadius.circular(4),
-                      color: Colors.red.withOpacity(0.05),
+                      color: Colors.red.withValues(alpha: 0.05),
                     ),
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -2304,7 +2321,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                         ),
                         Switch(
                           value: game.godModePersistPenalty,
-                          activeColor: Colors.redAccent,
+                          activeThumbColor: Colors.redAccent,
                           onChanged: (val) {
                             game.toggleGodModePersistPenalty();
                           },
@@ -2356,14 +2373,18 @@ class _ProfileScreenState extends State<ProfileScreen>
               children: [
                 Icon(Icons.lock_outline, color: Color(0xFFFF9100), size: 18),
                 SizedBox(width: 8),
-                Text(
-                  "TELECOMMANDE MAITRE (ADMIN)",
-                  style: TextStyle(
-                    color: Colors.white54,
-                    fontFamily: 'monospace',
-                    fontSize: 12,
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 1.2,
+                Flexible(
+                  child: Text(
+                    "TELECOMMANDE MAITRE (ADMIN)",
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: Colors.white54,
+                      fontFamily: 'monospace',
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 1.2,
+                    ),
                   ),
                 ),
               ],
@@ -2407,51 +2428,69 @@ class _ProfileScreenState extends State<ProfileScreen>
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Row(
-                children: [
-                  Icon(
-                    hasActiveLink ? Icons.security : Icons.lock_outline,
-                    color:
-                        hasActiveLink ? const Color(0xFFFF9100) : Colors.white38,
-                    size: 18,
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    "TELECOMMANDE MAITRE",
-                    style: GoogleFonts.orbitron(
+              Expanded(
+                child: Row(
+                  children: [
+                    Icon(
+                      hasActiveLink ? Icons.security : Icons.lock_outline,
                       color: hasActiveLink
                           ? const Color(0xFFFF9100)
                           : Colors.white38,
-                      fontSize: 11,
-                      fontWeight: FontWeight.bold,
-                      letterSpacing: 1.2,
+                      size: 18,
                     ),
-                  ),
-                ],
-              ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                decoration: BoxDecoration(
-                  color: hasActiveLink
-                      ? const Color(0xFFFF9100).withOpacity(0.15)
-                      : Colors.white10,
-                  border: Border.all(
-                    color: hasActiveLink
-                        ? const Color(0xFFFF9100)
-                        : Colors.white24,
-                  ),
-                  borderRadius: BorderRadius.circular(4),
+                    const SizedBox(width: 8),
+                    Flexible(
+                      child: Text(
+                        "TELECOMMANDE MAITRE",
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: GoogleFonts.orbitron(
+                          color: hasActiveLink
+                              ? const Color(0xFFFF9100)
+                              : Colors.white38,
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 1.0,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
-                child: Text(
-                  hasActiveLink ? effectiveRoom!.toUpperCase() : "NON JUMELE",
-                  style: GoogleFonts.orbitron(
-                    color: hasActiveLink
-                        ? const Color(0xFFFF9100)
-                        : Colors.white38,
-                    fontSize: 9,
-                    fontWeight: FontWeight.bold,
+              ),
+              const SizedBox(width: 8),
+              Flexible(
+                flex: 0,
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 135),
+                  child: Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: hasActiveLink
+                          ? const Color(0xFFFF9100).withValues(alpha: 0.15)
+                          : Colors.white10,
+                      border: Border.all(
+                        color: hasActiveLink
+                            ? const Color(0xFFFF9100)
+                            : Colors.white24,
+                      ),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      hasActiveLink
+                          ? effectiveRoom!.toUpperCase()
+                          : "NON JUMELE",
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.orbitron(
+                        color: hasActiveLink
+                            ? const Color(0xFFFF9100)
+                            : Colors.white38,
+                        fontSize: 9,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
                   ),
                 ),
               ),
@@ -2483,8 +2522,8 @@ class _ProfileScreenState extends State<ProfileScreen>
                         child: OutlinedButton.icon(
                           style: OutlinedButton.styleFrom(
                             foregroundColor: const Color(0xFF00FF66),
-                            backgroundColor:
-                                const Color(0xFF00FF66).withOpacity(0.08),
+                            backgroundColor: const Color(0xFF00FF66)
+                                .withValues(alpha: 0.08),
                             side: const BorderSide(
                                 color: Color(0xFF00FF66), width: 1.2),
                             padding: const EdgeInsets.symmetric(
@@ -2509,8 +2548,8 @@ class _ProfileScreenState extends State<ProfileScreen>
                         child: OutlinedButton.icon(
                           style: OutlinedButton.styleFrom(
                             foregroundColor: const Color(0xFFFF9100),
-                            backgroundColor:
-                                const Color(0xFFFF9100).withOpacity(0.08),
+                            backgroundColor: const Color(0xFFFF9100)
+                                .withValues(alpha: 0.08),
                             side: const BorderSide(
                                 color: Color(0xFFFF9100), width: 1.2),
                             padding: const EdgeInsets.symmetric(
@@ -2542,7 +2581,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                 margin: const EdgeInsets.only(bottom: 10),
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF00FF66).withOpacity(0.08),
+                  color: const Color(0xFF00FF66).withValues(alpha: 0.08),
                   border: Border.all(color: const Color(0xFF00FF66)),
                   borderRadius: BorderRadius.circular(4),
                 ),
@@ -2614,8 +2653,8 @@ class _ProfileScreenState extends State<ProfileScreen>
               padding: const EdgeInsets.symmetric(horizontal: 10),
               decoration: BoxDecoration(
                 color: Colors.black45,
-                border:
-                    Border.all(color: const Color(0xFFFF9100).withOpacity(0.5)),
+                border: Border.all(
+                    color: const Color(0xFFFF9100).withValues(alpha: 0.5)),
                 borderRadius: BorderRadius.circular(4),
               ),
               child: DropdownButtonHideUnderline(
@@ -2914,7 +2953,8 @@ class _ProfileScreenState extends State<ProfileScreen>
                 ),
                 const SizedBox(width: 6),
                 Expanded(
-                  child: _compactButton("RESET BOSS", const Color(0xFFFF2E56), () {
+                  child:
+                      _compactButton("RESET BOSS", const Color(0xFFFF2E56), () {
                     _confirmDestructiveAdminAction(
                       title: "CONFIRMER RESET BOSS",
                       message:
@@ -2966,8 +3006,8 @@ class _ProfileScreenState extends State<ProfileScreen>
       child: OutlinedButton(
         style: OutlinedButton.styleFrom(
           padding: const EdgeInsets.symmetric(horizontal: 2),
-          side: BorderSide(color: color.withOpacity(0.6), width: 1.2),
-          backgroundColor: color.withOpacity(0.08),
+          side: BorderSide(color: color.withValues(alpha: 0.6), width: 1.2),
+          backgroundColor: color.withValues(alpha: 0.08),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
         ),
         onPressed: onTap,
@@ -3016,11 +3056,11 @@ class _ProfileScreenState extends State<ProfileScreen>
               margin: const EdgeInsets.symmetric(vertical: 4),
               decoration: BoxDecoration(
                 color: unlocked
-                    ? systemBlue.withOpacity(0.08)
-                    : Colors.white.withOpacity(0.02),
+                    ? systemBlue.withValues(alpha: 0.08)
+                    : Colors.white.withValues(alpha: 0.02),
                 border: Border.all(
                   color: unlocked
-                      ? systemBlue.withOpacity(0.4)
+                      ? systemBlue.withValues(alpha: 0.4)
                       : Colors.white10,
                 ),
                 borderRadius: BorderRadius.circular(4),
@@ -3110,8 +3150,8 @@ class _ProfileScreenState extends State<ProfileScreen>
                 urgentProv.spawnTestUrgentQuest();
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(
-                    content:
-                        Text("Alerte ! Une Quete Urgente vient de se declencher."),
+                    content: Text(
+                        "Alerte ! Une Quete Urgente vient de se declencher."),
                     backgroundColor: Colors.purpleAccent,
                     duration: Duration(seconds: 2),
                   ),
@@ -3169,7 +3209,7 @@ class _ProfileScreenState extends State<ProfileScreen>
         decoration: BoxDecoration(
             border: Border.all(color: const Color(0xFFFFD700)),
             borderRadius: BorderRadius.circular(4),
-            color: const Color(0xFFFFD700).withOpacity(0.05)),
+            color: const Color(0xFFFFD700).withValues(alpha: 0.05)),
         child: Text("OR: ${game.goldCoins}",
             style: GoogleFonts.orbitron(
                 color: const Color(0xFFFFD700),
@@ -3308,7 +3348,7 @@ class _ProfileScreenState extends State<ProfileScreen>
       padding: const EdgeInsets.all(6),
       decoration: BoxDecoration(
         border: Border.all(color: Colors.white12, width: 1),
-        color: Colors.black.withOpacity(0.5),
+        color: Colors.black.withValues(alpha: 0.5),
         borderRadius: BorderRadius.circular(4),
       ),
       child: GridView.builder(
@@ -3325,7 +3365,7 @@ class _ProfileScreenState extends State<ProfileScreen>
           final dateToShow = today.subtract(Duration(days: 69 - index));
           final dateKey = dateToShow.toIso8601String().split('T')[0];
           Map<String, dynamic>? data = game.calendarHistory[dateKey];
-          Color boxColor = Colors.white.withOpacity(0.04);
+          Color boxColor = Colors.white.withValues(alpha: 0.04);
           Border? boxBorder = Border.all(color: Colors.white10, width: 0.8);
 
           if (data != null) {
@@ -3407,7 +3447,8 @@ class _ProfileScreenState extends State<ProfileScreen>
       width: double.infinity,
       padding: const EdgeInsets.symmetric(vertical: 10),
       decoration: BoxDecoration(
-          border: Border(bottom: BorderSide(color: color.withOpacity(0.5)))),
+          border:
+              Border(bottom: BorderSide(color: color.withValues(alpha: 0.5)))),
       child: Center(
           child: Text(title,
               style: GoogleFonts.orbitron(
@@ -3451,7 +3492,8 @@ class _ProfileScreenState extends State<ProfileScreen>
                           borderRadius: BorderRadius.circular(2),
                           boxShadow: [
                             BoxShadow(
-                                color: color.withOpacity(0.5), blurRadius: 5)
+                                color: color.withValues(alpha: 0.5),
+                                blurRadius: 5)
                           ])),
                 ],
               );
@@ -3592,8 +3634,8 @@ class _ProfileScreenState extends State<ProfileScreen>
         onPressed: onTap,
         style: OutlinedButton.styleFrom(
           padding: const EdgeInsets.symmetric(horizontal: 6),
-          side: BorderSide(color: color.withOpacity(0.6), width: 1.2),
-          backgroundColor: color.withOpacity(0.08),
+          side: BorderSide(color: color.withValues(alpha: 0.6), width: 1.2),
+          backgroundColor: color.withValues(alpha: 0.08),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
         ),
         child: Row(
@@ -3684,7 +3726,7 @@ class _ProfileScreenState extends State<ProfileScreen>
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.03),
+        color: Colors.white.withValues(alpha: 0.03),
         border: Border.all(color: Colors.white12),
         borderRadius: BorderRadius.circular(4),
       ),
@@ -3702,7 +3744,7 @@ class _ProfileScreenState extends State<ProfileScreen>
         trailing: OutlinedButton(
           style: OutlinedButton.styleFrom(
             side: const BorderSide(color: Color(0xFFFFD700)),
-            backgroundColor: const Color(0xFFFFD700).withOpacity(0.1),
+            backgroundColor: const Color(0xFFFFD700).withValues(alpha: 0.1),
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
             shape:
                 RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),

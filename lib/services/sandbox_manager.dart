@@ -2,9 +2,9 @@
 
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
-import 'storage_service.dart';
-import 'lock_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'lock_service.dart';
+import 'storage_service.dart';
 
 class SandboxManager {
   static const String keyGodSave = 'save_godmode';
@@ -20,7 +20,11 @@ class SandboxManager {
   }
 
   /// Quitte le God Mode et nettoie tout le sas
-  static Future exitSandbox({bool keepChanges = false, Map<String, dynamic>? currentData}) async {
+  static Future exitSandbox({
+    bool keepChanges = false,
+    Map<String, dynamic>? currentData,
+    Map<String, dynamic>? snapshotData,
+  }) async {
     isSandboxActive = false;
     persistPenalty = false;
     StorageService.blockAllRealSaves = false;
@@ -28,8 +32,20 @@ class SandboxManager {
     await deleteSandboxFile();
     await clearNativePenalty();
 
-    if (keepChanges && currentData != null && kDebugMode) {
-      await StorageService.forceSaveDirect(currentData);
+    if (!kDebugMode) return;
+
+    if (keepChanges && currentData != null) {
+      final cleanKeep = Map<String, dynamic>.from(currentData);
+      cleanKeep['sandbox'] = false;
+      cleanKeep['sandboxSnapshot'] = null;
+      cleanKeep['godModePersistPenalty'] = false;
+      await StorageService.forceSaveDirect(cleanKeep);
+    } else if (!keepChanges && snapshotData != null) {
+      final cleanRestore = Map<String, dynamic>.from(snapshotData);
+      cleanRestore['sandbox'] = false;
+      cleanRestore['sandboxSnapshot'] = null;
+      cleanRestore['godModePersistPenalty'] = false;
+      await StorageService.forceSaveDirect(cleanRestore);
     }
   }
 

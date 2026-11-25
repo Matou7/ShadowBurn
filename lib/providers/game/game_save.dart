@@ -25,6 +25,8 @@ mixin _SaveLogic on _GameBase {
       return;
     }
 
+    if (StorageService.blockAllRealSaves) return;
+
     _pruneCalendarHistory();
     await StorageService.save(_toJson());
   }

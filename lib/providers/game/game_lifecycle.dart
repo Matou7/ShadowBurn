@@ -2,7 +2,6 @@
 part of '../game_provider.dart';
 
 mixin _LifecycleLogic on _GameBase {
-  /// Valide de manière stricte et distante la licence et l'empreinte matérielle sur Firestore
   Future<void> verifyLicenseRemotely() async {
     final gp = this as GameProvider;
     final String key = gp.licenseKey;
@@ -10,13 +9,16 @@ mixin _LifecycleLogic on _GameBase {
 
     try {
       final String currentHwId = await gp.getUniqueHardwareIdForCheckout();
-      
+      if (currentHwId.trim().isEmpty || currentHwId == 'UNKNOWN_HARDWARE_ID') {
+        return;
+      }
+
       final doc = await FirebaseFirestore.instance
           .collection('pro_licenses')
           .doc(key)
           .get()
           .timeout(const Duration(seconds: 4));
-      
+
       if (!doc.exists) {
         await gp.revokeProStatusLocally();
         return;
@@ -28,15 +30,29 @@ mixin _LifecycleLogic on _GameBase {
         return;
       }
 
+      if (data['revoked'] == true || data['active'] == false) {
+        await gp.revokeProStatusLocally();
+        return;
+      }
+
       final bool isUsed = data['used'] == true;
       final String serverUsedBy = (data['used_by'] ?? '').toString().trim();
+      final String serverHwId = (data['hardware_id'] ?? '').toString().trim();
 
-      // Invalidation immédiate si used == false ou si used_by a été modifié (ex: remplacé par un faux)
-      if (!isUsed || (serverUsedBy.isNotEmpty && serverUsedBy != currentHwId)) {
+      if (!isUsed ||
+          serverUsedBy.isEmpty ||
+          serverUsedBy != currentHwId ||
+          (serverHwId.isNotEmpty && serverHwId != currentHwId)) {
         await gp.revokeProStatusLocally();
       } else {
         _isPro = true;
         _notify();
+      }
+    } on FirebaseException catch (e) {
+      if (e.code == 'permission-denied' || e.code == 'not-found') {
+        await gp.revokeProStatusLocally();
+      } else {
+        debugPrint("[LICENSE REMOTE VERIFY] Mode hors-ligne : ${e.code}");
       }
     } catch (e) {
       debugPrint("[LICENSE REMOTE VERIFY] Mode hors-ligne ou timeout : $e");
@@ -58,7 +74,8 @@ mixin _LifecycleLogic on _GameBase {
           _applyJson(loaded.data);
           final dynamic b = loaded.data['stepBaseline'];
           baseline = b is num ? b.toInt() : null;
-          _applyPassiveRegen(DateTime.tryParse(asString(loaded.data['savedAt'])));
+          _applyPassiveRegen(
+              DateTime.tryParse(asString(loaded.data['savedAt'])));
         }
 
         _sandbox = false;
@@ -67,7 +84,9 @@ mixin _LifecycleLogic on _GameBase {
         SandboxManager.persistPenalty = false;
         StorageService.blockAllRealSaves = false;
 
-        if (_activeDungeon != null && _activeDungeon!.isRandomThreat && !_godModePersistPenalty) {
+        if (_activeDungeon != null &&
+            _activeDungeon!.isRandomThreat &&
+            !_godModePersistPenalty) {
           _activeDungeon = null;
           _isActiveDungeonRed = false;
           _dungeonTimer?.cancel();
@@ -78,7 +97,6 @@ mixin _LifecycleLogic on _GameBase {
       dlog("Chargement impossible : $e");
     }
 
-    // Vérification distante au démarrage pour valider l'intégrité de used_by
     await verifyLicenseRemotely();
 
     _syncTitleWithRank();
@@ -103,10 +121,12 @@ mixin _LifecycleLogic on _GameBase {
     if (_activeDungeon != null) {
       LockService.lockScreen();
     } else {
-      final expiredThreatIndex = _activeThreats.indexWhere((t) => now.isAfter(t.expiresAt));
+      final expiredThreatIndex =
+          _activeThreats.indexWhere((t) => now.isAfter(t.expiresAt));
       if (expiredThreatIndex != -1) {
         final d = _activeThreats.removeAt(expiredThreatIndex);
-        enterDungeon(d.rank, isThreat: true, threatInstance: d, isRed: _isActiveDungeonRed);
+        enterDungeon(d.rank,
+            isThreat: true, threatInstance: d, isRed: _isActiveDungeonRed);
       }
     }
 
@@ -128,7 +148,8 @@ mixin _LifecycleLogic on _GameBase {
     if (granted) _steps.start();
 
     final String today = _todayKey();
-    final bool isWhiteZone = _calendarHistory[today]?['status'] == 'white_zone';
+    final bool isWhiteZone =
+        _calendarHistory[today]?['status'] == 'white_zone';
     if (!isWhiteZone && _lastResetDateStr != null) {
       _updateOngoingSystem(force: true);
     }
@@ -165,10 +186,12 @@ mixin _LifecycleLogic on _GameBase {
     if (_activeThreats.isNotEmpty) {
       final DateTime now = DateTime.now();
       if (_activeDungeon == null) {
-        final expiredIndex = _activeThreats.indexWhere((t) => now.isAfter(t.expiresAt));
+        final expiredIndex =
+            _activeThreats.indexWhere((t) => now.isAfter(t.expiresAt));
         if (expiredIndex != -1) {
           final d = _activeThreats.removeAt(expiredIndex);
-          enterDungeon(d.rank, isThreat: true, threatInstance: d, isRed: _isActiveDungeonRed);
+          enterDungeon(d.rank,
+              isThreat: true, threatInstance: d, isRed: _isActiveDungeonRed);
           _requestSave();
           _notify();
           return;
@@ -177,11 +200,9 @@ mixin _LifecycleLogic on _GameBase {
     }
   }
 
-  @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (!_loaded) return;
     if (state == AppLifecycleState.resumed) {
-      // SYNCHRONISATION AU RETOUR DE PREMIER PLAN (LIFECYCLE RESUME / SWIPE) : Revalide instantanément le used_by distant
       verifyLicenseRemotely();
 
       checkMidnightReset();
@@ -194,15 +215,18 @@ mixin _LifecycleLogic on _GameBase {
       if (_activeDungeon != null) {
         LockService.lockScreen();
       } else {
-        final expiredIndex = _activeThreats.indexWhere((t) => now.isAfter(t.expiresAt));
+        final expiredIndex =
+            _activeThreats.indexWhere((t) => now.isAfter(t.expiresAt));
         if (expiredIndex != -1) {
           final d = _activeThreats.removeAt(expiredIndex);
-          enterDungeon(d.rank, isThreat: true, threatInstance: d, isRed: _isActiveDungeonRed);
+          enterDungeon(d.rank,
+              isThreat: true, threatInstance: d, isRed: _isActiveDungeonRed);
         }
       }
 
       final String today = _todayKey();
-      final bool isWhiteZone = _calendarHistory[today]?['status'] == 'white_zone';
+      final bool isWhiteZone =
+          _calendarHistory[today]?['status'] == 'white_zone';
       if (!isWhiteZone && _lastResetDateStr != null) {
         _updateOngoingSystem(force: true);
       }
