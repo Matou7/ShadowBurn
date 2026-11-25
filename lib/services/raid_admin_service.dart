@@ -32,9 +32,10 @@ class RaidAdminService {
     _activeLanRoomId = roomId.trim().isEmpty ? 'LAN_1' : roomId.trim();
   }
 
-  static void clearLan() {
+  static Future<void> clearLan() async {
     _activeLanWsUrl = null;
     _activeLanRoomId = null;
+    await _lanSocket.disconnect();
   }
 
   static Future<String?> _sendLanAdminCommand(
@@ -55,6 +56,13 @@ class RaidAdminService {
         if (!ok) {
           return "Connexion WebSocket LAN impossible sur $wsUrl.";
         }
+        _lanSocket.sendJson({
+          'type': 'join',
+          'role': 'admin',
+          'room': targetRoom,
+          'roomId': targetRoom,
+          'name': 'Admin_LAN',
+        });
       }
 
       _lanSocket.sendJson({

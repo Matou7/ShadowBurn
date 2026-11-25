@@ -82,29 +82,14 @@ class GameProvider extends _GameBase
     initializeGame();
   }
 
-  /// Garantit que le statut Pro et la clé de licence sont chargés depuis le stockage local
-  /// avant toute vérification d'accès (ex: ouverture par QR Code / Deep Link à froid).
   Future<bool> ensureProStatusLoaded() async {
-    if (_isPro) return true;
+    if (_isPro && _persistedLicenseKey.isNotEmpty) return true;
     if (_licenseInitFuture != null) {
       await _licenseInitFuture;
     } else {
       await _restoreCachedLicense();
     }
-    if (_isPro) return true;
-
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final savedKey = prefs.getString('shadow_user_license_key');
-      if (savedKey != null && savedKey.trim().isNotEmpty) {
-        _persistedLicenseKey = savedKey.trim().toUpperCase();
-        _isPro = true;
-        notifyListeners();
-        return true;
-      }
-    } catch (_) {}
-
-    return _isPro;
+    return _isPro && _persistedLicenseKey.isNotEmpty;
   }
 
   Future<void> _restorePairedAdminRoom() async {
@@ -167,9 +152,16 @@ class GameProvider extends _GameBase
       final saved = prefs.getString('shadow_user_license_key');
       if (saved != null && saved.trim().isNotEmpty) {
         final cleanKey = saved.trim().toUpperCase();
-        _persistedLicenseKey = cleanKey;
-        _isPro = true;
-        notifyListeners();
+        // Validation silencieuse au démarrage : autorise le cache hors-ligne,
+        // mais révoque immédiatement si le serveur indique que la clé est invalide ou transférée.
+        final bool stillValid = await _verifyLicenseWithBackend(cleanKey, allowOfflineCache: true);
+        if (stillValid) {
+          _persistedLicenseKey = cleanKey;
+          _isPro = true;
+          notifyListeners();
+        } else {
+          await revokeProStatusLocally();
+        }
       } else {
         await requestHardwareAutoRecovery(silent: true);
       }
@@ -235,39 +227,75 @@ class GameProvider extends _GameBase
     try {
       final String hwId = await getUniqueHardwareIdForCheckout();
       final String? foundKey = await AuthRecoveryService.fetchKeyForHardware(hwId);
-      if (foundKey != null && foundKey.isNotEmpty) {
-        await saveLicenseLocally(foundKey);
+      if (foundKey != null && foundKey.trim().isNotEmpty) {
+        await saveLicenseLocally(foundKey.trim());
         return true;
       }
     } catch (_) {}
     return false;
   }
 
+  Future<bool> _verifyLicenseWithBackend(
+    String cleanKey, {
+    bool allowOfflineCache = false,
+  }) async {
+    final String hwId = await getUniqueHardwareIdForCheckout();
+
+    try {
+      final docRef = FirebaseFirestore.instance
+          .collection('pro_licenses')
+          .doc(cleanKey);
+      final doc = await docRef.get().timeout(const Duration(seconds: 6));
+
+      if (!doc.exists) {
+        return false;
+      }
+
+      final Map<String, dynamic> data =
+          Map<String, dynamic>.from(doc.data() as Map? ?? {});
+
+      if (data['revoked'] == true || data['active'] == false) {
+        return false;
+      }
+
+      final String boundHw = (data['hardware_id'] ?? '').toString().trim();
+      if (boundHw.isNotEmpty && boundHw != hwId) {
+        // Clé déjà liée à un autre appareil
+        return false;
+      }
+
+      // Lier la licence à cet appareil lors de la première activation
+      await docRef.set({
+        'used': true,
+        'hardware_id': hwId,
+        'activated_at_ms': data['activated_at_ms'] ?? DateTime.now().millisecondsSinceEpoch,
+        'last_verified_ms': DateTime.now().millisecondsSinceEpoch,
+      }, SetOptions(merge: true)).timeout(const Duration(seconds: 6));
+
+      return true;
+    } on TimeoutException {
+      return allowOfflineCache;
+    } on FirebaseException catch (e) {
+      if (e.code == 'unavailable' || e.code == 'network-request-failed') {
+        return allowOfflineCache;
+      }
+      return false;
+    } catch (_) {
+      return allowOfflineCache;
+    }
+  }
+
   @override
   Future<bool> activateProKey(String rawKey) async {
     final cleanKey = rawKey.trim().toUpperCase();
-    if (cleanKey.isEmpty) return false;
+    if (cleanKey.isEmpty || cleanKey.length < 8) return false;
 
-    try {
-      if (cleanKey.startsWith("SHADOW-PRO-") || cleanKey.length > 10) {
-        await saveLicenseLocally(cleanKey);
-        return true;
-      }
-
-      final doc = await FirebaseFirestore.instance
-          .collection('pro_licenses')
-          .doc(cleanKey)
-          .get();
-      if (doc.exists) {
-        final data = doc.data();
-        if (data != null) {
-          await saveLicenseLocally(cleanKey);
-          await doc.reference.update({'used': true});
-          return true;
-        }
-      }
-    } catch (_) {}
-
+    final bool isVerified =
+        await _verifyLicenseWithBackend(cleanKey, allowOfflineCache: false);
+    if (isVerified) {
+      await saveLicenseLocally(cleanKey);
+      return true;
+    }
     return false;
   }
 
@@ -365,7 +393,7 @@ class GameProvider extends _GameBase
     _clockTimer?.cancel();
     _dungeonTimer?.cancel();
     _saveTimer?.cancel();
-    WidgetsBinding.instance.addObserver(this);
+    WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
 }

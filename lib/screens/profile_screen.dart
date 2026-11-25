@@ -834,11 +834,13 @@ class _ProfileScreenState extends State<ProfileScreen>
       );
       return;
     }
-    unawaited(_ensureLanPackInstalledInBackground(
+    await _ensureLanPackInstalledInBackground(
       force: force,
       promptStoragePermission: true,
-    ));
-    unawaited(_launchLanServerAutomatically());
+    );
+    if (_isLanPackInstalledLocally()) {
+      await _launchLanServerAutomatically();
+    }
   }
 
   Future<void> _promptAndActivateLanMode({
