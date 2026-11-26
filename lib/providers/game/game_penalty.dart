@@ -1,3 +1,5 @@
+// lib/providers/game/game_penalty.dart
+
 part of '../game_provider.dart';
 
 mixin _PenaltyLogic on _GameBase {

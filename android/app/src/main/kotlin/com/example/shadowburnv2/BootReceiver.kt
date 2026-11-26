@@ -1,3 +1,5 @@
+// android/app/src/main/kotlin/com/example/shadowburnv2/BootReceiver.kt
+
 package com.example.shadowburnv2
 
 import android.app.AlarmManager

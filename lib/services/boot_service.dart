@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'lock_service.dart';
 import 'notification_service.dart';
 import 'storage_service.dart';
 
@@ -14,6 +15,12 @@ class BootService {
     try {
       _channel.setMethodCallHandler((call) async {
         if (call.method == "onBootWithPenalty") {
+          await StorageService.writePenaltyState(
+            active: true,
+            squatsDone: 0,
+            squatsGoal: 100,
+          );
+          await LockService.lockScreen(force: true);
           onPenaltyRestored();
         }
       });

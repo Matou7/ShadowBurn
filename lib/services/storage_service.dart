@@ -27,12 +27,9 @@ class StorageService {
   static const String keyPenaltySquatsGoal = 'cerberus_penalty_squats_goal';
   static const String keySandboxVolatile = 'cerberus_sandbox_volatile';
 
-  // VERROU PHYSIQUE GLOBAL EN MÉMOIRE
   static bool blockAllRealSaves = false;
 
   static Future<void> _chain = Future<void>.value();
-
-  // --- SAS GOD MODE ÉTANCHE ---
 
   static Future<void> saveGodMode(JsonMap data) async {
     try {
@@ -65,8 +62,6 @@ class StorageService {
       dlog("Erreur deleteGodModeSave : $e");
     }
   }
-
-  // --- ÉTATS NATIVE ET VERROUS ---
 
   static Future<void> writeSandboxVolatileState(bool isVolatile) async {
     try {
@@ -106,6 +101,7 @@ class StorageService {
   static Future<JsonMap> readPenaltyState() async {
     try {
       final prefs = await SharedPreferences.getInstance();
+      await prefs.reload();
       return <String, dynamic>{
         'active': prefs.getBool(keyPenaltyActive) ?? false,
         'squatsDone': prefs.getInt(keyPenaltySquatsDone) ?? 0,
@@ -116,8 +112,6 @@ class StorageService {
       return <String, dynamic>{'active': false, 'squatsDone': 0, 'squatsGoal': 100};
     }
   }
-
-  // --- VRAIE SAUVEGARDE PRINCIPALE ---
 
   static Future<LoadedSave?> load() async {
     final prefs = await SharedPreferences.getInstance();

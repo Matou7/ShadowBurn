@@ -1,3 +1,5 @@
+// lib/services/lock_service.dart
+
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -88,6 +90,18 @@ class LockService {
   static Future<void> requestOverlayPermission() async {
     try {
       await _invokeWithFallback('requestOverlayPermission');
+    } catch (_) {}
+  }
+
+  static Future<void> openUsageSettings() async {
+    try {
+      await _invokeWithFallback('openUsageSettings');
+    } catch (_) {}
+  }
+
+  static Future<void> openBatteryNoRestrictions() async {
+    try {
+      await _invokeWithFallback('openBatteryNoRestrictions');
     } catch (_) {}
   }
 }

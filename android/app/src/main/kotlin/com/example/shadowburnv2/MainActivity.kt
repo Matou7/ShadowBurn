@@ -1,4 +1,6 @@
-﻿package com.example.shadowburnv2
+﻿// android/app/src/main/kotlin/com/example/shadowburnv2/MainActivity.kt
+
+package com.example.shadowburnv2
 
 import android.app.AppOpsManager
 import android.content.Context
@@ -139,7 +141,7 @@ class MainActivity : FlutterActivity() {
             ip.startsWith("169.254.")
     }
 
-    private fun detectLocalLanCandidates(): List<Map<String, String>> {
+    private fun detectLocalLanCandidates(): List> {
         val candidates = mutableListOf<Triple<Int, String, String>>()
         try {
             val rawInterfaces = NetworkInterface.getNetworkInterfaces() ?: return emptyList()

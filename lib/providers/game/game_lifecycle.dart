@@ -1,3 +1,5 @@
+// lib/providers/game/game_lifecycle.dart
+
 part of '../game_provider.dart';
 
 mixin _LifecycleLogic on _GameBase {
