@@ -141,7 +141,7 @@ class MainActivity : FlutterActivity() {
             ip.startsWith("169.254.")
     }
 
-    private fun detectLocalLanCandidates(): List> {
+    private fun detectLocalLanCandidates(): List<Map<String, String>> {
         val candidates = mutableListOf<Triple<Int, String, String>>()
         try {
             val rawInterfaces = NetworkInterface.getNetworkInterfaces() ?: return emptyList()
