@@ -1,4 +1,4 @@
-﻿// lib/screens/profile_screen.dart
+// lib/screens/profile_screen.dart
 
 import 'dart:async';
 import 'dart:convert';
@@ -2337,6 +2337,18 @@ class _ProfileScreenState extends State<ProfileScreen>
                   ),
                   const SizedBox(height: 25),
                 ],
+                SizedBox(
+                  width: double.infinity,
+                  child: _holoButton(
+                    "TEST ZONE DE PENALITE",
+                    const Color(0xFFFF2E56),
+                    () {
+                      game.triggerDailyPenalty();
+                    },
+                    icon: Icons.warning_amber_rounded,
+                  ),
+                ),
+                const SizedBox(height: 15),
                 SizedBox(
                   width: double.infinity,
                   child: _holoButton(
