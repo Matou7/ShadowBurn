@@ -104,7 +104,7 @@ mixin _LifecycleLogic on _GameBase {
       dlog("Chargement impossible : $e");
     }
 
-    if (nativePenaltyActive && !_isInPenaltyZone) {
+    if (nativePenaltyActive) {
       _isInPenaltyZone = true;
       _penaltySquatsDone =
           _penaltySquatsDone > 0 ? _penaltySquatsDone : nativeSquatsDone;
