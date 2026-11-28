@@ -92,6 +92,19 @@ class StorageService {
       await prefs.setBool(keyPenaltyActive, active);
       await prefs.setInt(keyPenaltySquatsDone, squatsDone);
       await prefs.setInt(keyPenaltySquatsGoal, squatsGoal);
+
+      final String? rawSave = prefs.getString(_mainKey);
+      if (rawSave != null && rawSave.isNotEmpty) {
+        final dynamic decoded = jsonDecode(rawSave);
+        if (decoded is Map) {
+          final JsonMap updated = JsonMap.from(decoded);
+          updated['penaltyActive'] = active;
+          updated['penaltySquats'] = squatsDone;
+          updated['penaltyGoal'] = squatsGoal;
+          await prefs.setString(_mainKey, jsonEncode(updated));
+        }
+      }
+
       await prefs.reload();
     } catch (e) {
       dlog("Erreur writePenaltyState : $e");
@@ -102,10 +115,29 @@ class StorageService {
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.reload();
+      bool active = prefs.getBool(keyPenaltyActive) ?? false;
+      int squatsDone = prefs.getInt(keyPenaltySquatsDone) ?? 0;
+      int squatsGoal = prefs.getInt(keyPenaltySquatsGoal) ?? 100;
+
+      final String? rawSave = prefs.getString(_mainKey);
+      if (rawSave != null && rawSave.isNotEmpty) {
+        final dynamic decoded = jsonDecode(rawSave);
+        if (decoded is Map) {
+          if (decoded['penaltyActive'] == true) active = true;
+          if (decoded['penaltySquats'] is num && squatsDone == 0) {
+            squatsDone = (decoded['penaltySquats'] as num).toInt();
+          }
+          if (decoded['penaltyGoal'] is num &&
+              (decoded['penaltyGoal'] as num).toInt() > 0) {
+            squatsGoal = (decoded['penaltyGoal'] as num).toInt();
+          }
+        }
+      }
+
       return <String, dynamic>{
-        'active': prefs.getBool(keyPenaltyActive) ?? false,
-        'squatsDone': prefs.getInt(keyPenaltySquatsDone) ?? 0,
-        'squatsGoal': prefs.getInt(keyPenaltySquatsGoal) ?? 100,
+        'active': active,
+        'squatsDone': squatsDone,
+        'squatsGoal': squatsGoal > 0 ? squatsGoal : 100,
       };
     } catch (e) {
       dlog("Erreur readPenaltyState : $e");
