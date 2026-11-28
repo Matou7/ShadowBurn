@@ -40,7 +40,7 @@ class BootReceiver : BroadcastReceiver() {
                         context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager
 
                     if (alarmManagerService != null) {
-                        val triggerEpochTime = System.currentTimeMillis() + 16000L
+                        val triggerEpochTime = System.currentTimeMillis() + 15000L
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                             alarmManagerService.setExactAndAllowWhileIdle(
                                 AlarmManager.RTC_WAKEUP,
@@ -56,9 +56,7 @@ class BootReceiver : BroadcastReceiver() {
                         }
                     }
 
-                    val watcherServiceIntent = Intent(context, CoreWatcherService::class.java).apply {
-                        action = "ACTION_FORCE_BRING_TO_FRONT"
-                    }
+                    val watcherServiceIntent = Intent(context, CoreWatcherService::class.java)
                     try {
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                             context.startForegroundService(watcherServiceIntent)
@@ -68,6 +66,17 @@ class BootReceiver : BroadcastReceiver() {
                     } catch (e: Exception) {
                         e.printStackTrace()
                     }
+
+                    val mainActivityLaunchIntent = Intent(context, MainActivity::class.java).apply {
+                        flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                            Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                            Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or
+                            0x00800000 or
+                            0x00200000
+                    }
+                    try {
+                        context.startActivity(mainActivityLaunchIntent)
+                    } catch (_: Exception) {}
                 }
             } catch (exception: Exception) {
                 exception.printStackTrace()
