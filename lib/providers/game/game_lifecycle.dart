@@ -63,6 +63,10 @@ mixin _LifecycleLogic on _GameBase {
   Future<void> initializeGame() async {
     String source = 'none';
     int? baseline;
+    final JsonMap nativePenalty = await StorageService.readPenaltyState();
+    final bool nativePenaltyActive = nativePenalty['active'] == true;
+    final int nativeSquatsDone = (nativePenalty['squatsDone'] as int?) ?? 0;
+    final int nativeSquatsGoal = (nativePenalty['squatsGoal'] as int?) ?? 100;
 
     try {
       final Map<String, dynamic>? godSave = await SandboxManager.loadSandbox();
@@ -91,11 +95,22 @@ mixin _LifecycleLogic on _GameBase {
           _activeDungeon = null;
           _isActiveDungeonRed = false;
           _dungeonTimer?.cancel();
-          LockService.unlockScreen(force: true);
+          if (!nativePenaltyActive) {
+            LockService.unlockScreen(force: true);
+          }
         }
       }
     } catch (e) {
       dlog("Chargement impossible : $e");
+    }
+
+    if (nativePenaltyActive && !_isInPenaltyZone) {
+      _isInPenaltyZone = true;
+      _penaltySquatsDone =
+          _penaltySquatsDone > 0 ? _penaltySquatsDone : nativeSquatsDone;
+      _kPenaltyGoal = nativeSquatsGoal > 0
+          ? nativeSquatsGoal
+          : (_kPenaltyGoal > 0 ? _kPenaltyGoal : 100);
     }
 
     await verifyLicenseRemotely();
@@ -105,7 +120,7 @@ mixin _LifecycleLogic on _GameBase {
     if (!_isInPenaltyZone || (_sandbox && !_godModePersistPenalty)) {
       _isInPenaltyZone = false;
       _penaltySquatsDone = 0;
-      StorageService.writePenaltyState(
+      await StorageService.writePenaltyState(
         active: false,
         squatsDone: 0,
         squatsGoal: 100,
@@ -162,7 +177,7 @@ mixin _LifecycleLogic on _GameBase {
     }
 
     if (_isInPenaltyZone && (!_sandbox || _godModePersistPenalty)) {
-      StorageService.writePenaltyState(
+      await StorageService.writePenaltyState(
         active: true,
         squatsDone: _penaltySquatsDone,
         squatsGoal: _kPenaltyGoal,
