@@ -26,12 +26,12 @@ public class CoreWatcherService extends Service {
     private static final String CHANNEL_ID = "CoreWatcherSystemLockChannel";
     private static final int NOTIFICATION_ID = 7777;
     private static final int RESURRECT_REQUEST_CODE = 9999;
-    private static final long PATROL_INTERVAL_MS = 1000L;
-    private static final long USAGE_LOOKBACK_MS = 3000L;
+    private static final long PATROL_INTERVAL_MS = 350L;
+    private static final long USAGE_LOOKBACK_MS = 2500L;
     private static final long GRACE_DURATION_MS = 15000L;
     private static final long ALARM_MIN_INTERVAL_MS = 15000L;
     private static final long ALARM_DELAY_MS = 16000L;
-    private static final long BRING_COOLDOWN_MS = 1500L;
+    private static final long BRING_COOLDOWN_MS = 900L;
 
     private PowerManager.WakeLock wakeLock = null;
     private volatile boolean isRunning = false;
@@ -134,9 +134,7 @@ public class CoreWatcherService extends Service {
             notificationIntent.setFlags(
                 Intent.FLAG_ACTIVITY_NEW_TASK |
                 Intent.FLAG_ACTIVITY_SINGLE_TOP |
-                Intent.FLAG_ACTIVITY_REORDER_TO_FRONT |
-                0x00800000 |
-                0x00200000
+                Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
             );
 
             int pendingFlags = (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M)
@@ -155,7 +153,6 @@ public class CoreWatcherService extends Service {
                 .setContentText("Le Cerbère surveille les applications tierces.")
                 .setSmallIcon(android.R.drawable.ic_dialog_alert)
                 .setContentIntent(pendingIntent)
-                .setFullScreenIntent(pendingIntent, true)
                 .setOngoing(true)
                 .setPriority(NotificationCompat.PRIORITY_MAX)
                 .setCategory(NotificationCompat.CATEGORY_SERVICE)
@@ -176,19 +173,6 @@ public class CoreWatcherService extends Service {
                 wakeLock.acquire(60L * 60L * 1000L);
             }
         } catch (Throwable ignored) {}
-
-        if ("ACTION_FORCE_BRING_TO_FRONT".equals(actionVal)) {
-            if (System.currentTimeMillis() >= emergencyGraceUntil) {
-                String pkg = getForegroundPackageName();
-                String homePkg = getHomeLauncherPackageName();
-                if (!pkg.isEmpty()
-                    && !pkg.equals(getPackageName())
-                    && !pkg.equals(homePkg)
-                    && !isPackageWhitelisted(pkg)) {
-                    bringAppToFront();
-                }
-            }
-        }
 
         scheduleAlarmResurrection(false);
         startWatchdogLoop();
@@ -270,9 +254,9 @@ public class CoreWatcherService extends Service {
         super.onTaskRemoved(rootIntent);
         try {
             if (isPenaltyActiveInPrefs(this)) {
+                lastBringToFrontMs = System.currentTimeMillis();
                 scheduleAlarmResurrection(true);
                 Intent restartServiceIntent = new Intent(getApplicationContext(), CoreWatcherService.class);
-                restartServiceIntent.setAction("ACTION_FORCE_BRING_TO_FRONT");
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                     getApplicationContext().startForegroundService(restartServiceIntent);
                 } else {
@@ -295,15 +279,10 @@ public class CoreWatcherService extends Service {
         lastBringToFrontMs = now;
         try {
             Intent launchIntent = new Intent(this, MainActivity.class);
-            int showWhenLockedFlag = 0x00800000;
-            int turnScreenOnFlag = 0x00200000;
             launchIntent.setFlags(
                 Intent.FLAG_ACTIVITY_NEW_TASK |
                 Intent.FLAG_ACTIVITY_SINGLE_TOP |
-                Intent.FLAG_ACTIVITY_REORDER_TO_FRONT |
-                showWhenLockedFlag |
-                turnScreenOnFlag |
-                Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED
+                Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
             );
             startActivity(launchIntent);
         } catch (Throwable ignored) {}
@@ -339,11 +318,10 @@ public class CoreWatcherService extends Service {
 
                     String currentPkg = getForegroundPackageName();
                     if (currentPkg.isEmpty()) {
-                        currentPkg = lastKnownForegroundPkg;
+                        continue;
                     }
 
-                    if (currentPkg.isEmpty()
-                        || currentPkg.equals(selfPkg)
+                    if (currentPkg.equals(selfPkg)
                         || currentPkg.equals(homeLauncherPkg)
                         || isPackageWhitelisted(currentPkg)) {
                         continue;
