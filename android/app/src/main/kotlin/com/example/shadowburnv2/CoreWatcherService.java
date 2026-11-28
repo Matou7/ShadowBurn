@@ -26,16 +26,18 @@ public class CoreWatcherService extends Service {
     private static final String CHANNEL_ID = "CoreWatcherSystemLockChannel";
     private static final int NOTIFICATION_ID = 7777;
     private static final int RESURRECT_REQUEST_CODE = 9999;
-    private static final long PATROL_INTERVAL_MS = 200L;
-    private static final long USAGE_LOOKBACK_MS = 2500L;
+    private static final long PATROL_INTERVAL_MS = 1000L;
+    private static final long USAGE_LOOKBACK_MS = 3000L;
     private static final long GRACE_DURATION_MS = 15000L;
     private static final long ALARM_MIN_INTERVAL_MS = 15000L;
     private static final long ALARM_DELAY_MS = 16000L;
+    private static final long BRING_COOLDOWN_MS = 1500L;
 
     private PowerManager.WakeLock wakeLock = null;
     private volatile boolean isRunning = false;
     private Thread patrolThread = null;
     private long lastAlarmScheduledMs = 0L;
+    private long lastBringToFrontMs = 0L;
     private volatile String lastKnownForegroundPkg = "";
 
     public static volatile long emergencyGraceUntil = 0L;
@@ -76,7 +78,7 @@ public class CoreWatcherService extends Service {
                 Intent graceIntent = new Intent(context, CoreWatcherService.class);
                 graceIntent.setAction("ACTION_EMERGENCY_GRACE");
                 context.startService(graceIntent);
-            } catch (Exception ignored) {}
+            } catch (Throwable ignored) {}
         }
     }
 
@@ -89,7 +91,7 @@ public class CoreWatcherService extends Service {
             if (resolveInfo != null && resolveInfo.activityInfo != null) {
                 return resolveInfo.activityInfo.packageName;
             }
-        } catch (Exception ignored) {}
+        } catch (Throwable ignored) {}
         return "";
     }
 
@@ -150,7 +152,7 @@ public class CoreWatcherService extends Service {
 
             Notification notification = new NotificationCompat.Builder(this, CHANNEL_ID)
                 .setContentTitle("SYSTÈMES : ZONE DE PÉNALITÉ")
-                .setContentText("Le Cerbère patrouille : bureau libre, applis tierces bloquées.")
+                .setContentText("Le Cerbère surveille les applications tierces.")
                 .setSmallIcon(android.R.drawable.ic_dialog_alert)
                 .setContentIntent(pendingIntent)
                 .setFullScreenIntent(pendingIntent, true)
@@ -160,18 +162,20 @@ public class CoreWatcherService extends Service {
                 .build();
 
             startForeground(NOTIFICATION_ID, notification);
-        } catch (Exception e) {
-            e.printStackTrace();
+        } catch (Throwable t) {
+            t.printStackTrace();
         }
 
-        PowerManager powerManager = (PowerManager) getSystemService(Context.POWER_SERVICE);
-        if (powerManager != null && wakeLock == null) {
-            wakeLock = powerManager.newWakeLock(
-                PowerManager.PARTIAL_WAKE_LOCK,
-                "ShadowBurn::CoreWatcherWakeLock"
-            );
-            wakeLock.acquire(60L * 60L * 1000L);
-        }
+        try {
+            PowerManager powerManager = (PowerManager) getSystemService(Context.POWER_SERVICE);
+            if (powerManager != null && (wakeLock == null || !wakeLock.isHeld())) {
+                wakeLock = powerManager.newWakeLock(
+                    PowerManager.PARTIAL_WAKE_LOCK,
+                    "ShadowBurn::CoreWatcherWakeLock"
+                );
+                wakeLock.acquire(60L * 60L * 1000L);
+            }
+        } catch (Throwable ignored) {}
 
         if ("ACTION_FORCE_BRING_TO_FRONT".equals(actionVal)) {
             if (System.currentTimeMillis() >= emergencyGraceUntil) {
@@ -197,7 +201,7 @@ public class CoreWatcherService extends Service {
             if (wakeLock != null && wakeLock.isHeld()) {
                 wakeLock.release();
             }
-        } catch (Exception ignored) {}
+        } catch (Throwable ignored) {}
         wakeLock = null;
     }
 
@@ -235,8 +239,8 @@ public class CoreWatcherService extends Service {
                     am.setExact(AlarmManager.RTC_WAKEUP, triggerTime, pi);
                 }
             }
-        } catch (Exception e) {
-            e.printStackTrace();
+        } catch (Throwable t) {
+            t.printStackTrace();
         }
     }
 
@@ -258,7 +262,7 @@ public class CoreWatcherService extends Service {
             if (am != null) {
                 am.cancel(pi);
             }
-        } catch (Exception ignored) {}
+        } catch (Throwable ignored) {}
     }
 
     @Override
@@ -278,12 +282,17 @@ public class CoreWatcherService extends Service {
                 cancelAlarmResurrection();
                 releaseWakeLockSafe();
             }
-        } catch (Exception e) {
-            e.printStackTrace();
+        } catch (Throwable t) {
+            t.printStackTrace();
         }
     }
 
     private void bringAppToFront() {
+        long now = System.currentTimeMillis();
+        if ((now - lastBringToFrontMs) < BRING_COOLDOWN_MS) {
+            return;
+        }
+        lastBringToFrontMs = now;
         try {
             Intent launchIntent = new Intent(this, MainActivity.class);
             int showWhenLockedFlag = 0x00800000;
@@ -297,7 +306,7 @@ public class CoreWatcherService extends Service {
                 Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED
             );
             startActivity(launchIntent);
-        } catch (Exception ignored) {}
+        } catch (Throwable ignored) {}
     }
 
     private void startWatchdogLoop() {
@@ -343,7 +352,7 @@ public class CoreWatcherService extends Service {
                     bringAppToFront();
                 } catch (InterruptedException e) {
                     break;
-                } catch (Exception ignored) {}
+                } catch (Throwable ignored) {}
             }
         }, "CerberusEventWatchdog");
         patrolThread.start();
@@ -385,7 +394,7 @@ public class CoreWatcherService extends Service {
                 }
             }
             return latestPkg;
-        } catch (Exception e) {
+        } catch (Throwable t) {
             return "";
         }
     }
@@ -394,7 +403,9 @@ public class CoreWatcherService extends Service {
     public void onDestroy() {
         isRunning = false;
         if (patrolThread != null) {
-            patrolThread.interrupt();
+            try {
+                patrolThread.interrupt();
+            } catch (Throwable ignored) {}
             patrolThread = null;
         }
         try {
@@ -410,7 +421,7 @@ public class CoreWatcherService extends Service {
                 cancelAlarmResurrection();
                 releaseWakeLockSafe();
             }
-        } catch (Exception ignored) {}
+        } catch (Throwable ignored) {}
         super.onDestroy();
     }
 
