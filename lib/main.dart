@@ -132,10 +132,11 @@ void main() async {
 
     final LoadedSave? realSave = await StorageService.load();
     final Map<String, dynamic>? realData = realSave?.data;
-    final bool penaltyInReal = realData?['penaltyActive'] == true;
+    final penaltyState = await StorageService.readPenaltyState();
+    final bool penaltyInReal =
+        (realData?['penaltyActive'] == true) || (penaltyState['active'] == true);
 
     if (penaltyInReal || kForcePenaltyOnBoot) {
-      final penaltyState = await StorageService.readPenaltyState();
       startsInPenalty = true;
       initialSquatsDone = (penaltyState['squatsDone'] as int?) ??
           (realData?['penaltySquats'] as int?) ??
