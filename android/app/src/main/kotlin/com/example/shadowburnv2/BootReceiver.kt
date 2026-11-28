@@ -66,17 +66,6 @@ class BootReceiver : BroadcastReceiver() {
                     } catch (e: Exception) {
                         e.printStackTrace()
                     }
-
-                    val mainActivityLaunchIntent = Intent(context, MainActivity::class.java).apply {
-                        flags = Intent.FLAG_ACTIVITY_NEW_TASK or
-                            Intent.FLAG_ACTIVITY_SINGLE_TOP or
-                            Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or
-                            0x00800000 or
-                            0x00200000
-                    }
-                    try {
-                        context.startActivity(mainActivityLaunchIntent)
-                    } catch (_: Exception) {}
                 }
             } catch (exception: Exception) {
                 exception.printStackTrace()
